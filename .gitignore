@@ -14,3 +14,6 @@ tags
 *.vpw
 *.vtg
 *.md
+
+# Local machine configuration
+spidey_local_config.bat
