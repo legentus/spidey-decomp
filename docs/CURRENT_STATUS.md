@@ -1847,3 +1847,38 @@ Interpretation:
 - if black screen STILL occurs, then the single Font::height trampoline change itself is implicated and should be reverted for a pure baseline confirmation;
 - if startup returns, the prior black-screen regression was in the post-playable main/spool experiment set and is now eliminated;
 - audio/controller feature work remains paused until the playable baseline is reconfirmed.
+
+
+## Black screen persists with only Font::height differing from confirmed playable runtime — 2026-09-29
+
+Latest tested revision:
+`d6c077ff95193cf033ea310169e10d24777a275f`
+
+User result:
+- black screen;
+- no sound;
+- no automatic crash reported.
+
+Uploaded evidence:
+- retail EXE fingerprint remains unchanged:
+  SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`;
+- DirectDraw windowed compatibility patch still installs at:
+  - push `0x00515BA9`
+  - call `0x00515BAD`
+  - target `0x004FDE90`;
+- texture behavior matches the confirmed-playable-era implementation:
+  - inferred retail base `0x006B70F8` remains unresolved;
+  - checksum `0xE90B5F6E` repeatedly misses;
+  - non-null default texture `0x006AD3C8` is returned.
+
+At this revision:
+- `main.cpp` is byte-for-byte equal to confirmed-playable `35e73ed...`;
+- `spool.cpp` is byte-for-byte equal to confirmed-playable `35e73ed...`;
+- the only remaining runtime C++ difference is the isolated `Font::height` FASTCALL trampoline.
+
+NEXT ACTION:
+- restore `FontTools.cpp` exactly from confirmed-playable `35e73ed...`;
+- also restore the test runner from that exact revision to remove non-runtime launcher/logging deltas from the control test;
+- perform a PURE BASELINE test with no runtime code differences from the user-confirmed playable revision.
+
+If that pure baseline still black-screens, source regression is ruled out and investigation must move to local/environment state (game config, preserved retail Bink DLL, generated state/files, registry/settings, or other installation differences).
