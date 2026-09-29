@@ -1760,3 +1760,33 @@ If startup is restored:
 4. controller phase 1 is intentionally inactive for this isolation run.
 
 If the same `DCMem_New/PCTex_CreateTexture256` crash persists after this rollback, next step is to add narrowly scoped allocation telemetry around the exact PCTex buffer request and game-heap state.
+
+
+## Black screen persists after startup-hook rollback — 2026-09-29
+
+Runtime test of revision:
+`4e4f2b1ddc706b49237512669abcc92ff9b92238`
+
+Observed:
+- game window appears;
+- screen remains completely black;
+- no sound;
+- no automatic crash;
+- process remains alive/hung until user force-closes it in Task Manager.
+
+Uploaded evidence:
+- retail EXE fingerprint unchanged;
+- windowed DirectDraw arg patch installs at the expected retail RealWinMain call;
+- retail texture table address `0x006AB934` verifies, but runtime consumption is disabled (`runtime_use=0`);
+- one texture miss is logged for checksum `0xE90B5F6E`, falling back to non-null default texture `0x006AD3C8`;
+- no crash log exists for this run because the process did not fault.
+
+Conclusion:
+- black-screen regression is NOT caused solely by the parked XInput hooks, parked audio wrappers, or active consumption of the retail texture hash table;
+- regression predates those changes and must be isolated against the last user-confirmed playable revision rather than by further speculative patches.
+
+Immediate next action:
+1. identify exact last revision/run that reached title + first level;
+2. diff startup-affecting code from that revision to current dev;
+3. restore/bisect only those deltas;
+4. do not add new feature work until title/gameplay baseline is recovered.
