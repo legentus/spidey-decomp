@@ -634,6 +634,16 @@ static int my_video_player(const char*, i32)
 }
 
 #ifdef _WIN32
+static volatile DWORD gSpideyCompatSeen = 0;
+static volatile DWORD gSpideyCompatWidth = 0;
+static volatile DWORD gSpideyCompatHeight = 0;
+static volatile DWORD gSpideyCompatBpp = 0;
+static volatile DWORD gSpideyCompatRefresh = 0;
+static volatile DWORD gSpideyCompatFlags = 0;
+static volatile long gSpideyCompatFirstResult = 0;
+static volatile long gSpideyCompatRetryResult = 0;
+static volatile DWORD gSpideyCompatRetryAttempted = 0;
+
 static void SpideyAppendCompatLog(
 		DWORD width,
 		DWORD height,
@@ -675,6 +685,16 @@ static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
 		DWORD refreshRate,
 		DWORD flags)
 {
+	gSpideyCompatSeen = 1;
+	gSpideyCompatWidth = width;
+	gSpideyCompatHeight = height;
+	gSpideyCompatBpp = bpp;
+	gSpideyCompatRefresh = refreshRate;
+	gSpideyCompatFlags = flags;
+	gSpideyCompatFirstResult = 0x7FFFFFFF;
+	gSpideyCompatRetryResult = 0x7FFFFFFF;
+	gSpideyCompatRetryAttempted = 0;
+
 	if (!dd)
 	{
 		SpideyAppendCompatLog(
@@ -693,15 +713,18 @@ static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
 		bpp,
 		refreshRate,
 		flags);
+	gSpideyCompatFirstResult = (long)hr;
 
 	if (hr == DDERR_UNSUPPORTED && bpp == 16)
 	{
+		gSpideyCompatRetryAttempted = 1;
 		HRESULT retry = dd->SetDisplayMode(
 			width,
 			height,
 			32,
 			refreshRate,
 			flags);
+		gSpideyCompatRetryResult = (long)retry;
 
 		SpideyAppendCompatLog(
 			width,
@@ -827,6 +850,39 @@ static void SpideyAppendDxErrorWithCaller(
 		line,
 		callerReturn,
 		callSite);
+
+	if (gSpideyCompatSeen)
+	{
+		fprintf(
+			f,
+			"compat_state width=%lu height=%lu bpp=%lu refresh=%lu flags=0x%08lX first=0x%08lX retry_attempted=%lu retry=0x%08lX\n",
+			(unsigned long)gSpideyCompatWidth,
+			(unsigned long)gSpideyCompatHeight,
+			(unsigned long)gSpideyCompatBpp,
+			(unsigned long)gSpideyCompatRefresh,
+			(unsigned long)gSpideyCompatFlags,
+			(unsigned long)gSpideyCompatFirstResult,
+			(unsigned long)gSpideyCompatRetryAttempted,
+			(unsigned long)gSpideyCompatRetryResult);
+	}
+	else
+	{
+		fprintf(f, "compat_state not_seen\n");
+	}
+
+	__try
+	{
+		fprintf(
+			f,
+			"retail_mode_globals width=%lu height=%lu bpp=%lu\n",
+			(unsigned long)*(DWORD*)0x006B78E4,
+			(unsigned long)*(DWORD*)0x006B78E8,
+			(unsigned long)*(DWORD*)0x006B78EC);
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		fprintf(f, "retail_mode_globals <unreadable>\n");
+	}
 
 	fprintf(f, "code_window_base=0x%08lX\n", callSite - 96);
 	fprintf(f, "code_window_bytes=");
