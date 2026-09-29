@@ -513,3 +513,24 @@ Final clean implementation commit:
 During implementation a malformed intermediate script commit was detected during verification and immediately replaced before user testing. Commit `6d5405a419fea28e4e2bf011d099dc1c6be079b5` is the clean replacement.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. On the first run only, enter the path to the Spider-Man ISO. Accept the existing UAC prompt for the Program Files game install. Verify that the CD-ROM dialog no longer appears and that the game reaches the menu/gameplay.
+
+
+## ISO auto-mount test — mounted successfully but CD check still fails — 2026-09-29
+
+User tested revision `4d315296553698cd972253e35153cf2a6ff5b239` with configured disc image:
+`F:\Spider-Man.iso`
+
+Observed:
+- matching proxy built successfully;
+- proxy SHA-256: `9568710A82A82C781F4233AFA34086A5AAD5C1AB2DEBD34AB42D8C919220D144`;
+- proxy installed successfully;
+- ISO mounted successfully as drive `I:`;
+- `SpideyPC.exe` launched;
+- game still displayed the original "Please insert the Spider-Man CD-ROM" error;
+- game exited with code 1;
+- launcher then unmounted the ISO successfully.
+
+Conclusion:
+- automatic mounting works;
+- a plain Windows-mounted ISO does not satisfy the game's original CD validation;
+- next investigation is to determine what disc characteristics the retail check expects (for example data layout, volume identity, mixed-mode/audio TOC, or another property) and whether the current ISO representation preserves them.
