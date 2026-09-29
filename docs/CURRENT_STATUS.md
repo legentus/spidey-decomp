@@ -120,3 +120,21 @@ Launch `SpideyPC.exe` and capture:
 If the fork's GitHub Actions page shows workflows disabled, enable Actions there as a secondary CI path. As of the latest check, the API still reports zero `dev` workflow runs.
 
 **Do not start bug-fix source changes until this baseline result is recorded.**
+
+
+## User Workflow Change — 2026-09-29
+
+User requested a BAT-first local workflow matching the Destroy All Humans recomp style.
+
+**ACTIVE NOW:** add top-level Windows BAT launchers so the user can keep one local clone, update it from `origin/dev`, build, install, run, and restore without typing PowerShell commands.
+
+Planned BAT interface:
+- `SETUP_FIRST_TIME.bat`
+- `UPDATE_PROJECT.bat`
+- `BUILD_DEV.bat`
+- `INSTALL_DEV_BUILD.bat`
+- `RUN_GAME.bat`
+- `UPDATE_BUILD_INSTALL.bat`
+- `RESTORE_STOCK_GAME.bat`
+
+Local game path will be stored in an ignored local config file and never committed.
