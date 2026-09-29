@@ -1106,3 +1106,40 @@ Purpose of this probe:
 - conclusively determine whether 32-bpp SetDisplayMode works on the current Windows/DirectDraw stack;
 - if the line-1005 error disappears or moves, 16-bpp mode switching is the compatibility blocker;
 - if E_NOTIMPL remains at the same site, the blocker is SetDisplayMode/exclusive mode itself rather than color depth.
+
+
+## Direct retail 32-bpp SetDisplayMode probe ready — 2026-09-29
+
+Implementation commit:
+`77253607b2c3fc3f3b058699d983a0d66e0bcd09`
+
+The previous cross-module helper/detour path has been removed from this compatibility test.
+
+Current probe:
+- exact patch site: `0x004FFB75`;
+- validates original bytes:
+  `8B 15 EC 78 6B 00`
+  = `mov edx,[0x006B78EC]`;
+- replaces only those six bytes with:
+  `BA 20 00 00 00 90`
+  = `mov edx,32; nop`;
+- original retail SetDisplayMode argument pushes remain intact;
+- original retail `IDirectDraw7::SetDisplayMode` vtable call remains intact;
+- original `mov edi,eax` remains intact;
+- original DirectX error handling remains intact;
+- no DLL helper is called by this probe.
+
+Static verification passed:
+- exact six-byte guard present;
+- only bpp-load instruction is replaced;
+- old full-block helper removed;
+- old 36-byte patch removed;
+- no direct helper call remains at 0x004FFB75;
+- instruction cache flush covers six bytes;
+- existing DX/crash diagnostics remain enabled.
+
+Interpretation for next run:
+- if `DXinit.cpp:1005 / 0x80004001` disappears or moves, 16-bpp SetDisplayMode is the compatibility problem;
+- if the exact same error remains, exclusive SetDisplayMode itself is unsupported and the next fix should move to windowed/borderless DirectDraw initialization instead of color-depth retrying.
+
+**Next user action:** update and rerun `TEST_LATEST_BUILD.bat`. User will provide all generated logs by default.
