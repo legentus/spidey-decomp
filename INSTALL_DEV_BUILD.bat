@@ -36,14 +36,35 @@ if not exist "%~dp0out\matching\binkw32.dll" (
     goto :FAIL
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install_dev_proxy.ps1" -GameDir "%SPIDEY_GAME_DIR%"
+if not exist "%SPIDEY_GAME_DIR%\binkw32_.dll" (
+    if not exist "%SPIDEY_GAME_DIR%\binkw32.dll" (
+        echo [ERROR] Neither binkw32.dll nor binkw32_.dll exists in the game folder.
+        goto :FAIL
+    )
+    echo [..] Preserving retail Bink DLL as binkw32_.dll...
+    move /y "%SPIDEY_GAME_DIR%\binkw32.dll" "%SPIDEY_GAME_DIR%\binkw32_.dll" >nul
+    if errorlevel 1 goto :FAIL
+) else (
+    echo [OK] Preserved retail binkw32_.dll already exists.
+)
+
+echo [..] Installing rebuilt proxy as binkw32.dll...
+copy /y "%~dp0out\matching\binkw32.dll" "%SPIDEY_GAME_DIR%\binkw32.dll" >nul
 if errorlevel 1 goto :FAIL
 
 echo.
 echo [OK] Dev build installed.
+echo Game:
+echo   %SPIDEY_GAME_DIR%\SpideyPC.exe
+echo.
+where certutil.exe >nul 2>&1
+if not errorlevel 1 (
+    echo Installed proxy SHA-256:
+    certutil.exe -hashfile "%SPIDEY_GAME_DIR%\binkw32.dll" SHA256
+)
+echo.
 echo Next: run RUN_GAME.bat.
 echo.
-
 if not defined SPIDEY_NO_PAUSE pause
 exit /b 0
 
