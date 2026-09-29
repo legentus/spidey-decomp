@@ -175,6 +175,7 @@ CLEAN :
 	-@erase "$(OUTDIR)\spider.dll"
 	-@erase "$(OUTDIR)\spider.exp"
 	-@erase "$(OUTDIR)\spider.lib"
+	-@erase "$(OUTDIR)\spider.map"
 
 "$(OUTDIR)" :
     if not exist "$(OUTDIR)/$(NULL)" mkdir "$(OUTDIR)"
@@ -186,7 +187,7 @@ BSC32_FLAGS=/nologo /o"$(OUTDIR)\spider.bsc"
 BSC32_SBRS= \
 	
 LINK32=link.exe
-LINK32_FLAGS=kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib zlib.lib winmm.lib dinput8.lib dxguid.lib dsound.lib ddraw.lib /nologo /dll /incremental:no /pdb:"$(OUTDIR)\spider.pdb" /machine:I386 /out:"$(OUTDIR)\spider.dll" /implib:"$(OUTDIR)\spider.lib" /libpath:"directx\lib" /libpath:"lib" 
+LINK32_FLAGS=kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib zlib.lib winmm.lib dinput8.lib dxguid.lib dsound.lib ddraw.lib /nologo /dll /incremental:no /pdb:"$(OUTDIR)\spider.pdb" /map:"$(OUTDIR)\spider.map" /machine:I386 /out:"$(OUTDIR)\spider.dll" /implib:"$(OUTDIR)\spider.lib" /libpath:"directx\lib" /libpath:"lib" 
 LINK32_OBJS= \
 	"$(INTDIR)\ai.obj" \
 	"$(INTDIR)\algebra.obj" \
