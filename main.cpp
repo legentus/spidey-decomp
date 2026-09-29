@@ -633,10 +633,57 @@ static int my_video_player(const char*, i32)
 	return 1;
 }
 
+#ifdef _WIN32
+static void SpideyAppendDxError(
+		const char* kind,
+		long error,
+		char* file,
+		i32 line)
+{
+	FILE* f = fopen("spidey-decomp-dxerror.log", "a");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"%s error=0x%08lX file=%s line=%d\n",
+		kind,
+		(unsigned long)error,
+		file ? file : "<null>",
+		line);
+	fflush(f);
+	fclose(f);
+}
+
+static void SpideyDiagDisplayDIError(long error, char* file, i32 line)
+{
+	SpideyAppendDxError("DI", error, file, line);
+	displayDIError(error, file, line);
+}
+
+static void SpideyDiagDisplayDSError(long error, char* file, i32 line)
+{
+	SpideyAppendDxError("DS", error, file, line);
+	displayDSError(error, file, line);
+}
+
+static void SpideyDiagDisplayD3DError(long error, char* file, i32 line)
+{
+	SpideyAppendDxError("D3D", error, file, line);
+	displayD3DError(error, file, line);
+}
+#endif
+
 // @Bogus
 void game_patches(void)
 {
 	//PATCH_CALL(0x004707BE, my_video_player);
+
+#ifdef _WIN32
+	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
+	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
+	PATCH_PUSH_RET(0x004FC820, SpideyDiagDisplayD3DError);
+#endif
 
 	patch_alloc();
 
