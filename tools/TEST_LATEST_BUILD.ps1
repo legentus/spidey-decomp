@@ -279,16 +279,6 @@ if ($Elevated) {
     Write-Host "[OK] Elevated access confirmed for the game folder."
 }
 
-Write-Host "[..] Fingerprinting SpideyPC.exe..."
-try {
-    $peInfo = Write-PeFingerprint $gameExe (Join-Path $sessionDir "game-exe-fingerprint.txt")
-    Write-Host ("[INFO] EXE SHA-256: " + $peInfo.Sha256)
-    Write-Host ("[INFO] PE timestamp: 0x{0:X8}" -f $peInfo.TimeDateStamp)
-    Write-Host ("[INFO] Image size: 0x{0:X8}" -f $peInfo.SizeOfImage)
-} catch {
-    Stop-WithPause ("Failed to fingerprint SpideyPC.exe: " + $_.Exception.Message)
-}
-
 $toolchainRoot = Ensure-MatchingToolchain
 Write-Host "[OK] Matching toolchain: $toolchainRoot"
 
@@ -355,6 +345,16 @@ New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $sessionDir = Join-Path $logRoot $stamp
 New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
+
+Write-Host "[..] Fingerprinting SpideyPC.exe..."
+try {
+    $peInfo = Write-PeFingerprint $gameExe (Join-Path $sessionDir "game-exe-fingerprint.txt")
+    Write-Host ("[INFO] EXE SHA-256: " + $peInfo.Sha256)
+    Write-Host ("[INFO] PE timestamp: 0x{0:X8}" -f $peInfo.TimeDateStamp)
+    Write-Host ("[INFO] Image size: 0x{0:X8}" -f $peInfo.SizeOfImage)
+} catch {
+    Stop-WithPause ("Failed to fingerprint SpideyPC.exe: " + $_.Exception.Message)
+}
 
 @(
     "revision=$revision",
