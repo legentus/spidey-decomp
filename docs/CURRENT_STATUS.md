@@ -1444,3 +1444,41 @@ Next user action:
   - `spidey-decomp-crash.log` if present
   - `proxy-link-map.txt`
   - launcher output/session/fingerprint files.
+
+
+## PLAYABLE MILESTONE + new priorities — 2026-09-29
+
+User runtime report:
+- game now boots through splash/title;
+- user can enter the first level and control Spider-Man;
+- user successfully quit back to main menu;
+- **no sound at all** during current runtime;
+- entering/changing Options crashes reproducibly;
+- user provided two independent options-menu crash sessions;
+- full modern controller support is now an explicit project requirement:
+  - Xbox-style controller support;
+  - analog stick/trigger handling;
+  - configurable button mappings;
+  - Xbox button/UI prompts.
+
+Both options-menu crash logs agree on:
+- exception: `0xC0000005`;
+- exact retail EIP: `0x0043EB29`;
+- fault module: `SpideyPC.exe`;
+- first session read target `0x8A14244A`;
+- second session read target `0x8A14270A`;
+- both have `ESI=0x0043EAF0`;
+- crash is therefore reproducible in the same retail function/path rather than a random heap fault.
+
+DirectDraw compatibility remains active and game is now playable.
+
+Texture compatibility observation from both sessions:
+- inferred `0x006B70F8` hash-table base was NOT corroborated;
+- retail machine code itself reveals an indexed absolute base operand `0x006AB934` in the lookup sequence;
+- default texture resolves non-null (`0x006AD3C8`);
+- current texture compatibility logging is very noisy and should be cleaned up after crash triage.
+
+ACTIVE WORKSTREAMS:
+1. map and fix options crash at `0x0043EB29`;
+2. diagnose missing DirectSound/audio path without regressing gameplay;
+3. design/implement modern XInput/Xbox controller layer with remapping and Xbox prompts after stability hooks are in place.
