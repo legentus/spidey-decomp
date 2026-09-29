@@ -375,12 +375,16 @@ try {
 
 $crashLog = Join-Path $gameDir "spidey-decomp-crash.log"
 $dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
+$compatLog = Join-Path $gameDir "spidey-decomp-compat.log"
 
 if (Test-Path $crashLog) {
     Remove-Item -LiteralPath $crashLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $dxErrorLog) {
     Remove-Item -LiteralPath $dxErrorLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $compatLog) {
+    Remove-Item -LiteralPath $compatLog -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""
@@ -407,6 +411,12 @@ if (Test-Path $dxErrorLog) {
     Copy-Item -LiteralPath $dxErrorLog -Destination (Join-Path $sessionDir "spidey-decomp-dxerror.log") -Force
     Write-Host "[DXERR] DirectX error log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-dxerror.log"))
+}
+
+if (Test-Path $compatLog) {
+    Copy-Item -LiteralPath $compatLog -Destination (Join-Path $sessionDir "spidey-decomp-compat.log") -Force
+    Write-Host "[COMPAT] DirectDraw compatibility log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-compat.log"))
 }
 
 if ($exitCode -eq -1073741819) {
