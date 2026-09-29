@@ -939,3 +939,25 @@ Static verification passed:
 - launcher removes stale compat logs and copies the new one into the timestamped test folder.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat` then `TEST_LATEST_BUILD.bat`. If the game progresses farther, return the launcher output and all generated diagnostic logs. If it still exits at startup, `spidey-decomp-compat.log` is the primary file needed.
+
+
+## 16->32 compatibility attempt did not clear startup failure — 2026-09-29
+
+Latest test at revision `d86523d538a7b97ac32fac0d5b6748378a2be4a2`:
+- forced clean build/link succeeded;
+- proxy SHA-256 `7FC5396C91CA478E11A3DB95C565DC3F33C3B7BF2A16262C312A74F004CDDF16`;
+- EXE fingerprint unchanged;
+- live instruction window proves the compatibility patch installed at `0x004FFB94`:
+  original `FF 51 54 8B F8` is now a direct `E8 rel32` call;
+- nevertheless the same D3D `0x80004001` error reaches `displayD3DError`;
+- secondary crash remains `DXSOUND_ShutDown()+0x7` null read;
+- no `spidey-decomp-compat.log` was collected.
+
+Interpretation:
+- the compatibility thunk executed far enough to return an HRESULT into retail EDI;
+- the returned HRESULT is still `0x80004001`;
+- we do not yet know whether:
+  1. requested bpp was not 16, so retry condition did not run; or
+  2. 16->32 retry ran and also returned E_NOTIMPL.
+
+**ACTIVE FIX/DIAGNOSTIC:** record SetDisplayMode arguments and first/retry HRESULTs in static runtime state inside the proxy, then append that state through the already-proven DirectX error logger. This avoids relying on a separate compatibility log file and will conclusively distinguish those two cases on the next run.
