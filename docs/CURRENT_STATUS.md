@@ -1482,3 +1482,41 @@ ACTIVE WORKSTREAMS:
 1. map and fix options crash at `0x0043EB29`;
 2. diagnose missing DirectSound/audio path without regressing gameplay;
 3. design/implement modern XInput/Xbox controller layer with remapping and Xbox prompts after stability hooks are in place.
+
+
+## Options crash root-cause fixed + exact retail texture table decoded — 2026-09-29
+
+Options crash:
+- both independent sessions faulted at retail `0x0043EB29`;
+- `tools/names.json` maps function start `0x0043EAF0` to `Font::height(char*)`;
+- crash offset: `Font::height + 0x39`;
+- both linker maps show DLL return address `0x100237EC` immediately after the reconstructed `Font::height` wrapper calls retail;
+- reconstructed wrapper incorrectly invoked the retail C++ instance method as a free function:
+  `typedef i32 (*func_ptr)(char*); return func(txt);`
+- this failed to pass the `Font* this` pointer in ECX.
+
+Fix commit:
+`a0a8aee2f2fcbd931c3d9eb80c8270da38711563`
+- removes invalid retail call-through;
+- uses already reconstructed implementation:
+  `heightAboveBaseline(txt) + heightBelowBaseline(txt)`.
+
+Texture resolver correction:
+- retail `Spool_FindTextureEntry` bytes explicitly decode:
+  - `mov eax,[eax*4 + 0x006AB934]` => exact live retail texture hash table base `0x006AB934`;
+  - default-texture flag at `0x006B2F08`;
+  - retail animation-table slot 13 at `0x0056EA98`;
+- previous inferred `0x006B70F8` was correctly rejected by runtime validation.
+
+Correction commit:
+`b3af5be5087b6cf7a2003aaf70daeb0c621c24d7`
+- live hash resolver now verifies and uses exact `0x006AB934`;
+- reads live retail default-texture flag;
+- throttles repeated identical texture-miss logging.
+
+Both commits are implemented but not yet runtime-tested.
+
+Current priorities:
+1. runtime-test the Options fix while preserving first-level playability;
+2. diagnose/fix total absence of audio;
+3. add XInput/Xbox controller support through the existing PCINPUT/Pad abstraction, preserving remapping support and adding Xbox button prompts/UI.
