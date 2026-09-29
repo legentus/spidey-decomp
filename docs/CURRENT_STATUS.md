@@ -172,3 +172,17 @@ RUN_GAME.bat
 ### Next blocking step
 
 User should bootstrap/clone locally, run the BAT workflow, and report the first build + launch result. Capture the complete build console output and any `spidey-decomp` runtime console output. Do not begin gameplay-source bug fixes until the baseline proxy has been tested against the user's exact retail installation.
+
+
+## Bootstrap Git Dependency Fix — 2026-09-29
+
+First user run of the standalone bootstrap stopped because `git.exe` was not in PATH.
+
+**ACTIVE FIX:** replace the bootstrap with a self-healing version that:
+1. checks PATH for Git;
+2. checks normal Git for Windows install locations even if PATH is stale/missing;
+3. installs Git automatically with `winget` when available;
+4. falls back to downloading the current 64-bit Git for Windows installer from the official `git-for-windows/git` GitHub release and runs it silently;
+5. continues cloning/updating `legentus/spidey-decomp` branch `dev` in the same run.
+
+User should not need to manually install Git or edit PATH.
