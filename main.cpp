@@ -708,8 +708,13 @@ int main()
 
 
 #ifdef _WIN32
-// Diagnostic only: preserve enough information from an unhandled exception
-// to identify the failing module/address in local development builds.
+typedef LONG (CALLBACK *SpideyVectoredHandlerFn)(EXCEPTION_POINTERS*);
+typedef PVOID (WINAPI *SpideyAddVectoredExceptionHandlerFn)(
+    ULONG firstHandler,
+    SpideyVectoredHandlerFn handler);
+
+// Diagnostic only: capture the first access violation observed by the
+// process without relying on the game's top-level exception filter.
 static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
 {
     if (!info || !info->ExceptionRecord)
@@ -723,14 +728,17 @@ static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
         return EXCEPTION_CONTINUE_SEARCH;
 
     fprintf(f, "spidey-decomp access violation\n");
-    fprintf(f, "exception_code=0x%08lX\n", info->ExceptionRecord->ExceptionCode);
+    fprintf(f, "exception_code=0x%08lX\n",
+        info->ExceptionRecord->ExceptionCode);
     fprintf(f, "exception_address=0x%08lX\n",
         (unsigned long)info->ExceptionRecord->ExceptionAddress);
 
     if (info->ExceptionRecord->NumberParameters >= 2)
     {
-        unsigned long op = (unsigned long)info->ExceptionRecord->ExceptionInformation[0];
-        unsigned long target = (unsigned long)info->ExceptionRecord->ExceptionInformation[1];
+        unsigned long op =
+            (unsigned long)info->ExceptionRecord->ExceptionInformation[0];
+        unsigned long target =
+            (unsigned long)info->ExceptionRecord->ExceptionInformation[1];
 
         const char* opName = "unknown";
         if (op == 0)
@@ -806,11 +814,27 @@ static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
     fclose(f);
     return EXCEPTION_CONTINUE_SEARCH;
 }
-#endif
+
+static void InstallSpideyCrashHandler()
+{
+    HMODULE kernel = GetModuleHandleA("kernel32.dll");
+    if (kernel)
+    {
+        SpideyAddVectoredExceptionHandlerFn addHandler =
+            (SpideyAddVectoredExceptionHandlerFn)GetProcAddress(
+                kernel,
+                "AddVectoredExceptionHandler");
+
+        if (addHandler)
+        {
+            addHandler(1, SpideyVectoredExceptionHandler);
+            puts("[*] Installed vectored crash handler");
+            return;
+        }
     }
 
-    fclose(f);
-    return EXCEPTION_CONTINUE_SEARCH;
+    SetUnhandledExceptionFilter(SpideyVectoredExceptionHandler);
+    puts("[*] Vectored handler unavailable; installed fallback crash handler");
 }
 #endif
 
@@ -835,7 +859,7 @@ BOOL WINAPI DllMain(
 			AllocConsole();
 			SetConsoleTitle("spidey-decomp - " RUNTIME_VERSION);
 			freopen("CONOUT$", "w", stdout);
-			AddVectoredExceptionHandler(1, SpideyVectoredExceptionHandler);
+			InstallSpideyCrashHandler();
 
 			bink_dll = GetModuleHandleA("binkw32.dll");
 
