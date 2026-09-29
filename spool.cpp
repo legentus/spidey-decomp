@@ -1066,13 +1066,12 @@ void Spool_ClearAllPSXs(void)
 }
 
 // @SMALLTODO
+// Runtime-validated replacement for the old temporary call-through to
+// retail 0x004C9460. The call-through can recurse if the retail entry is
+// redirected back into this reconstruction, so use the already-decompiled
+// hash-table lookup directly.
 Texture *Spool_FindTextureEntry(u32 checksum)
 {
-	//@FIXME
-	typedef Texture* (*func_ptr)(u32);
-	func_ptr func = (func_ptr)0x004C9460;
-	return func(checksum);
-
 	Texture *pSearch;
 	for (pSearch = TextureChecksumHashTable[checksum & 511];
 			pSearch;
