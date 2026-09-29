@@ -72,6 +72,8 @@ EXPORT u8 gGiveDefaultTexture;
 #ifdef _WIN32
 static Texture** gSpideyRetailTextureChecksumHashTable = 0;
 static i32 gSpideyRetailTextureHashTableResolved = 0;
+static u32 gSpideyLastMissingTextureChecksum = 0;
+#define G_SPIDEY_RETAIL_GIVE_DEFAULT_TEXTURE (*reinterpret_cast<u8*>(0x006B2F08))
 
 static void SpideyLogTextureCompat(
 		const char* message,
@@ -95,12 +97,11 @@ static Texture** SpideyResolveRetailTextureHashTable(void)
 
 	gSpideyRetailTextureHashTableResolved = 1;
 
-	// The reconstructed global layout places the 512-entry pointer table
-	// immediately before retail G_LOWGRAPHICS (0x006B78F8), which implies
-	// 0x006B70F8. Do not trust that inference by itself: verify that the
-	// untouched retail Spool_FindTextureEntry code actually embeds this
-	// absolute address before using it.
-	const u32 expectedBase = 0x006B70F8;
+	// Verified from the untouched retail Spool_FindTextureEntry machine code:
+	//   mov eax, [eax*4 + 0x006AB934]
+	// Keep the byte verification below so an incompatible executable will
+	// refuse to use the address rather than silently trusting it.
+	const u32 expectedBase = 0x006AB934;
 	const unsigned char* retailCode =
 		reinterpret_cast<const unsigned char*>(0x004C9460);
 	const i32 retailSize = 132;
@@ -1267,17 +1268,35 @@ Texture *Spool_FindTextureEntry(u32 checksum)
 			return pSearch;
 	}
 
-	if (!gGiveDefaultTexture)
+	u8 giveDefaultTexture =
+		gGiveDefaultTexture;
+#ifdef _WIN32
+	__try
+	{
+		giveDefaultTexture =
+			G_SPIDEY_RETAIL_GIVE_DEFAULT_TEXTURE;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+#endif
+
+	if (!giveDefaultTexture)
 	{
 		Texture* pDefault =
 			SpideyGetDefaultTexture();
 
 #ifdef _WIN32
-		SpideyLogTextureCompat(
-			"texture_lookup MISS checksum=0x%08X default=0x%08X retail_table=0x%08X",
-			checksum,
-			reinterpret_cast<u32>(pDefault),
-			reinterpret_cast<u32>(gSpideyRetailTextureChecksumHashTable));
+		if (gSpideyLastMissingTextureChecksum != checksum)
+		{
+			gSpideyLastMissingTextureChecksum =
+				checksum;
+			SpideyLogTextureCompat(
+				"texture_lookup MISS checksum=0x%08X default=0x%08X retail_table=0x%08X",
+				checksum,
+				reinterpret_cast<u32>(pDefault),
+				reinterpret_cast<u32>(gSpideyRetailTextureChecksumHashTable));
+		}
 #endif
 
 		DoAssert(
