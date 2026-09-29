@@ -72,6 +72,7 @@ EXPORT u8 gGiveDefaultTexture;
 #ifdef _WIN32
 static Texture** gSpideyRetailTextureChecksumHashTable = 0;
 static i32 gSpideyRetailTextureHashTableResolved = 0;
+static i32 gSpideyRetailTextureRuntimeEnabled = 0;
 static u32 gSpideyLastMissingTextureChecksum = 0;
 #define G_SPIDEY_RETAIL_GIVE_DEFAULT_TEXTURE (*reinterpret_cast<u8*>(0x006B2F08))
 
@@ -132,9 +133,17 @@ static Texture** SpideyResolveRetailTextureHashTable(void)
 			reinterpret_cast<Texture**>(expectedBase);
 
 		SpideyLogTextureCompat(
-			"texture_hash_table verified retail_base=0x%08X",
-			expectedBase);
-		return gSpideyRetailTextureChecksumHashTable;
+			"texture_hash_table verified retail_base=0x%08X runtime_use=%u",
+			expectedBase,
+			gSpideyRetailTextureRuntimeEnabled);
+
+		if (gSpideyRetailTextureRuntimeEnabled)
+			return gSpideyRetailTextureChecksumHashTable;
+
+		// Keep the exact decoded retail address documented, but preserve
+		// the last known playable lookup behavior until the retail Texture
+		// layout and ownership model are validated end-to-end.
+		return 0;
 	}
 
 	FILE* f = fopen("spidey-decomp-compat.log", "a");
@@ -1270,14 +1279,18 @@ Texture *Spool_FindTextureEntry(u32 checksum)
 
 	u8 giveDefaultTexture =
 		gGiveDefaultTexture;
+
 #ifdef _WIN32
-	__try
+	if (gSpideyRetailTextureRuntimeEnabled)
 	{
-		giveDefaultTexture =
-			G_SPIDEY_RETAIL_GIVE_DEFAULT_TEXTURE;
-	}
-	__except(EXCEPTION_EXECUTE_HANDLER)
-	{
+		__try
+		{
+			giveDefaultTexture =
+				G_SPIDEY_RETAIL_GIVE_DEFAULT_TEXTURE;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
 	}
 #endif
 
