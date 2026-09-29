@@ -7,85 +7,57 @@ echo ============================================================
 echo   Spider-Man 2000 Dev - Update Project
 echo ============================================================
 echo.
-
-set "GIT_EXE="
-for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined GIT_EXE set "GIT_EXE=%%G"
-if not defined GIT_EXE if exist "%ProgramFiles%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles%\Git\cmd\git.exe"
-if not defined GIT_EXE if exist "%ProgramFiles(x86)%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles(x86)%\Git\cmd\git.exe"
-if not defined GIT_EXE if exist "%LocalAppData%\Programs\Git\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Programs\Git\cmd\git.exe"
-if not defined GIT_EXE if exist "%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe"
-
-if not defined GIT_EXE (
-    echo [ERROR] Git for Windows was not found.
-    echo Run the latest GET_SPIDEY_PROJECT.bat bootstrap to set up portable MinGit automatically.
-    goto :FAIL
-)
-
-for %%D in ("%GIT_EXE%") do set "PATH=%%~dpD;%PATH%"
-
-if not exist ".git" (
-    echo [ERROR] This folder is not a Git clone.
-    echo Use the project bootstrap BAT for the first download.
-    goto :FAIL
-)
-
-for /f "delims=" %%A in ('git.exe remote get-url origin 2^>nul') do set "ORIGIN_URL=%%A"
-echo Repository:
-echo   %CD%
-echo Origin:
-echo   %ORIGIN_URL%
+echo Updating directly from the GitHub dev branch archive.
+echo No Git, PowerShell, or curl installation is required.
 echo.
 
-set "DIRTY="
-for /f "delims=" %%A in ('git.exe status --porcelain --untracked-files=no') do set "DIRTY=1"
-if defined DIRTY (
-    echo [ERROR] Tracked local files have uncommitted changes.
-    echo The updater will not overwrite or stash them automatically.
-    echo.
-    git.exe status --short
+if not exist "%~dp0scripts\update_project_worker.bat" (
+    echo [ERROR] scripts\update_project_worker.bat is missing.
+    echo Re-run the latest standalone bootstrap once.
+    goto :FAIL
+)
+if not exist "%~dp0scripts\download_file.vbs" (
+    echo [ERROR] scripts\download_file.vbs is missing.
+    echo Re-run the latest standalone bootstrap once.
+    goto :FAIL
+)
+if not exist "%~dp0scripts\extract_zip.vbs" (
+    echo [ERROR] scripts\extract_zip.vbs is missing.
+    echo Re-run the latest standalone bootstrap once.
     goto :FAIL
 )
 
-echo [..] Fetching latest dev branch...
-git.exe fetch origin dev
-if errorlevel 1 goto :GIT_FAIL
-
-git.exe show-ref --verify --quiet refs/heads/dev
+set "WORK=%TEMP%\Spidey2000Update-%RANDOM%-%RANDOM%"
+mkdir "%WORK%" >nul 2>&1
 if errorlevel 1 (
-    echo [..] Creating local dev branch from origin/dev...
-    git.exe checkout -b dev --track origin/dev
-    if errorlevel 1 goto :GIT_FAIL
-) else (
-    git.exe checkout dev
-    if errorlevel 1 goto :GIT_FAIL
+    echo [ERROR] Could not create temporary update folder.
+    goto :FAIL
 )
 
-echo [..] Fast-forwarding to origin/dev...
-git.exe pull --ff-only origin dev
-if errorlevel 1 goto :GIT_FAIL
+copy /y "%~dp0scripts\update_project_worker.bat" "%WORK%\update_project_worker.bat" >nul
+copy /y "%~dp0scripts\download_file.vbs" "%WORK%\download_file.vbs" >nul
+copy /y "%~dp0scripts\extract_zip.vbs" "%WORK%\extract_zip.vbs" >nul
+if exist "%~dp0scripts\get_remote_sha.vbs" copy /y "%~dp0scripts\get_remote_sha.vbs" "%WORK%\get_remote_sha.vbs" >nul
 
-git.exe submodule update --init --recursive
-if errorlevel 1 goto :GIT_FAIL
+call "%WORK%\update_project_worker.bat" "%CD%"
+set "RESULT=%ERRORLEVEL%"
 
-for /f "delims=" %%A in ('git.exe rev-parse --short HEAD') do set "CURRENT_COMMIT=%%A"
+rmdir /s /q "%WORK%" >nul 2>&1
+
+if not "%RESULT%"=="0" goto :FAIL
 
 echo.
-echo [OK] Project is up to date.
-echo Commit:
-echo   %CURRENT_COMMIT%
+echo ============================================================
+echo   UPDATE COMPLETE
+echo ============================================================
 echo.
 echo Next: run BUILD_AND_INSTALL.bat.
 echo.
-
 if not defined SPIDEY_NO_PAUSE pause
 exit /b 0
 
-:GIT_FAIL
-echo.
-echo [ERROR] Git update failed.
-goto :FAIL
-
 :FAIL
 echo.
+echo [ERROR] Project update did not complete.
 if not defined SPIDEY_NO_PAUSE pause
 exit /b 1
