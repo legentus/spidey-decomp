@@ -551,3 +551,22 @@ Next step:
 
 
 Latest test-runner update: commit 9bcdaacc9fccf59384cc6813fb91cd31cf3443ad adds pre-launch disc compatibility diagnostics and an alternate virtual-drive backend. Next action: update locally and rerun TEST_LATEST_BUILD.bat.
+
+
+## Cracked EXE boot succeeds; first runtime crash — 2026-09-29
+
+User is now testing with a cracked Spider-Man PC executable, so the physical-disc/ISO workaround is no longer part of the active workflow.
+
+Latest run:
+- tested revision: `9bcdaacc9fccf59384cc6813fb91cd31cf3443ad`;
+- proxy SHA-256: `5508A0BE8D13CE694BEEEED14CB0F5ACFF30FF2D92AA7BD4233A5A0D9AD99CDC`;
+- proxy installed successfully;
+- game passed the previous disc gate and actually booted;
+- process later exited with code `-1073741819` = `0xC0000005` (access violation).
+
+Important risk:
+- the decomp proxy applies many fixed-address runtime patches into `SpideyPC.exe`;
+- the cracked executable may differ from the original retail executable at those addresses even if it otherwise boots;
+- before treating the crash as a decomp bug, we must fingerprint the exact running EXE and validate that its PE layout and patched bytes are compatible with the hardcoded addresses.
+
+**ACTIVE NEXT STEP:** remove the disc-image requirement from TEST_LATEST_BUILD and add automatic executable fingerprint + patch-site compatibility logging before launch.
