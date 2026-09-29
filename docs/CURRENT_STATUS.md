@@ -268,3 +268,21 @@ Private local tools:
 No administrator rights, PowerShell, system-wide Git installation, or writes to `C:\vs` are required by the new user workflow.
 
 **Next user action:** discard all older bootstrap BATs and run the bootstrap generated from commit `79667480f51ba0a130e5df8cd1e172a98a4eb86e`. Expected path: portable MinGit download -> SHA-256 verification -> tar extraction -> clone `dev` -> configure game folder.
+
+
+## Bootstrap Fix #4 — Eliminate Git/curl/PowerShell dependencies — 2026-09-29
+
+User's environment also does not expose `curl.exe`. Continuing to add prerequisite probes is the wrong design.
+
+**New final local-update design:**
+- Do not require Git on the user's PC at all.
+- Do not require PowerShell.
+- Do not require curl.
+- Bootstrap/update downloads the GitHub `dev` branch archive directly:
+  `https://github.com/legentus/spidey-decomp/archive/refs/heads/dev.zip`
+- Download is performed through Windows Script Host (`cscript.exe`) using built-in Windows HTTP/COM components.
+- ZIP extraction is performed through Windows Shell COM, with `tar.exe` only as an optional fast path when present.
+- Local refresh preserves `spidey_local_config.bat`.
+- The user's normal update workflow remains a single `UPDATE_PROJECT.bat`.
+
+This is now preferred over maintaining a local Git clone because the user's goal is a self-updating working copy, not local source-control operations.
