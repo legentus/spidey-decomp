@@ -60,7 +60,7 @@ We **do not need a standalone fully rebuilt executable before fixing bugs**. We 
 
 ## Current Frontier
 
-**ACTIVE:** establish a reproducible baseline build from our `dev` branch before making gameplay/source changes.
+**ACTIVE:** perform the first baseline build/install/launch from `dev` before making gameplay-source changes.
 
 CI workflow was updated on `dev` at commit `9748899a10ce5ac708f54e4f9c7d8c4de3845351` to:
 - run on pushes to `dev`;
@@ -69,7 +69,17 @@ CI workflow was updated on `dev` at commit `9748899a10ce5ac708f54e4f9c7d8c4de384
 
 **Observed after the push:** GitHub's Actions-runs API currently reports zero runs for branch `dev`, and the commit has no combined status entries. Therefore the CI build is **not yet verified**. Do not assume the DLL was built. This may require enabling Actions for the newly created fork or another workflow-side fix; exact cause not yet proven.
 
-To avoid blocking progress on fork Actions initialization, the next work item is a local one-command Windows matching-build helper that reproduces the same preserved-toolchain procedure used by upstream CI.
+To avoid blocking progress on fork Actions initialization, a local one-command Windows matching-build path has now been added and documented.
+
+### Added build/install helpers
+
+- `scripts/setup_matching_toolchain.ps1` — commit `5b5ea2d37e94feef9dfc6a8d2681f339cc6960b1`
+- `scripts/build_matching.ps1` — commit `a3a18cd8b5ea8af3793b0fd4bb5fa2db9ab509e1`
+- `scripts/install_dev_proxy.ps1` — commit `903ad122a41eb5da1e6ae28602c30637451e83ab`
+- `scripts/restore_stock_bink.ps1` — commit `74a08d8da003111d671934cc02f6a37e11453d14`
+- `docs/BUILD_AND_INSTALL.md` — commit `384a592aa6c16e3f61308fd54b47fcdc9a122190`
+
+These changes do **not** modify reconstructed gameplay/engine code.
 
 ## Baseline Test Plan
 
@@ -86,11 +96,27 @@ Do **not** move on to a gameplay bug until this baseline is confirmed.
 
 ## Next Action
 
-Add a safe local Windows matching-build path on `dev` that:
-1. bootstraps the preserved compiler/toolchain used by upstream CI when needed;
-2. writes `runtime_version.h` from the current Git commit;
-3. runs the existing `build.bat` / `spider.mak` unchanged;
-4. stages the generated proxy as `out\\matching\\binkw32.dll`;
-5. prints a SHA-256 so the exact tested artifact can be recorded.
+**User-side baseline test is now the blocking step.**
 
-After that, add a safe install/restore helper for the retail game and perform the first baseline launch.
+From a Windows clone of this repository:
+
+```powershell
+git checkout dev
+powershell -ExecutionPolicy Bypass -File .\scripts\build_matching.ps1
+```
+
+Then install the generated proxy against the user's retail game directory:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install_dev_proxy.ps1 -GameDir "<folder containing SpideyPC.exe>"
+```
+
+Launch `SpideyPC.exe` and capture:
+- whether the `spidey-decomp` console appears;
+- the full console output, especially any validation failures;
+- whether the game reaches the menu / gameplay;
+- the SHA-256 printed by the build/install helper.
+
+If the fork's GitHub Actions page shows workflows disabled, enable Actions there as a secondary CI path. As of the latest check, the API still reports zero `dev` workflow runs.
+
+**Do not start bug-fix source changes until this baseline result is recorded.**
