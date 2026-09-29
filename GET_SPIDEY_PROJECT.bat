@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 title Spider-Man 2000 Dev - Get / Update Project
 
 echo ============================================================
@@ -7,7 +7,7 @@ echo   Spider-Man 2000 Developer Project - Bootstrap
 echo ============================================================
 echo.
 echo This BAT will:
-echo   1. Find Git or install a private portable MinGit copy
+echo   1. Find Git or set up a private portable MinGit copy
 echo   2. Clone or update legentus/spidey-decomp
 echo   3. Switch to the active dev branch
 echo   4. Start first-time game-folder setup if needed
@@ -131,7 +131,7 @@ if not exist "%TARGET_DIR%\spidey_local_config.bat" (
     call "SETUP_FIRST_TIME.bat"
     set "SETUP_RESULT=%ERRORLEVEL%"
     popd
-    if not "%SETUP_RESULT%"=="0" goto :FAIL
+    if not "!SETUP_RESULT!"=="0" goto :FAIL
 ) else (
     echo [OK] Game folder is already configured.
 )
@@ -159,11 +159,12 @@ if not defined GIT_EXE if exist "%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe
 exit /b 0
 
 :INSTALL_PORTABLE_GIT
-where powershell.exe >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Windows PowerShell was not found.
-    exit /b 1
-)
+call :REQUIRE_TOOL curl.exe
+if errorlevel 1 exit /b 1
+call :REQUIRE_TOOL certutil.exe
+if errorlevel 1 exit /b 1
+call :REQUIRE_TOOL tar.exe
+if errorlevel 1 exit /b 1
 
 set "PORTABLE_ROOT=%LocalAppData%\Spidey2000Dev"
 set "PORTABLE_GIT=%PORTABLE_ROOT%\MinGit"
@@ -179,16 +180,22 @@ if exist "%PORTABLE_GIT%\cmd\git.exe" (
 if not exist "%PORTABLE_ROOT%" mkdir "%PORTABLE_ROOT%" >nul 2>&1
 
 echo [..] Downloading official portable MinGit...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%PORTABLE_URL%' -OutFile '%PORTABLE_ZIP%'"
+curl.exe -L --fail --retry 3 --retry-delay 2 -o "%PORTABLE_ZIP%" "%PORTABLE_URL%"
 if errorlevel 1 (
     echo [ERROR] MinGit download failed.
     exit /b 1
 )
 
 echo [..] Verifying SHA-256...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$h=(Get-FileHash -Algorithm SHA256 -LiteralPath '%PORTABLE_ZIP%').Hash; if ($h -ne '%PORTABLE_SHA256%') { Write-Host 'Expected: %PORTABLE_SHA256%'; Write-Host ('Actual:   ' + $h); exit 2 }"
-if errorlevel 1 (
+set "ACTUAL_HASH="
+for /f "tokens=* delims=" %%H in ('certutil.exe -hashfile "%PORTABLE_ZIP%" SHA256 ^| findstr /R /I "^[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]"') do if not defined ACTUAL_HASH set "ACTUAL_HASH=%%H"
+set "ACTUAL_HASH=!ACTUAL_HASH: =!"
+if /I not "!ACTUAL_HASH!"=="%PORTABLE_SHA256%" (
     echo [ERROR] MinGit SHA-256 did not match.
+    echo Expected:
+    echo   %PORTABLE_SHA256%
+    echo Actual:
+    echo   !ACTUAL_HASH!
     del /q "%PORTABLE_ZIP%" >nul 2>&1
     exit /b 1
 )
@@ -197,7 +204,7 @@ if exist "%PORTABLE_GIT%" rmdir /s /q "%PORTABLE_GIT%"
 mkdir "%PORTABLE_GIT%" >nul 2>&1
 
 echo [..] Extracting portable MinGit...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '%PORTABLE_ZIP%' -DestinationPath '%PORTABLE_GIT%' -Force"
+tar.exe -xf "%PORTABLE_ZIP%" -C "%PORTABLE_GIT%"
 if errorlevel 1 (
     echo [ERROR] MinGit extraction failed.
     exit /b 1
@@ -212,6 +219,14 @@ if not exist "%PORTABLE_GIT%\cmd\git.exe" (
 
 echo [OK] Portable MinGit ready:
 echo   %PORTABLE_GIT%
+exit /b 0
+
+:REQUIRE_TOOL
+where %~1 >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Required Windows tool was not found: %~1
+    exit /b 1
+)
 exit /b 0
 
 :GIT_FAIL
