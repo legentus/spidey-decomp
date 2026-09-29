@@ -570,3 +570,40 @@ Important risk:
 - before treating the crash as a decomp bug, we must fingerprint the exact running EXE and validate that its PE layout and patched bytes are compatible with the hardcoded addresses.
 
 **ACTIVE NEXT STEP:** remove the disc-image requirement from TEST_LATEST_BUILD and add automatic executable fingerprint + patch-site compatibility logging before launch.
+
+
+## Crash-diagnostic frontier — 2026-09-29
+
+The ISO/MCI/virtual-drive testing path is superseded and no longer active. User is testing with a cracked EXE that boots without the disc gate.
+
+Latest known runtime result:
+- game boots under rebuilt proxy;
+- process later exits with `0xC0000005` access violation.
+
+Diagnostics now added:
+- `tools/TEST_LATEST_BUILD.ps1` reset to the pre-ISO workflow;
+- exact running `SpideyPC.exe` is fingerprinted every test:
+  - SHA-256
+  - file size
+  - PE machine
+  - timestamp
+  - entry point RVA
+  - image base
+  - image size
+  - section layout
+- fingerprint saved under the timestamped test-session directory as `game-exe-fingerprint.txt`;
+- proxy installs an unhandled-exception filter and writes `spidey-decomp-crash.log` containing:
+  - exception code
+  - fault address
+  - fault module/path
+  - module base + module-relative offset
+  - x86 register state;
+- launcher waits for the game to exit and copies the native crash log into the same session directory when present;
+- launcher labels `-1073741819` explicitly as `0xC0000005`.
+
+Relevant commits:
+- `295313a4b71b74f0b79cdac05142bf76beec737c` — remove ISO workflow; add EXE fingerprint/crash collection;
+- `ab73cf5e3ecb3312390390906acb95f98a6b111f` — native unhandled-exception crash logger;
+- `a21dc7cb3743291ff9c14c8f747423bcb8bba2f3` — fix session-log/fingerprint ordering.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. After the crash, provide the new console output plus the timestamped session's `game-exe-fingerprint.txt` and `spidey-decomp-crash.log` if generated.
