@@ -812,3 +812,23 @@ Because the installed updater can fail before fetching this change, a minimal re
 `tools\UPDATE_SPIDEY_PROJECT.ps1`
 
 **Next user action:** extract that ZIP into the local project root and overwrite the existing updater script, then run `UPDATE_SPIDEY_PROJECT.bat` followed by `TEST_LATEST_BUILD.bat`.
+
+
+## Exact DirectX error call site captured — 2026-09-29
+
+Latest test at revision `13b50f409ab2afccbb4846a9d5a1b34c082c6ea0`:
+- forced clean build/link succeeded;
+- proxy SHA-256 `F07384C326D25AA2E6551B5C9F8E21A2F65DEAFA18B6A03305643CB8843B90F7`;
+- EXE fingerprint unchanged;
+- primary DirectX error:
+  - kind: D3D
+  - HRESULT: `0x80004001` (E_NOTIMPL)
+  - original source: `DXinit.cpp`
+  - original source line: 1005
+  - caller return: `0x004FFBB1`
+  - probable direct call site: `0x004FFBAC`;
+- secondary cleanup crash remains:
+  - `DXSOUND_ShutDown()+0x7`
+  - read from `0x00000000`.
+
+**ACTIVE NEXT STEP:** map `0x004FFBAC` inside retail `initDirectDraw7()` to the exact DirectDraw/Direct3D method, then patch/tolerate that specific modern-Windows compatibility failure while preserving diagnostics.
