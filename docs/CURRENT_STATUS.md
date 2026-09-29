@@ -199,3 +199,19 @@ Committed fixes:
 Latest bootstrap commit: `2309c4613a9e97d25206ae3211ed46ca794802e7`.
 
 **Next user action:** discard the old bootstrap ZIP/BAT, run the newly generated `GET_SPIDEY_PROJECT.bat`, and report the complete output if it stops again.
+
+
+## Bootstrap Fix #2 — Portable Git — 2026-09-29
+
+Second bootstrap attempt reached the official Git for Windows installer download (`Git-2.56.0-64-bit.exe`) but the installer path returned failure before the project clone.
+
+**Decision:** stop relying on a system-wide Git installation entirely.
+
+New design:
+- Prefer an existing system Git when available.
+- Otherwise download the official **MinGit 64-bit portable ZIP** from the latest `git-for-windows/git` GitHub release.
+- Extract it under the local Spider-Man development folder (no admin/UAC, no installer, no PATH persistence required).
+- Use that portable `git.exe` for clone/update operations.
+- Keep future `UPDATE_PROJECT.bat` able to use the bundled portable Git when system Git is unavailable.
+
+This should make the project self-contained on a clean Windows machine.
