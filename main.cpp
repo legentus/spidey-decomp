@@ -755,6 +755,154 @@ static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
 	return hr;
 }
 
+
+static void SpideyLogRetailAudioState(const char* stage)
+{
+	FILE* f = fopen("spidey-decomp-audio.log", "a");
+	if (!f)
+		return;
+
+	void* pDS = 0;
+	void* pPrimary = 0;
+	i32 loadedBuffers = 0;
+	i32 activeVoices = 0;
+
+	__try
+	{
+		pDS =
+			*(void**)0x006B7920;
+		pPrimary =
+			*(void**)0x006BBF1C;
+
+		void** buffers =
+			(void**)0x006BBAD4;
+		for (i32 i = 0; i < 0x80; i++)
+		{
+			if (buffers[i])
+				loadedBuffers++;
+		}
+
+		unsigned char* holders =
+			(unsigned char*)0x006BBD50;
+		for (i32 j = 0; j < 0x20; j++)
+		{
+			if (*(void**)(holders + j * 0x0C))
+				activeVoices++;
+		}
+
+		fprintf(
+			f,
+			"audio_state stage=%s pDS=0x%08lX primary=0x%08lX loaded_buffers=%d active_voices=%d\n",
+			stage ? stage : "<null>",
+			(unsigned long)pDS,
+			(unsigned long)pPrimary,
+			loadedBuffers,
+			activeVoices);
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		fprintf(
+			f,
+			"audio_state stage=%s <unreadable>\n",
+			stage ? stage : "<null>");
+	}
+
+	fclose(f);
+}
+
+typedef void (__cdecl *SpideyRetailDXINITDirectX8Fn)(
+		HWND,
+		HINSTANCE,
+		unsigned long);
+
+static void __cdecl SpideyDiagDXINITDirectX8(
+		HWND hwnd,
+		HINSTANCE hInstance,
+		unsigned long flags)
+{
+	SpideyRetailDXINITDirectX8Fn fn =
+		(SpideyRetailDXINITDirectX8Fn)0x004FDE90;
+
+	fn(hwnd, hInstance, flags);
+	SpideyLogRetailAudioState("after_DXINIT_DirectX8");
+}
+
+typedef void (__cdecl *SpideyRetailSFXNameFn)(char*);
+
+static void __cdecl SpideyDiagSFXInit(char* name)
+{
+	SpideyRetailSFXNameFn fn =
+		(SpideyRetailSFXNameFn)0x004718B0;
+
+	fn(name);
+	SpideyLogRetailAudioState("after_SFX_Init");
+}
+
+static void __cdecl SpideyDiagSFXSpoolInLevel(char* name)
+{
+	SpideyRetailSFXNameFn fn =
+		(SpideyRetailSFXNameFn)0x004719B0;
+
+	fn(name);
+	SpideyLogRetailAudioState("after_SFX_SpoolInLevelSFX");
+}
+
+static int SpideyRedirectDirectCalls(
+		unsigned long oldTarget,
+		void* newTarget,
+		const char* label)
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	i32 count = 0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long oldRel =
+			*(long*)(p + 1);
+
+		unsigned long target =
+			(unsigned long)(p + 5 + oldRel);
+
+		if (target != oldTarget)
+			continue;
+
+		long newRel =
+			(long)((unsigned char*)newTarget - (p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+		count++;
+	}
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		textStart,
+		textEnd - textStart);
+
+	FILE* f = fopen("spidey-decomp-audio.log", "a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_hook label=%s old_target=0x%08lX replacement=0x%08lX direct_calls=%d\n",
+			label ? label : "<null>",
+			oldTarget,
+			(unsigned long)newTarget,
+			count);
+		fclose(f);
+	}
+
+	return count;
+}
+
 static void SpideyInstallWindowedDirectDrawCompat()
 {
 	unsigned char* textStart =
@@ -881,19 +1029,31 @@ static void SpideyInstallWindowedDirectDrawCompat()
 	matchedPush[1] =
 		0x03;
 
+	long dxInitWrapperRel =
+		(long)(
+			(unsigned char*)SpideyDiagDXINITDirectX8 -
+			(matchedCall + 5));
+	*(long*)(matchedCall + 1) =
+		dxInitWrapperRel;
+
 	FlushInstructionCache(
 		GetCurrentProcess(),
 		matchedPush,
 		2);
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		matchedCall,
+		5);
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX target=0x%08lX old_arg=2 new_arg=3\n",
+			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX retail_target=0x%08lX wrapper=0x%08lX old_arg=2 new_arg=3\n",
 			(unsigned long)matchedPush,
 			(unsigned long)matchedCall,
-			callTarget);
+			callTarget,
+			(unsigned long)SpideyDiagDXINITDirectX8);
 		fclose(f);
 	}
 
@@ -1056,6 +1216,15 @@ void game_patches(void)
 
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
+
+	SpideyRedirectDirectCalls(
+		0x004718B0,
+		(void*)SpideyDiagSFXInit,
+		"SFX_Init");
+	SpideyRedirectDirectCalls(
+		0x004719B0,
+		(void*)SpideyDiagSFXSpoolInLevel,
+		"SFX_SpoolInLevelSFX");
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
