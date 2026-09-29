@@ -54,6 +54,7 @@ function Read-LocalGameDir {
 function Ensure-MatchingToolchain {
     $root = Join-Path $env:LOCALAPPDATA "Spidey2000Dev\MatchingVS"
     $nmake = Join-Path $root "BIN\nmake.exe"
+
     if (Test-Path $nmake) {
         return $root
     }
