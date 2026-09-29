@@ -747,3 +747,31 @@ Latest test at revision `9cf5b139661f11bd613ef646d2e0f3e2a477ba52`:
 The embedded original source line cannot be mapped directly to the current reconstructed source because line numbering has diverged.
 
 **ACTIVE NEXT DIAGNOSTIC:** replace the three DirectX error wrappers with x86 naked trampolines that preserve normal calling semantics while recording the retail return/call-site address. This will identify the exact instruction/API call that produced E_NOTIMPL.
+
+
+## Exact DirectX call-site capture ready — 2026-09-29
+
+The latest DirectX error log proves the primary failure:
+- kind: D3D
+- HRESULT: `0x80004001` (E_NOTIMPL)
+- original source: `C:\backup\SpideyPC\SpideyPC\D3d\DXinit.cpp`
+- original source line: `1005`
+- secondary crash remains `DXSOUND_ShutDown()+0x7` null-reading `g_pDSBuffer`.
+
+Because the reconstructed `DXinit.cpp` line numbering no longer matches the original Neversoft source, line 1005 cannot by itself identify the exact API call.
+
+New diagnostic commit:
+- `dcf0e7ce21468230de9b8c07b4d5d02c5e74d229`
+
+Changes:
+- DI/DS/D3D error wrappers are now x86 naked trampolines;
+- trampolines capture the untouched retail return address directly from the entry stack;
+- logger records:
+  - HRESULT
+  - original file/line
+  - `caller_return`
+  - probable direct-call site `caller_return - 5`;
+- each trampoline restores the original stack exactly and tail-jumps to the normal reconstructed error display function;
+- normal error/cleanup behavior is otherwise preserved.
+
+**Next user action:** update and rerun `TEST_LATEST_BUILD.bat`. Return `spidey-decomp-dxerror.log`; its new caller/call-site fields should identify the exact failing DirectDraw/Direct3D instruction.
