@@ -55,7 +55,8 @@ if ($currentRevision -eq $remoteRevision) {
         Write-Host ""
         Read-Host "Press Enter to close"
     }
-    exit 0
+    $global:LASTEXITCODE = 0
+    return
 }
 
 $tempRoot = Join-Path $env:TEMP ("Spidey2000Update-" + [Guid]::NewGuid().ToString("N"))
@@ -122,3 +123,9 @@ if (-not $NoPause) {
     Write-Host ""
     Read-Host "Press Enter to close"
 }
+
+# Robocopy uses 0-7 as successful/acceptable results. Normalize the native
+# process exit state so callers such as TEST_LATEST_BUILD.ps1 do not mistake
+# a successful refresh (for example robocopy code 3) for an update failure.
+$global:LASTEXITCODE = 0
+return
