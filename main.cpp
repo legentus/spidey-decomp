@@ -1136,6 +1136,8 @@ typedef LONG (CALLBACK *SpideyVectoredHandlerFn)(EXCEPTION_POINTERS*);
 typedef PVOID (WINAPI *SpideyAddVectoredExceptionHandlerFn)(
     ULONG firstHandler,
     SpideyVectoredHandlerFn handler);
+typedef BOOL (WINAPI *SpideySetThreadStackGuaranteeFn)(
+    PULONG stackSizeInBytes);
 
 // Diagnostic only: capture the first access violation observed by the
 // process without relying on the game's top-level exception filter.
@@ -1144,20 +1146,29 @@ static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
     if (!info || !info->ExceptionRecord)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    if (info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION)
+    DWORD exceptionCode =
+        info->ExceptionRecord->ExceptionCode;
+
+    if (exceptionCode != EXCEPTION_ACCESS_VIOLATION &&
+        exceptionCode != 0xC00000FD)
         return EXCEPTION_CONTINUE_SEARCH;
 
     FILE* f = fopen("spidey-decomp-crash.log", "w");
     if (!f)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    fprintf(f, "spidey-decomp access violation\n");
+    if (exceptionCode == 0xC00000FD)
+        fprintf(f, "spidey-decomp stack overflow\n");
+    else
+        fprintf(f, "spidey-decomp access violation\n");
+
     fprintf(f, "exception_code=0x%08lX\n",
-        info->ExceptionRecord->ExceptionCode);
+        exceptionCode);
     fprintf(f, "exception_address=0x%08lX\n",
         (unsigned long)info->ExceptionRecord->ExceptionAddress);
 
-    if (info->ExceptionRecord->NumberParameters >= 2)
+    if (exceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        info->ExceptionRecord->NumberParameters >= 2)
     {
         unsigned long op =
             (unsigned long)info->ExceptionRecord->ExceptionInformation[0];
@@ -1215,15 +1226,51 @@ static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
         fprintf(f, "EIP=0x%08lX\n", ctx->Eip);
         fprintf(f, "EFLAGS=0x%08lX\n", ctx->EFlags);
 
+        int stackWordCount =
+            exceptionCode == 0xC00000FD ? 128 : 32;
+
         fprintf(f, "stack_dwords=");
         __try
         {
             unsigned long* sp = (unsigned long*)ctx->Esp;
-            for (int i = 0; i < 16; ++i)
+            for (int i = 0; i < stackWordCount; ++i)
             {
                 fprintf(f, "%08lX", sp[i]);
-                if (i != 15)
+                if (i != stackWordCount - 1)
                     fputc(',', f);
+            }
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER)
+        {
+            fprintf(f, "<unreadable>");
+        }
+        fputc('\n', f);
+
+        fprintf(f, "ebp_return_chain=");
+        __try
+        {
+            unsigned long* frame =
+                (unsigned long*)ctx->Ebp;
+
+            for (int i = 0; i < 64 && frame; ++i)
+            {
+                unsigned long next =
+                    frame[0];
+                unsigned long ret =
+                    frame[1];
+
+                fprintf(f, "%08lX", ret);
+
+                if (i != 63)
+                    fputc(',', f);
+
+                if (!next ||
+                    next <= (unsigned long)frame ||
+                    next - (unsigned long)frame > 0x100000)
+                    break;
+
+                frame =
+                    (unsigned long*)next;
             }
         }
         __except(EXCEPTION_EXECUTE_HANDLER)
@@ -1242,8 +1289,34 @@ static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
 static void InstallSpideyCrashHandler()
 {
     HMODULE kernel = GetModuleHandleA("kernel32.dll");
+
     if (kernel)
     {
+        SpideySetThreadStackGuaranteeFn setGuarantee =
+            (SpideySetThreadStackGuaranteeFn)GetProcAddress(
+                kernel,
+                "SetThreadStackGuarantee");
+
+        if (setGuarantee)
+        {
+            ULONG requested =
+                64 * 1024;
+            ULONG originalRequest =
+                requested;
+
+            if (setGuarantee(&requested))
+            {
+                printf(
+                    "[*] Reserved %lu bytes for stack-overflow diagnostics\n",
+                    (unsigned long)originalRequest);
+            }
+            else
+            {
+                puts(
+                    "[!] SetThreadStackGuarantee failed; stack-overflow log may be unavailable");
+            }
+        }
+
         SpideyAddVectoredExceptionHandlerFn addHandler =
             (SpideyAddVectoredExceptionHandlerFn)GetProcAddress(
                 kernel,
