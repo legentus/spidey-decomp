@@ -389,6 +389,7 @@ $dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
 $compatLog = Join-Path $gameDir "spidey-decomp-compat.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 $audioLog = Join-Path $gameDir "spidey-decomp-audio.log"
+$controllerLog = Join-Path $gameDir "spidey-decomp-controller.log"
 
 if (Test-Path $crashLog) {
     Remove-Item -LiteralPath $crashLog -Force -ErrorAction SilentlyContinue
@@ -404,6 +405,9 @@ if (Test-Path $runtimeLog) {
 }
 if (Test-Path $audioLog) {
     Remove-Item -LiteralPath $audioLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $controllerLog) {
+    Remove-Item -LiteralPath $controllerLog -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""
@@ -448,6 +452,12 @@ if (Test-Path $audioLog) {
     Copy-Item -LiteralPath $audioLog -Destination (Join-Path $sessionDir "spidey-decomp-audio.log") -Force
     Write-Host "[AUDIO] Audio diagnostic log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-audio.log"))
+}
+
+if (Test-Path $controllerLog) {
+    Copy-Item -LiteralPath $controllerLog -Destination (Join-Path $sessionDir "spidey-decomp-controller.log") -Force
+    Write-Host "[INPUT] Controller diagnostic log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-controller.log"))
 }
 
 if ($exitCode -eq -1073741819) {
