@@ -607,3 +607,25 @@ Relevant commits:
 - `a21dc7cb3743291ff9c14c8f747423bcb8bba2f3` — fix session-log/fingerprint ordering.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. After the crash, provide the new console output plus the timestamped session's `game-exe-fingerprint.txt` and `spidey-decomp-crash.log` if generated.
+
+
+## Critical build-system finding — stale DLL was executed — 2026-09-29
+
+Latest user run at revision `bfaee84279eab635aaefadce36bb412683751de2`:
+- `main.cpp` was recompiled;
+- NMAKE output did **not** show a subsequent `link.exe` step;
+- staged proxy SHA-256 remained `5508A0BE8D13CE694BEEEED14CB0F5ACFF30FF2D92AA7BD4233A5A0D9AD99CDC`, identical to the previous pre-crash-logger DLL;
+- therefore the newly added crash-logger code was not present in the DLL actually launched;
+- this explains why no `spidey-decomp-crash.log` was generated.
+
+The exact tested EXE fingerprint is:
+- SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
+- file size 1507328
+- PE timestamp `0x3B7A3167`
+- image base `0x00400000`
+- image size `0x02A0D000`
+- .text RVA `0x1000`, raw size `0x13A000`
+
+The cracked EXE preserves the expected fixed-address layout at a coarse PE level.
+
+**ACTIVE FIX:** make TEST_LATEST_BUILD force a clean relink/rebuild whenever source revision changes and verify that the output DLL timestamp/hash changed when compilation occurred. Also replace the overwriteable unhandled-exception filter with a first-priority vectored exception handler filtered to access violations.
