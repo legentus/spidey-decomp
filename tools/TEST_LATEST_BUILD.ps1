@@ -333,6 +333,11 @@ if (Test-Path $pdb) {
     Copy-Item $pdb (Join-Path $outDir "spider.pdb") -Force
 }
 
+$linkMap = Join-Path $RepoRoot "Release\spider.map"
+if (Test-Path $linkMap) {
+    Copy-Item $linkMap (Join-Path $outDir "spider-link-map.txt") -Force
+}
+
 $hash = (Get-FileHash -Algorithm SHA256 $proxyDll).Hash
 Write-Host "[OK] Proxy SHA-256: $hash"
 
@@ -372,6 +377,12 @@ try {
     "game=$gameExe",
     "started=$(Get-Date -Format o)"
 ) | Set-Content -Path (Join-Path $sessionDir "test-session.txt") -Encoding UTF8
+
+if (Test-Path $linkMap) {
+    Copy-Item $linkMap (Join-Path $sessionDir "proxy-link-map.txt") -Force
+    Write-Host "[MAP] Proxy linker map captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "proxy-link-map.txt"))
+}
 
 $crashLog = Join-Path $gameDir "spidey-decomp-crash.log"
 $dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
