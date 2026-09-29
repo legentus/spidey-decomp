@@ -1166,3 +1166,46 @@ Conclusion:
 - stop testing alternate bpp values.
 
 **ACTIVE NEXT STEP:** identify and patch the retail branch that selects the game's existing windowed DirectDraw path (`gDxOptionRelated`) instead of the exclusive fullscreen path. Reuse the game's own windowed surface/clipper code rather than suppressing SetDisplayMode errors or inventing a new renderer path.
+
+
+## Built-in windowed DirectDraw route implemented — 2026-09-29
+
+Implementation commit:
+`36570947fa515636c9f3326282295c0e5fd2a37a`
+
+Latest evidence:
+- forcing the retail SetDisplayMode call to 32 bpp still produced the same `0x80004001` at the same original error site;
+- therefore color depth is not the blocker;
+- exclusive fullscreen SetDisplayMode is the compatibility failure.
+
+Relevant reconstructed source:
+- retail caller uses `DXINIT_DirectX8(hwnd, hInstance, 2)`;
+- `DXINIT_DirectX8` computes `gDxOptionRelated = a3 & 1`;
+- `initDirectDraw7` uses `gDxOptionRelated != 0` to select the game's own windowed DirectDraw path using `DDSCL_NORMAL`, primary/offscreen surfaces, and a clipper;
+- changing the third DXINIT argument from 2 to 3 preserves bit 1 and enables bit 0.
+
+Current patch strategy:
+- no SetDisplayMode detour;
+- no bpp forcing;
+- scans retail .text `0x00401000..0x0053B000` for direct calls targeting retail `DXINIT_DirectX8` at `0x004FDE90`;
+- within a bounded 20-byte window before each matching call, looks for exactly one `push 2` (`6A 02`);
+- requires exactly one unambiguous call-site match in the whole text range;
+- verifies the call still resolves to `0x004FDE90`;
+- patches only the immediate byte from `2` to `3`;
+- flushes instruction cache;
+- logs push site/call site/target to `spidey-decomp-compat.log`;
+- refuses to patch on ambiguity or verification failure.
+
+Static verification passed:
+- new windowed initializer installer present;
+- previous SetDisplayMode installer removed;
+- previous direct 32-bpp probe removed;
+- target address correct;
+- bounded scan + uniqueness check present;
+- immediate changes only `02 -> 03`;
+- launcher still collects compat, DX, crash, session, and fingerprint logs.
+
+User preference:
+- user will send all logs after every test; treat the complete log set as the standard test input.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat` then `TEST_LATEST_BUILD.bat`, and provide all generated logs.
