@@ -353,3 +353,29 @@ Latest safety cleanup:
 - `LOCAL_DEV_REVISION.txt` and `logs/` are ignored.
 
 **Next user action:** use the newly packaged DAH-style bootstrap containing only `GET_SPIDEY_PROJECT.bat` and `tools\BOOTSTRAP_SPIDEY_PROJECT.ps1`. Discard all earlier bootstrap ZIPs.
+
+
+## Local Bootstrap Success — 2026-09-29
+
+User confirmed the DAH-style bootstrap completed successfully.
+
+Local state now present:
+- full Spider-Man decomp/dev project downloaded locally;
+- `UPDATE_SPIDEY_PROJECT.bat` present and working copy established;
+- `TEST_LATEST_BUILD.bat` present;
+- local game path configured;
+- local project is ready for the first baseline build/install/launch.
+
+**Immediate next step:** run `TEST_LATEST_BUILD.bat` with the current unmodified gameplay/decomp source.
+
+Baseline success criteria:
+1. updater reports local project current;
+2. matching compiler toolchain is downloaded/extracted if not already present;
+3. `Release\spider.dll` builds successfully;
+4. proxy is staged/installed as `binkw32.dll`;
+5. original retail Bink is preserved as `binkw32_.dll`;
+6. `SpideyPC.exe` launches;
+7. `spidey-decomp` console appears and prints revision/validation output;
+8. game reaches menu/gameplay without immediate failure.
+
+Do not make gameplay/source changes until this exact baseline is captured.
