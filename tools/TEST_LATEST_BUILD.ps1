@@ -293,9 +293,11 @@ try {
     Set-Content -Path $runtimeHeader -Value ('#define RUNTIME_VERSION "' + $revision + '"') -Encoding ASCII
 
     $env:SPIDEY_MSVC_ROOT = $toolchainRoot
+    $env:SPIDEY_FORCE_CLEAN = "1"
+    $buildStartedUtc = [DateTime]::UtcNow
 
     Write-Host ""
-    Write-Host "[..] Building matching proxy..."
+    Write-Host "[..] Building matching proxy (forced clean build)..."
     & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
     if ($LASTEXITCODE -ne 0) {
         Stop-WithPause "Matching build failed." $LASTEXITCODE
@@ -312,6 +314,14 @@ $builtDll = Join-Path $RepoRoot "Release\spider.dll"
 if (-not (Test-Path $builtDll)) {
     Stop-WithPause "Build completed but Release\spider.dll was not produced."
 }
+
+$builtInfo = Get-Item -LiteralPath $builtDll
+if ($builtInfo.LastWriteTimeUtc -lt $buildStartedUtc.AddSeconds(-2)) {
+    Stop-WithPause ("Build returned success, but Release\spider.dll was not freshly regenerated. " +
+        "DLL timestamp: " + $builtInfo.LastWriteTimeUtc.ToString("o") +
+        "; build started: " + $buildStartedUtc.ToString("o"))
+}
+Write-Host ("[OK] Fresh DLL timestamp: " + $builtInfo.LastWriteTimeUtc.ToString("o"))
 
 $outDir = Join-Path $RepoRoot "out\matching"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
