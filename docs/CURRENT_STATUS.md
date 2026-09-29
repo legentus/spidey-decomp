@@ -1209,3 +1209,36 @@ User preference:
 - user will send all logs after every test; treat the complete log set as the standard test input.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat` then `TEST_LATEST_BUILD.bat`, and provide all generated logs.
+
+
+## MAJOR MILESTONE: reaches start screen; new crash is stack overflow — 2026-09-29
+
+Latest test at revision `172735331305286580fc1b76e1859c680f4fa77b`:
+- clean forced build/link succeeded;
+- proxy SHA-256 `3858F003D643B50DECAE2BA985AFF1FA4100AB2B44FEF1B20E65E81F1824C81E`;
+- EXE fingerprint unchanged;
+- compatibility patch installed successfully:
+  - push site `0x00515BA9`
+  - call site `0x00515BAD`
+  - target `DXINIT_DirectX8 = 0x004FDE90`
+  - argument changed `2 -> 3`;
+- game successfully passed DirectDraw initialization;
+- all splash screens played;
+- game reached the start/title screen;
+- pressing Enter/Start then crashed.
+
+New process exit code:
+- decimal `-1073741571`
+- NTSTATUS `0xC00000FD`
+- **STATUS_STACK_OVERFLOW**
+
+This is a new failure class and confirms the previous DirectDraw startup blocker is fixed/worked around.
+
+No `spidey-decomp-crash.log` was produced because the current vectored handler only logs `EXCEPTION_ACCESS_VIOLATION`.
+
+**ACTIVE NEXT STEP:**
+1. extend native crash diagnostics to handle `STATUS_STACK_OVERFLOW`;
+2. reserve emergency exception stack space early using `SetThreadStackGuarantee` when available;
+3. make the stack-overflow logging path minimal/safe;
+4. capture EIP/registers plus a bounded stack window at the overflow;
+5. trace the title/start-screen transition in source to identify likely recursion/re-entry caused by an active reconstructed patch.
