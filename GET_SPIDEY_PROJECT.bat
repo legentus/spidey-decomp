@@ -27,6 +27,7 @@ if not defined GIT_EXE (
 )
 
 :HAVE_GIT
+for %%D in ("%GIT_EXE%") do set "PATH=%%~dpD;%PATH%"
 echo [OK] Git:
 echo   %GIT_EXE%
 echo.
@@ -55,7 +56,7 @@ if exist "%TARGET_DIR%" (
 )
 
 echo [..] Cloning development branch...
-"%GIT_EXE%" clone --branch dev --single-branch https://github.com/legentus/spidey-decomp.git "%TARGET_DIR%"
+git.exe clone --branch dev --single-branch https://github.com/legentus/spidey-decomp.git "%TARGET_DIR%"
 if errorlevel 1 goto :GIT_FAIL
 goto :PROJECT_READY
 
@@ -64,33 +65,33 @@ echo [OK] Existing project clone found.
 pushd "%TARGET_DIR%"
 
 set "DIRTY="
-for /f "delims=" %%A in ('"%GIT_EXE%" status --porcelain --untracked-files=no 2^>nul') do set "DIRTY=1"
+for /f "delims=" %%A in ('git.exe status --porcelain --untracked-files=no 2^>nul') do set "DIRTY=1"
 if defined DIRTY (
     echo [ERROR] Tracked local files have uncommitted changes.
     echo The updater will not overwrite or stash them automatically.
     echo.
-    "%GIT_EXE%" status --short
+    git.exe status --short
     popd
     goto :FAIL
 )
 
 echo [..] Fetching latest dev branch...
-"%GIT_EXE%" fetch origin dev
+git.exe fetch origin dev
 if errorlevel 1 (
     popd
     goto :GIT_FAIL
 )
 
-"%GIT_EXE%" show-ref --verify --quiet refs/heads/dev
+git.exe show-ref --verify --quiet refs/heads/dev
 if errorlevel 1 (
     echo [..] Creating local dev branch from origin/dev...
-    "%GIT_EXE%" checkout -b dev --track origin/dev
+    git.exe checkout -b dev --track origin/dev
     if errorlevel 1 (
         popd
         goto :GIT_FAIL
     )
 ) else (
-    "%GIT_EXE%" checkout dev
+    git.exe checkout dev
     if errorlevel 1 (
         popd
         goto :GIT_FAIL
@@ -98,13 +99,13 @@ if errorlevel 1 (
 )
 
 echo [..] Fast-forwarding to origin/dev...
-"%GIT_EXE%" pull --ff-only origin dev
+git.exe pull --ff-only origin dev
 if errorlevel 1 (
     popd
     goto :GIT_FAIL
 )
 
-"%GIT_EXE%" submodule update --init --recursive
+git.exe submodule update --init --recursive
 if errorlevel 1 (
     popd
     goto :GIT_FAIL
