@@ -215,3 +215,22 @@ New design:
 - Keep future `UPDATE_PROJECT.bat` able to use the bundled portable Git when system Git is unavailable.
 
 This should make the project self-contained on a clean Windows machine.
+
+
+### Portable MinGit bootstrap implemented
+
+Verified official package used by the bootstrap:
+- release: `git-for-windows/git v2.56.0.windows.1`
+- asset: `MinGit-2.56.0-64-bit.zip`
+- SHA-256: `064b440ff870ed5198527e8f3a92cdf5bd2fd0fedf5e718af95e3fdaddeff718`
+
+Committed:
+- `GET_SPIDEY_PROJECT.bat` switched from installer/winget flow to verified portable MinGit: `c9d9210e66102e10d550dcf203c07c7fe710455e`
+- `UPDATE_PROJECT.bat` now also detects the private portable Git location: `18784b2d615b4e2bb393a3a4e5bb37e192070be2`
+
+Portable Git location:
+`%LOCALAPPDATA%\Spidey2000Dev\MinGit`
+
+No administrator rights, system-wide Git install, or persistent PATH modification should be required.
+
+**Next user action:** run the new portable-MinGit bootstrap. If it fails, capture all output; the expected progression is download -> SHA-256 verify -> extract -> clone `dev` -> first-time game path setup.
