@@ -534,3 +534,17 @@ Conclusion:
 - automatic mounting works;
 - a plain Windows-mounted ISO does not satisfy the game's original CD validation;
 - next investigation is to determine what disc characteristics the retail check expects (for example data layout, volume identity, mixed-mode/audio TOC, or another property) and whether the current ISO representation preserves them.
+
+
+## ISO mount compatibility test result — 2026-09-29
+
+User confirmed the configured ISO mounted successfully as drive I:, the dev proxy built/installed, and the game launched, but the game still displayed its original disc-required dialog and exited with code 1.
+
+Current conclusion:
+- mounting works;
+- Windows built-in ISO presentation is not sufficient for this legacy game check on the tested system.
+
+Next step:
+- add a pre-launch compatibility diagnostic for the mounted optical drive;
+- support a fuller virtual optical-drive backend when the built-in Windows mount is not compatible;
+- preserve the current automatic mount/unmount workflow.
