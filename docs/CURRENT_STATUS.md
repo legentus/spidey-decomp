@@ -1413,3 +1413,34 @@ Next runtime test:
 - especially inspect `spidey-decomp-compat.log` for either:
   - `texture_hash_table verified retail_base=0x006B70F8`, or
   - `texture_hash_table UNRESOLVED ... retail_code=...`.
+
+
+## Runtime assertion logging added for texture/menu diagnostics — 2026-09-29
+
+Additional diagnostics:
+- `776f2a8c3d57b750f8a2b2ddb2db054c7f6d3e74`
+  - `DoAssert` now preserves varargs formatting with `_vsnprintf`;
+  - console output now shows actual values instead of raw format strings;
+  - failed assertions are appended to `spidey-decomp-runtime.log`.
+- `84c98daaa30c0c23282c02c1a8c3882b7f45b5d7`
+  - latest-test launcher removes stale runtime log;
+  - copies fresh runtime log into the timestamped session;
+  - reports it as `[RUNTIME]`.
+
+Current test frontier:
+- DirectDraw startup compatibility remains solved by the built-in windowed path;
+- prior texture-lookup stack overflow is solved;
+- current focus is start-menu highlight texture lookup after Enter;
+- live retail texture hash-table resolver + safe retail default texture handling are implemented;
+- next run should reveal whether `0x006B70F8` is corroborated by retail code and whether the menu highlight texture is found in the live table.
+
+Next user action:
+- run `UPDATE_SPIDEY_PROJECT.bat`;
+- run `TEST_LATEST_BUILD.bat`;
+- reach the start screen and press Enter;
+- provide all generated logs, including:
+  - `spidey-decomp-compat.log`
+  - `spidey-decomp-runtime.log`
+  - `spidey-decomp-crash.log` if present
+  - `proxy-link-map.txt`
+  - launcher output/session/fingerprint files.
