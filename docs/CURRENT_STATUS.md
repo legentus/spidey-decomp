@@ -1262,3 +1262,29 @@ Next test:
 - reach the title screen;
 - press Enter once;
 - provide all generated logs, especially `spidey-decomp-crash.log`.
+
+
+## Stack overflow pinpointed at retail texture lookup — 2026-09-29
+
+Latest crash log:
+- exception: `0xC00000FD` (stack overflow);
+- EIP / exception address: `0x004C9460`;
+- ESP: `0x000C2000`;
+- stack contains an extremely repetitive alternating pattern:
+  - `0x1004D9DC`
+  - `0xE90B5F6E`
+  repeated throughout the captured window;
+- EBP chain is unreadable because the stack is exhausted.
+
+Important source correlation:
+- reconstructed `Spool_FindTextureEntry(u32 checksum)` is currently `@SMALLTODO`;
+- it explicitly calls retail address `0x004C9460` as a temporary fallback;
+- `patch_spool()` patches nearby spool functions including `0x004C9430` and `0x004C95C0`, but not `0x004C9460` itself.
+
+This strongly suggests the title/menu transition is entering a recursion/re-entry loop involving retail texture lookup and one of the reconstructed spool/texture functions.
+
+ACTIVE NEXT STEP:
+1. map retail `0x004C9460` in names/symbol data;
+2. locate all calls/references to `0x004C9460`;
+3. map proxy address/offset `0x1004D9DC` to a reconstructed function;
+4. remove the recursion at its source rather than increasing stack size.
