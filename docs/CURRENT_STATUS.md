@@ -435,3 +435,18 @@ Observed:
 - first install attempt failed at renaming retail `binkw32.dll` to `binkw32_.dll` with AccessDenied because the game is installed under Program Files (x86).
 
 **ACTIVE FIX:** TEST_LATEST_BUILD should detect that the configured game directory is not writable and automatically relaunch itself elevated once, then continue the update/build/install/launch workflow. The user should not have to manually right-click Run as administrator.
+
+
+### Automatic elevation fix committed
+
+Fix commit:
+`1339465e6da0741c4b1204712a3101c105ea1c0f`
+
+`tools/TEST_LATEST_BUILD.ps1` now:
+- probes write access to the configured game directory before build/install;
+- if the game directory is protected (observed under `C:\Program Files (x86)\Activision\Spider-Man`), automatically relaunches itself with UAC elevation;
+- resumes with `-PostUpdate -Elevated` to avoid re-running the updater unnecessarily;
+- confirms elevated write access before continuing;
+- preserves the same automatic build/install/launch workflow.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat` once to pull this fix, then run `TEST_LATEST_BUILD.bat`. Accept the Windows UAC prompt when it appears. Expected next frontier is actual proxy install + game launch.
