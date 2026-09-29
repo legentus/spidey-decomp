@@ -1348,3 +1348,68 @@ ACTIVE NEXT STEP:
 2. inspect the exact source operation at that symbol/offset;
 3. harden the missing-texture fallback so an absent checksum does not dereference an unavailable default texture;
 4. preserve logging of the missing checksum for later asset-table correctness work.
+
+
+## Start-menu highlight texture lookup corrected for hybrid retail/DLL state — 2026-09-29
+
+Latest runtime result:
+- previous texture-lookup stack overflow is gone;
+- pressing Enter reaches `PShell_DrawHighlight`;
+- missing checksum observed in crash stack: `0xE90B5F6E`;
+- new failure is `0xC0000005` inside DLL `Spool_FindTextureEntry(u32)` at `0x1004DB78`;
+- access target is `0x00000004`, consistent with dereferencing a null `SAnimFrame*` to read `pTexture`;
+- linker map resolves function start:
+  - `Spool_FindTextureEntry(u32) = 0x1004DB30`
+  - crash = function + `0x48`;
+- retail caller `0x0047A59E` maps to `PShell_DrawHighlight + 0xE`.
+
+Root hybrid-state issue:
+- reconstructed `TextureChecksumHashTable[512]` is DLL-owned state;
+- retail menu/asset loading is expected to populate the retail game's live hash table, not necessarily the DLL copy;
+- reconstructed `gAnimTable[13]` is also DLL-owned and is explicitly zeroed by `Bit_Init()`;
+- live retail animation table is already defined as `G_ANIM_TABLE = 0x0056EA64`;
+- therefore the old default fallback `gAnimTable[13]->pTexture` is unsafe in this hybrid runtime.
+
+Live texture-table inference:
+- `TextureChecksumHashTable` is 512 pointers = `0x800` bytes;
+- reconstructed declaration order places it immediately before live `G_LOWGRAPHICS = 0x006B78F8`;
+- inferred base is therefore `0x006B70F8`;
+- this base is NOT trusted blindly.
+
+Implementation commit:
+`0d3a720777cb35a0785839604ed7f21a14224ba3`
+
+New runtime behavior:
+1. inspect untouched retail `Spool_FindTextureEntry` at `0x004C9460` (known size 132 bytes);
+2. search those retail bytes for absolute address `0x006B70F8`;
+3. only if the retail function itself embeds that exact address, accept it as the verified live texture hash-table base;
+4. search the verified retail table first;
+5. search the DLL-owned reconstructed table second;
+6. on genuine miss, use live `G_ANIM_TABLE[13]` as default first, then DLL `gAnimTable[13]` only if populated;
+7. log resolver state and genuine misses to `spidey-decomp-compat.log`;
+8. if the inferred base is not corroborated by retail code, do not use it and dump the full 132-byte retail function to the compat log for exact follow-up analysis;
+9. string texture lookup now reads live `G_TEXTUREENTRIES` instead of the DLL copy.
+
+Secondary hardening commit:
+`7a28adb2e2d7b2b9efe1ec07cee7424086a51885`
+- `Spool_TextureAccess` no longer directly dereferences DLL `gAnimTable[13]`;
+- it uses the same safe default helper;
+- if no default exists, returns `-1` instead of dereferencing null.
+
+Static verification passed:
+- live hash resolver present;
+- inferred base must be corroborated by retail machine code;
+- retail table is searched before DLL table;
+- local table remains as secondary path;
+- live retail animation table is preferred for defaults;
+- no remaining direct `gAnimTable[13]->pTexture` dereferences in spool.cpp;
+- string lookup uses live retail texture entries;
+- existing linker-map generation and collection remain enabled.
+
+Next runtime test:
+- update and run latest build;
+- reach start screen and press Enter;
+- provide all generated logs;
+- especially inspect `spidey-decomp-compat.log` for either:
+  - `texture_hash_table verified retail_base=0x006B70F8`, or
+  - `texture_hash_table UNRESOLVED ... retail_code=...`.
