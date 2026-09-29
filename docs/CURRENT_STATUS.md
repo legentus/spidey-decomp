@@ -629,3 +629,44 @@ The exact tested EXE fingerprint is:
 The cracked EXE preserves the expected fixed-address layout at a coarse PE level.
 
 **ACTIVE FIX:** make TEST_LATEST_BUILD force a clean relink/rebuild whenever source revision changes and verify that the output DLL timestamp/hash changed when compilation occurred. Also replace the overwriteable unhandled-exception filter with a first-priority vectored exception handler filtered to access violations.
+
+
+## Stale-DLL root cause fixed; vectored crash capture ready — 2026-09-29
+
+Analysis of the previous test showed the diagnostic code had not actually been linked into the DLL that ran:
+- NMAKE recompiled `main.cpp`;
+- no `link.exe` step followed;
+- proxy SHA-256 remained exactly `5508A0BE8D13CE694BEEEED14CB0F5ACFF30FF2D92AA7BD4233A5A0D9AD99CDC`;
+- therefore `Release\spider.dll` was stale and the missing crash log was expected.
+
+Fixes now active:
+- `build.bat` supports `SPIDEY_FORCE_CLEAN`;
+- `TEST_LATEST_BUILD.ps1` forces a clean matching build for every test;
+- test runner verifies `Release\spider.dll` was freshly regenerated after build start;
+- stale DLLs are rejected instead of staged;
+- native crash logger now uses a first-priority vectored exception handler when available;
+- vectored API is resolved dynamically for compatibility with the preserved Visual C++ 6 headers;
+- handler only logs access violations;
+- log records:
+  - exception address/code;
+  - read/write/execute operation;
+  - invalid target address;
+  - fault module/base/offset;
+  - x86 registers;
+  - 16 stack DWORDs;
+- fallback top-level exception filter remains if vectored handlers are unavailable.
+
+Relevant commits:
+- `68a8192f1bf858152bbacf458f72280cd44d5d77` — forced-clean support;
+- `4e805ffce4f42cc66213c820e7e60d35f80c53d4` — clean test build + fresh-DLL validation;
+- `dcf07ccc811aff34939eaa3eabc8b162baff8add` — repaired VS6-compatible vectored crash handler;
+- `b817c98657be1a477996cb2c145e47b08c0c9cfe` — reliable CLEAN failure propagation.
+
+Static verification passed:
+- no stale old handler symbol;
+- no duplicated crash-handler tail;
+- forced-clean path present once;
+- fresh-DLL check present;
+- fingerprint and crash-log collection paths present.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. The build should now visibly perform a full CLEAN, compile, and `link.exe`. The proxy SHA should differ from the stale `5508A0BE...` build. After the crash, return the launcher output and `spidey-decomp-crash.log` from the timestamped session folder.
