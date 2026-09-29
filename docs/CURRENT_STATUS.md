@@ -1143,3 +1143,26 @@ Interpretation for next run:
 - if the exact same error remains, exclusive SetDisplayMode itself is unsupported and the next fix should move to windowed/borderless DirectDraw initialization instead of color-depth retrying.
 
 **Next user action:** update and rerun `TEST_LATEST_BUILD.bat`. User will provide all generated logs by default.
+
+
+## 32-bpp retail probe still E_NOTIMPL — exclusive fullscreen path is the blocker — 2026-09-29
+
+Latest test at revision `377991e26604e6fdaa23dda955a38a732ba05882`:
+- clean forced rebuild/link succeeded;
+- proxy SHA-256 `36434A263AD9921061F9DC4435A1DDF6F653D43215706A83C94C84F577258480`;
+- EXE fingerprint unchanged;
+- live retail code confirms the direct bpp patch installed:
+  `BA 20 00 00 00 90` = `mov edx,32; nop`;
+- the original retail SetDisplayMode vtable call remains intact;
+- despite forcing 32 bpp, the exact same D3D error remains:
+  - HRESULT `0x80004001` / DDERR_UNSUPPORTED / E_NOTIMPL
+  - original `DXinit.cpp` line 1005
+  - same error-report call site;
+- secondary cleanup crash remains `DXSOUND_ShutDown()+0x7` null read.
+
+Conclusion:
+- 16-bit color depth is NOT the compatibility blocker;
+- exclusive fullscreen `IDirectDraw7::SetDisplayMode` itself is unsupported/failing on this environment;
+- stop testing alternate bpp values.
+
+**ACTIVE NEXT STEP:** identify and patch the retail branch that selects the game's existing windowed DirectDraw path (`gDxOptionRelated`) instead of the exclusive fullscreen path. Reuse the game's own windowed surface/clipper code rather than suppressing SetDisplayMode errors or inventing a new renderer path.
