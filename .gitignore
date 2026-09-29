@@ -17,3 +17,5 @@ tags
 
 # Local machine configuration
 spidey_local_config.bat
+LOCAL_DEV_REVISION.txt
+logs/
