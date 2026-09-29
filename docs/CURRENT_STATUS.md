@@ -234,3 +234,19 @@ Portable Git location:
 No administrator rights, system-wide Git install, or persistent PATH modification should be required.
 
 **Next user action:** run the new portable-MinGit bootstrap. If it fails, capture all output; the expected progression is download -> SHA-256 verify -> extract -> clone `dev` -> first-time game path setup.
+
+
+## Bootstrap Fix #3 — Remove PowerShell Dependency — 2026-09-29
+
+User's Windows environment does not expose `powershell.exe`, so the portable-MinGit bootstrap stopped before download.
+
+**New bootstrap rule:** no PowerShell dependency.
+
+Next implementation will use only Windows command-line tools expected on current Windows builds:
+- `curl.exe` for download
+- `certutil.exe -hashfile ... SHA256` for checksum verification
+- `tar.exe -xf` for ZIP extraction
+
+If any of those are missing, the bootstrap will print exactly which tool is unavailable rather than failing generically.
+
+Goal remains: zero manual prerequisites and no admin/system-wide Git install.
