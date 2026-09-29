@@ -865,11 +865,28 @@ i32 Spool_TextureAccess(
 	if (!gSpoolLogFailedTextureAccess)
 	{
 		print_if_false(0, "Can't find texture from checksum %ld", checksum);
-		*ppTexture = gAnimTable[13]->pTexture;
+
+		Texture* pDefault =
+			SpideyGetDefaultTexture();
+
+		*ppTexture =
+			pDefault;
+
+		if (pDefault)
+		{
+			accessLog(
+					"Create Texture Access Fails [DEFAULT]: csum=%8.8X, rgn=%i, addr=0x%8.8X\r\n",
+					checksum,
+					pDefault->mRegion,
+					ppTexture);
+			return pDefault->mRegion;
+		}
+
 		accessLog(
-				"Create Texture Access Fails [NOT FOUND]: csum=%8.8X, rgn=%i, addr=0x%8.8X\r\n",
-				checksum, gAnimTable[13]->pTexture->mRegion, ppTexture);
-		return gAnimTable[13]->pTexture->mRegion;
+				"Create Texture Access Fails [NO DEFAULT]: csum=%8.8X, addr=0x%8.8X\r\n",
+				checksum,
+				ppTexture);
+		return -1;
 	}
 
 	accessLog("Create Texture Access Fails [NOT FOUND]: csum=%8.8X, addr=0x%8.8X\r\n", checksum, ppTexture);
