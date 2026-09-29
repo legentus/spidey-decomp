@@ -31,6 +31,111 @@ function Test-DirectoryWritable([string]$Path) {
     }
 }
 
+function Get-PeFingerprint([string]$Path) {
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
+    $length = (Get-Item -LiteralPath $Path).Length
+
+    $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $br = New-Object System.IO.BinaryReader($fs)
+
+    try {
+        if ($br.ReadUInt16() -ne 0x5A4D) {
+            throw "Missing MZ header."
+        }
+
+        $fs.Position = 0x3C
+        $peOffset = $br.ReadInt32()
+        $fs.Position = $peOffset
+
+        if ($br.ReadUInt32() -ne 0x00004550) {
+            throw "Missing PE signature."
+        }
+
+        $machine = $br.ReadUInt16()
+        $numberOfSections = $br.ReadUInt16()
+        $timeDateStamp = $br.ReadUInt32()
+        [void]$br.ReadUInt32()
+        [void]$br.ReadUInt32()
+        $sizeOfOptionalHeader = $br.ReadUInt16()
+        $characteristics = $br.ReadUInt16()
+
+        $optionalStart = $fs.Position
+        $magic = $br.ReadUInt16()
+        if ($magic -ne 0x10B) {
+            throw ("Expected PE32 executable, optional-header magic was 0x{0:X4}." -f $magic)
+        }
+
+        $fs.Position = $optionalStart + 16
+        $entryPoint = $br.ReadUInt32()
+
+        $fs.Position = $optionalStart + 28
+        $imageBase = $br.ReadUInt32()
+
+        $fs.Position = $optionalStart + 56
+        $sizeOfImage = $br.ReadUInt32()
+
+        $sectionTable = $optionalStart + $sizeOfOptionalHeader
+        $sections = @()
+
+        for ($i = 0; $i -lt $numberOfSections; $i++) {
+            $fs.Position = $sectionTable + ($i * 40)
+            $nameBytes = $br.ReadBytes(8)
+            $name = ([System.Text.Encoding]::ASCII.GetString($nameBytes)).Trim([char]0)
+            $virtualSize = $br.ReadUInt32()
+            $virtualAddress = $br.ReadUInt32()
+            $rawSize = $br.ReadUInt32()
+            $rawPointer = $br.ReadUInt32()
+            $sections += [PSCustomObject]@{
+                Name = $name
+                VirtualSize = $virtualSize
+                VirtualAddress = $virtualAddress
+                RawSize = $rawSize
+                RawPointer = $rawPointer
+            }
+        }
+
+        return [PSCustomObject]@{
+            Sha256 = $hash
+            Length = $length
+            Machine = $machine
+            TimeDateStamp = $timeDateStamp
+            EntryPointRva = $entryPoint
+            ImageBase = $imageBase
+            SizeOfImage = $sizeOfImage
+            Characteristics = $characteristics
+            Sections = $sections
+        }
+    } finally {
+        $br.Close()
+        $fs.Close()
+    }
+}
+
+function Write-PeFingerprint([string]$Path, [string]$OutputPath) {
+    $pe = Get-PeFingerprint $Path
+
+    $lines = @(
+        ("path=" + $Path),
+        ("sha256=" + $pe.Sha256),
+        ("file_size=" + $pe.Length),
+        ("machine=0x{0:X4}" -f $pe.Machine),
+        ("timestamp=0x{0:X8}" -f $pe.TimeDateStamp),
+        ("entrypoint_rva=0x{0:X8}" -f $pe.EntryPointRva),
+        ("image_base=0x{0:X8}" -f $pe.ImageBase),
+        ("size_of_image=0x{0:X8}" -f $pe.SizeOfImage),
+        ("characteristics=0x{0:X4}" -f $pe.Characteristics),
+        ""
+    )
+
+    foreach ($s in $pe.Sections) {
+        $lines += ("section={0} va=0x{1:X8} vsize=0x{2:X8} raw=0x{3:X8} rawsize=0x{4:X8}" -f
+            $s.Name, $s.VirtualAddress, $s.VirtualSize, $s.RawPointer, $s.RawSize)
+    }
+
+    $lines | Set-Content -Path $OutputPath -Encoding ASCII
+    return $pe
+}
+
 function Relaunch-Elevated {
     $psExe = (Get-Process -Id $PID).Path
     $argLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -PostUpdate -Elevated'
@@ -47,44 +152,15 @@ function Relaunch-Elevated {
     }
 }
 
-function Get-LocalConfigValue([string]$Name) {
+function Read-LocalGameDir {
     $configPath = Join-Path $RepoRoot "spidey_local_config.bat"
-    if (-not (Test-Path $configPath)) {
-        return $null
-    }
-
-    $escaped = [regex]::Escape($Name)
-    foreach ($line in Get-Content $configPath) {
-        if ($line -match ('^\s*set\s+"?' + $escaped + '=(.+?)"?\s*$')) {
-            return $Matches[1].Trim('"')
-        }
-    }
-
-    return $null
-}
-
-function Set-LocalConfigValue([string]$Name, [string]$Value) {
-    $configPath = Join-Path $RepoRoot "spidey_local_config.bat"
-    $lines = @()
 
     if (Test-Path $configPath) {
-        $lines = @(Get-Content $configPath)
-    }
-
-    if ($lines.Count -eq 0) {
-        $lines = @("@echo off")
-    }
-
-    $escaped = [regex]::Escape($Name)
-    $kept = @($lines | Where-Object { $_ -notmatch ('^\s*set\s+"?' + $escaped + '=') })
-    $kept += ('set "' + $Name + '=' + $Value + '"')
-    $kept | Set-Content -Path $configPath -Encoding ASCII
-}
-
-function Read-LocalGameDir {
-    $configured = Get-LocalConfigValue "SPIDEY_GAME_DIR"
-    if ($configured) {
-        return $configured
+        foreach ($line in Get-Content $configPath) {
+            if ($line -match '^\s*set\s+"?SPIDEY_GAME_DIR=(.+?)"?\s*$') {
+                return $Matches[1].Trim('"')
+            }
+        }
     }
 
     Write-Host ""
@@ -101,276 +177,12 @@ function Read-LocalGameDir {
         Stop-WithPause "SpideyPC.exe was not found in '$full'."
     }
 
-    Set-LocalConfigValue "SPIDEY_GAME_DIR" $full
+    @(
+        "@echo off",
+        ('set "SPIDEY_GAME_DIR=' + $full + '"')
+    ) | Set-Content -Path $configPath -Encoding ASCII
+
     return $full
-}
-
-function Read-LocalDiscImage {
-    $configured = Get-LocalConfigValue "SPIDEY_DISC_IMAGE"
-
-    if ($configured -and (Test-Path -LiteralPath $configured)) {
-        return [System.IO.Path]::GetFullPath($configured)
-    }
-
-    if ($configured) {
-        Write-Host ""
-        Write-Host "[WARNING] Configured Spider-Man disc image was not found:"
-        Write-Host "  $configured"
-    }
-
-    Write-Host ""
-    Write-Host "Disc image setup"
-    Write-Host "Enter the path to an ISO image made from your Spider-Man game disc."
-    $imageInput = (Read-Host "Spider-Man ISO").Trim().Trim('"')
-
-    if (-not $imageInput) {
-        Stop-WithPause "No Spider-Man disc image was entered."
-    }
-
-    $full = [System.IO.Path]::GetFullPath($imageInput)
-    if (-not (Test-Path -LiteralPath $full)) {
-        Stop-WithPause "Disc image was not found at '$full'."
-    }
-
-    if ([System.IO.Path]::GetExtension($full).ToLowerInvariant() -ne ".iso") {
-        Stop-WithPause "Windows' built-in mounter requires an ISO image for this workflow. Selected file: '$full'."
-    }
-
-    Set-LocalConfigValue "SPIDEY_DISC_IMAGE" $full
-    return $full
-}
-
-function Find-VirtualCloneDrive {
-    $candidates = @()
-
-    try {
-        $appPath = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\VCDMount.exe" -ErrorAction SilentlyContinue
-        if ($appPath -and $appPath.'(default)') {
-            $candidates += [string]$appPath.'(default)'
-        }
-    } catch {
-    }
-
-    try {
-        $appPath32 = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\VCDMount.exe" -ErrorAction SilentlyContinue
-        if ($appPath32 -and $appPath32.'(default)') {
-            $candidates += [string]$appPath32.'(default)'
-        }
-    } catch {
-    }
-
-    $pf86 = [Environment]::GetFolderPath("ProgramFilesX86")
-    $pf = [Environment]::GetFolderPath("ProgramFiles")
-
-    if ($pf86) {
-        $candidates += (Join-Path $pf86 "Elaborate Bytes\VirtualCloneDrive\VCDMount.exe")
-    }
-    if ($pf) {
-        $candidates += (Join-Path $pf "Elaborate Bytes\VirtualCloneDrive\VCDMount.exe")
-    }
-
-    foreach ($candidate in ($candidates | Select-Object -Unique)) {
-        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
-            return [System.IO.Path]::GetFullPath($candidate)
-        }
-    }
-
-    return $null
-}
-
-function Ensure-LegacyMciType {
-    if ("SpideyLegacyMci" -as [type]) {
-        return
-    }
-
-    Add-Type @"
-using System;
-using System.Text;
-using System.Runtime.InteropServices;
-
-public static class SpideyLegacyMci
-{
-    [DllImport("winmm.dll", CharSet = CharSet.Auto)]
-    public static extern int mciSendString(
-        string command,
-        StringBuilder returnValue,
-        int returnLength,
-        IntPtr winHandle);
-
-    [DllImport("winmm.dll", CharSet = CharSet.Auto)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool mciGetErrorString(
-        int errorCode,
-        StringBuilder errorText,
-        int errorTextSize);
-}
-"@
-}
-
-function Get-MciErrorText([int]$Code) {
-    Ensure-LegacyMciType
-    $buffer = New-Object System.Text.StringBuilder 512
-    if ([SpideyLegacyMci]::mciGetErrorString($Code, $buffer, $buffer.Capacity)) {
-        return $buffer.ToString()
-    }
-    return ("MCI error " + $Code)
-}
-
-function Test-LegacyCdInterface {
-    Ensure-LegacyMciType
-
-    $cdDrives = @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::CDRom })
-    if ($cdDrives.Count -eq 0) {
-        return [PSCustomObject]@{
-            Success = $false
-            DriveLetter = $null
-            Error = "No CD-ROM drives are visible to Windows."
-        }
-    }
-
-    $attempts = @()
-
-    foreach ($drive in $cdDrives) {
-        $root = $drive.Name.TrimEnd('\')
-        $alias = "spideycd" + ([Guid]::NewGuid().ToString("N").Substring(0, 8))
-        $buffer = New-Object System.Text.StringBuilder 512
-        $openCommand = 'open "' + $root + '" type cdaudio alias ' + $alias + ' shareable wait'
-        $openResult = [SpideyLegacyMci]::mciSendString($openCommand, $buffer, $buffer.Capacity, [IntPtr]::Zero)
-
-        if ($openResult -eq 0) {
-            $statusBuffer = New-Object System.Text.StringBuilder 512
-            $statusResult = [SpideyLegacyMci]::mciSendString(
-                ("status " + $alias + " number of tracks wait"),
-                $statusBuffer,
-                $statusBuffer.Capacity,
-                [IntPtr]::Zero)
-
-            [void][SpideyLegacyMci]::mciSendString(
-                ("close " + $alias + " wait"),
-                $buffer,
-                $buffer.Capacity,
-                [IntPtr]::Zero)
-
-            if ($statusResult -eq 0) {
-                return [PSCustomObject]@{
-                    Success = $true
-                    DriveLetter = $root
-                    Error = $null
-                    TrackCount = $statusBuffer.ToString()
-                }
-            }
-
-            $attempts += ($root + " opened, but MCI status failed: " + (Get-MciErrorText $statusResult))
-        } else {
-            $attempts += ($root + " MCI open failed: " + (Get-MciErrorText $openResult))
-        }
-    }
-
-    return [PSCustomObject]@{
-        Success = $false
-        DriveLetter = $null
-        Error = ($attempts -join "; ")
-    }
-}
-
-function Mount-SpideyDiscImage([string]$ImagePath) {
-    $vcdMount = Find-VirtualCloneDrive
-
-    if ($vcdMount) {
-        Write-Host "[INFO] Virtual CloneDrive detected:"
-        Write-Host ("  " + $vcdMount)
-        Write-Host "[..] Mounting Spider-Man disc image through Virtual CloneDrive..."
-
-        & $vcdMount "/d=0" $ImagePath
-        if ($LASTEXITCODE -ne 0) {
-            Stop-WithPause "Virtual CloneDrive could not mount the Spider-Man disc image."
-        }
-
-        Start-Sleep -Milliseconds 1200
-
-        return [PSCustomObject]@{
-            ImagePath = $ImagePath
-            MountedByUs = $true
-            DriveLetter = $null
-            Backend = "VirtualCloneDrive"
-            VcdMount = $vcdMount
-            VcdUnit = 0
-        }
-    }
-
-    if (-not (Get-Command Get-DiskImage -ErrorAction SilentlyContinue) -or
-        -not (Get-Command Mount-DiskImage -ErrorAction SilentlyContinue)) {
-        Stop-WithPause "No supported disc-image mounter is available."
-    }
-
-    $diskImage = Get-DiskImage -ImagePath $ImagePath -ErrorAction SilentlyContinue
-    $mountedByUs = $false
-
-    if ($diskImage -and $diskImage.Attached) {
-        Write-Host "[OK] Spider-Man disc image is already mounted by Windows."
-    } else {
-        Write-Host "[..] Mounting Spider-Man disc image with Windows..."
-        Mount-DiskImage -ImagePath $ImagePath -StorageType ISO -ErrorAction Stop | Out-Null
-        $mountedByUs = $true
-    }
-
-    Start-Sleep -Milliseconds 750
-
-    $driveLetter = $null
-    try {
-        $volume = Get-DiskImage -ImagePath $ImagePath |
-            Get-Volume |
-            Where-Object { $_.DriveLetter } |
-            Select-Object -First 1
-
-        if ($volume) {
-            $driveLetter = [string]$volume.DriveLetter
-            Write-Host ("[OK] Spider-Man disc mounted as " + $driveLetter + ":")
-        } else {
-            Write-Host "[OK] Spider-Man disc image mounted."
-        }
-    } catch {
-        Write-Host "[OK] Spider-Man disc image mounted."
-    }
-
-    return [PSCustomObject]@{
-        ImagePath = $ImagePath
-        MountedByUs = $mountedByUs
-        DriveLetter = $driveLetter
-        Backend = "Windows"
-        VcdMount = $null
-        VcdUnit = $null
-    }
-}
-
-function Dismount-SpideyDiscImage($MountInfo) {
-    if (-not $MountInfo -or -not $MountInfo.MountedByUs) {
-        return
-    }
-
-    if ($MountInfo.Backend -eq "VirtualCloneDrive") {
-        try {
-            Write-Host "[..] Unmounting Spider-Man disc image from Virtual CloneDrive..."
-            & $MountInfo.VcdMount ("/d=" + $MountInfo.VcdUnit) "/u"
-            Write-Host "[OK] Spider-Man disc image unmounted."
-        } catch {
-            Write-Host "[WARNING] Could not unmount the Virtual CloneDrive image: $($_.Exception.Message)"
-        }
-        return
-    }
-
-    if (-not (Get-Command Dismount-DiskImage -ErrorAction SilentlyContinue)) {
-        Write-Host "[WARNING] Dismount-DiskImage is unavailable; leaving the ISO mounted."
-        return
-    }
-
-    try {
-        Write-Host "[..] Unmounting Spider-Man disc image..."
-        Dismount-DiskImage -ImagePath $MountInfo.ImagePath -ErrorAction Stop | Out-Null
-        Write-Host "[OK] Spider-Man disc image unmounted."
-    } catch {
-        Write-Host "[WARNING] Could not unmount the Spider-Man disc image: $($_.Exception.Message)"
-    }
 }
 
 function Ensure-MatchingToolchain {
@@ -448,9 +260,6 @@ Write-Host "[TEST] Revision $revision"
 $gameDir = Read-LocalGameDir
 Write-Host "[INFO] Game: $gameDir"
 
-$discImage = Read-LocalDiscImage
-Write-Host "[INFO] Disc image: $discImage"
-
 $gameExe = Join-Path $gameDir "SpideyPC.exe"
 $liveBink = Join-Path $gameDir "binkw32.dll"
 $originalBink = Join-Path $gameDir "binkw32_.dll"
@@ -470,6 +279,16 @@ if ($Elevated) {
     Write-Host "[OK] Elevated access confirmed for the game folder."
 }
 
+Write-Host "[..] Fingerprinting SpideyPC.exe..."
+try {
+    $peInfo = Write-PeFingerprint $gameExe (Join-Path $sessionDir "game-exe-fingerprint.txt")
+    Write-Host ("[INFO] EXE SHA-256: " + $peInfo.Sha256)
+    Write-Host ("[INFO] PE timestamp: 0x{0:X8}" -f $peInfo.TimeDateStamp)
+    Write-Host ("[INFO] Image size: 0x{0:X8}" -f $peInfo.SizeOfImage)
+} catch {
+    Stop-WithPause ("Failed to fingerprint SpideyPC.exe: " + $_.Exception.Message)
+}
+
 $toolchainRoot = Ensure-MatchingToolchain
 Write-Host "[OK] Matching toolchain: $toolchainRoot"
 
@@ -482,6 +301,7 @@ if ($hadRuntimeHeader) {
 
 try {
     Set-Content -Path $runtimeHeader -Value ('#define RUNTIME_VERSION "' + $revision + '"') -Encoding ASCII
+
     $env:SPIDEY_MSVC_ROOT = $toolchainRoot
 
     Write-Host ""
@@ -540,50 +360,36 @@ New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
     "revision=$revision",
     "proxy_sha256=$hash",
     "game=$gameExe",
-    "disc_image=$discImage",
     "started=$(Get-Date -Format o)"
 ) | Set-Content -Path (Join-Path $sessionDir "test-session.txt") -Encoding UTF8
 
-Write-Host ""
-Write-Host "[DISC] Preparing Spider-Man disc image..."
-$mountInfo = Mount-SpideyDiscImage $discImage
-
-Write-Host "[DISC] Checking legacy MCI CD interface..."
-$mciCheck = Test-LegacyCdInterface
-
-if ($mciCheck.Success) {
-    Write-Host ("[OK] Legacy MCI sees CD media on " + $mciCheck.DriveLetter)
-    if ($mciCheck.TrackCount) {
-        Write-Host ("[INFO] MCI reports " + $mciCheck.TrackCount + " track(s).")
-    }
-} else {
-    Dismount-SpideyDiscImage $mountInfo
-
-    if ($mountInfo.Backend -eq "Windows") {
-        Stop-WithPause ("Windows mounted the ISO, but the legacy MCI CD interface cannot use it. " +
-            "Install Virtual CloneDrive, then run TEST_LATEST_BUILD.bat again. MCI detail: " + $mciCheck.Error)
-    }
-
-    Stop-WithPause ("Virtual CloneDrive mounted the image, but the legacy MCI CD interface still rejected it. " +
-        "The image may not preserve the disc layout expected by this retail build. MCI detail: " + $mciCheck.Error)
+$crashLog = Join-Path $gameDir "spidey-decomp-crash.log"
+if (Test-Path $crashLog) {
+    Remove-Item -LiteralPath $crashLog -Force -ErrorAction SilentlyContinue
 }
 
-try {
-    Write-Host ""
-    Write-Host "[RUN] $gameExe"
-    Write-Host "[LOG] $sessionDir"
-    $gameProcess = Start-Process -FilePath $gameExe -WorkingDirectory $gameDir -PassThru
+Write-Host ""
+Write-Host "[RUN] $gameExe"
+Write-Host "[LOG] $sessionDir"
+$gameProcess = Start-Process -FilePath $gameExe -WorkingDirectory $gameDir -PassThru
 
-    Write-Host ""
-    Write-Host "[OK] Latest dev build installed and launched." -ForegroundColor Green
-    Write-Host "[INFO] Keeping the Spider-Man disc image mounted until the game exits."
-    Write-Host "If it crashes or validation fails, send the complete spidey-decomp console output."
-    Write-Host ""
+Write-Host ""
+Write-Host "[OK] Latest dev build installed and launched." -ForegroundColor Green
+Write-Host "[INFO] Waiting for Spider-Man to exit so crash diagnostics can be collected."
+Write-Host ""
 
-    $gameProcess.WaitForExit()
-    Write-Host ("[INFO] Spider-Man exited with code " + $gameProcess.ExitCode + ".")
-} finally {
-    Dismount-SpideyDiscImage $mountInfo
+$gameProcess.WaitForExit()
+$exitCode = $gameProcess.ExitCode
+Write-Host ("[INFO] Spider-Man exited with code " + $exitCode + ".")
+
+if (Test-Path $crashLog) {
+    Copy-Item -LiteralPath $crashLog -Destination (Join-Path $sessionDir "spidey-decomp-crash.log") -Force
+    Write-Host "[CRASH] Native crash log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-crash.log"))
+}
+
+if ($exitCode -eq -1073741819) {
+    Write-Host "[CRASH] Exit code is 0xC0000005 (access violation)."
 }
 
 Write-Host ""
