@@ -1288,3 +1288,40 @@ ACTIVE NEXT STEP:
 2. locate all calls/references to `0x004C9460`;
 3. map proxy address/offset `0x1004D9DC` to a reconstructed function;
 4. remove the recursion at its source rather than increasing stack size.
+
+
+## Texture-lookup recursion fix implemented — 2026-09-29
+
+Crash evidence:
+- stack overflow occurs at retail `Spool_FindTextureEntry(u32)` = `0x004C9460`;
+- captured stack repeats the same DLL return address `0x1004D9DC` and checksum `0xE90B5F6E`, consistent with recursive re-entry through the temporary retail fallback.
+
+Source finding:
+- reconstructed `Spool_FindTextureEntry(u32 checksum)` contained:
+  `func_ptr func = (func_ptr)0x004C9460; return func(checksum);`
+- immediately after that unreachable return, the full hash-table lookup implementation was already present;
+- upstream currently contains the same temporary fallback, so no upstream fix exists to merge.
+
+Fix commit:
+- `d33111220ab81d2f6ad4b1597cac6f72f1597799`
+- removes the retail `0x004C9460` call-through;
+- activates the existing `TextureChecksumHashTable[checksum & 511]` traversal;
+- preserves the existing default-texture behavior.
+
+Future address-resolution tooling:
+- `d5d70161b5cc4d5a99bcc8724f0cc947e01ace02`: Release linker now emits `Release\spider.map`;
+- `9b407fb170283f3dc2c1daa9a9de266d2a3f62ba`: test launcher copies it into each session as `proxy-link-map.txt`.
+
+Static verification passed:
+- `0x004C9460` fallback is absent from the reconstructed checksum lookup;
+- hash-table traversal is reachable;
+- default texture fallback remains;
+- Release linker has /MAP enabled;
+- clean target removes stale map;
+- session logger captures the linker map.
+
+Next runtime test:
+- update and run the latest build;
+- let the game reach the title/menu normally;
+- do not assume Enter is required; simply note whether it crashes on its own or after input;
+- provide all generated logs, including the new `proxy-link-map.txt`.
