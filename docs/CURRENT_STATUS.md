@@ -1242,3 +1242,23 @@ No `spidey-decomp-crash.log` was produced because the current vectored handler o
 3. make the stack-overflow logging path minimal/safe;
 4. capture EIP/registers plus a bounded stack window at the overflow;
 5. trace the title/start-screen transition in source to identify likely recursion/re-entry caused by an active reconstructed patch.
+
+
+## Start-screen stack-overflow diagnostic frontier — 2026-09-29
+
+Latest runtime milestone:
+- game reaches the title/start screen successfully;
+- pressing Enter/Start causes process exit `0xC00000FD` (stack overflow);
+- previous DirectDraw startup failure is no longer the active blocker.
+
+Diagnostics added:
+- `53f5b503cedd7f07e80e924ab798eb57579eac52`: stack-overflow-aware native crash capture with reserved exception stack, extended stack dump, and EBP return-chain logging;
+- `3750f34e62c2be7c161665194402af28b05150f3`: launcher labels `0xC00000FD` explicitly.
+
+A source audit of the currently active reconstructed modules did not find the simplest direct self-recursion pattern.
+
+Next test:
+- update and rebuild;
+- reach the title screen;
+- press Enter once;
+- provide all generated logs, especially `spidey-decomp-crash.log`.
