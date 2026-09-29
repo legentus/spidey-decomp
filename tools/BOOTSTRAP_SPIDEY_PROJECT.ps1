@@ -25,6 +25,17 @@ Write-Host "Target:"
 Write-Host "  $target"
 Write-Host ""
 
+if (Test-Path $target) {
+    $existingItems = @(Get-ChildItem -Force -LiteralPath $target -ErrorAction SilentlyContinue)
+    $looksLikeSpideyProject =
+        (Test-Path (Join-Path $target "UPDATE_SPIDEY_PROJECT.bat")) -or
+        (Test-Path (Join-Path $target "TEST_LATEST_BUILD.bat"))
+
+    if ($existingItems.Count -gt 0 -and -not $looksLikeSpideyProject) {
+        Fail "Target folder is not empty and does not look like an existing Spider-Man dev project. Choose an empty folder."
+    }
+}
+
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $archiveUrl = "https://github.com/legentus/spidey-decomp/archive/refs/heads/dev.zip"
