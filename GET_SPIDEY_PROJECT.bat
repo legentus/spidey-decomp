@@ -7,7 +7,7 @@ echo   Spider-Man 2000 Developer Project - Bootstrap
 echo ============================================================
 echo.
 echo This BAT will:
-echo   1. Find or install Git for Windows automatically
+echo   1. Find Git or install a private portable MinGit copy
 echo   2. Clone or update legentus/spidey-decomp
 echo   3. Switch to the active dev branch
 echo   4. Start first-time game-folder setup if needed
@@ -16,13 +16,14 @@ echo.
 call :FIND_GIT
 if defined GIT_EXE goto :HAVE_GIT
 
-echo [..] Git was not found. Installing Git for Windows automatically...
-call :INSTALL_GIT
+echo [..] No usable Git installation found.
+echo [..] Setting up private portable MinGit - no admin rights required...
+call :INSTALL_PORTABLE_GIT
 if errorlevel 1 goto :FAIL
 
 call :FIND_GIT
 if not defined GIT_EXE (
-    echo [ERROR] Git installation completed but git.exe still could not be located.
+    echo [ERROR] Portable MinGit setup completed but git.exe was not found.
     goto :FAIL
 )
 
@@ -154,40 +155,63 @@ for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined GIT_EXE set "
 if not defined GIT_EXE if exist "%ProgramFiles%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles%\Git\cmd\git.exe"
 if not defined GIT_EXE if exist "%ProgramFiles(x86)%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles(x86)%\Git\cmd\git.exe"
 if not defined GIT_EXE if exist "%LocalAppData%\Programs\Git\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Programs\Git\cmd\git.exe"
+if not defined GIT_EXE if exist "%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe"
 exit /b 0
 
-:INSTALL_GIT
-where winget.exe >nul 2>&1
-if errorlevel 1 goto :GIT_FALLBACK
+:INSTALL_PORTABLE_GIT
+where powershell.exe >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Windows PowerShell was not found.
+    exit /b 1
+)
 
-echo [..] Using winget to install Git for Windows...
-winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements --silent
-call :FIND_GIT
-if defined GIT_EXE exit /b 0
+set "PORTABLE_ROOT=%LocalAppData%\Spidey2000Dev"
+set "PORTABLE_GIT=%PORTABLE_ROOT%\MinGit"
+set "PORTABLE_ZIP=%TEMP%\spidey-MinGit-2.56.0-64-bit.zip"
+set "PORTABLE_URL=https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.1/MinGit-2.56.0-64-bit.zip"
+set "PORTABLE_SHA256=064B440FF870ED5198527E8F3A92CDF5BD2FD0FEDF5E718AF95E3FDADDEFF718"
 
-:GIT_FALLBACK
-echo [..] winget did not provide Git. Falling back to the official Git for Windows release...
-set "GIT_INSTALL_PS1=%TEMP%\spidey-install-git-%RANDOM%.ps1"
+if exist "%PORTABLE_GIT%\cmd\git.exe" (
+    echo [OK] Portable MinGit is already present.
+    exit /b 0
+)
 
-> "%GIT_INSTALL_PS1%" echo $ErrorActionPreference = 'Stop'
->>"%GIT_INSTALL_PS1%" echo [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
->>"%GIT_INSTALL_PS1%" echo $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/git-for-windows/git/releases/latest' -Headers @{'User-Agent'='Spider-Man-2000-Dev-Bootstrap'}
->>"%GIT_INSTALL_PS1%" echo $asset = $release.assets ^| Where-Object { $_.name -match '^Git-.*-64-bit\.exe$' } ^| Select-Object -First 1
->>"%GIT_INSTALL_PS1%" echo if (-not $asset) { throw 'Could not find the current 64-bit Git for Windows installer.' }
->>"%GIT_INSTALL_PS1%" echo $installer = Join-Path $env:TEMP $asset.name
->>"%GIT_INSTALL_PS1%" echo Write-Host ('Downloading ' + $asset.name + ' ...')
->>"%GIT_INSTALL_PS1%" echo Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $installer -UseBasicParsing
->>"%GIT_INSTALL_PS1%" echo $p = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/NORESTART','/NOCANCEL','/SP-' -Wait -PassThru
->>"%GIT_INSTALL_PS1%" echo Remove-Item $installer -Force -ErrorAction SilentlyContinue
->>"%GIT_INSTALL_PS1%" echo exit $p.ExitCode
+if not exist "%PORTABLE_ROOT%" mkdir "%PORTABLE_ROOT%" >nul 2>&1
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%GIT_INSTALL_PS1%"
-set "PS_RESULT=%ERRORLEVEL%"
-del /q "%GIT_INSTALL_PS1%" >nul 2>&1
-if not "%PS_RESULT%"=="0" exit /b %PS_RESULT%
+echo [..] Downloading official portable MinGit...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%PORTABLE_URL%' -OutFile '%PORTABLE_ZIP%'"
+if errorlevel 1 (
+    echo [ERROR] MinGit download failed.
+    exit /b 1
+)
 
-call :FIND_GIT
-if not defined GIT_EXE exit /b 1
+echo [..] Verifying SHA-256...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$h=(Get-FileHash -Algorithm SHA256 -LiteralPath '%PORTABLE_ZIP%').Hash; if ($h -ne '%PORTABLE_SHA256%') { Write-Host 'Expected: %PORTABLE_SHA256%'; Write-Host ('Actual:   ' + $h); exit 2 }"
+if errorlevel 1 (
+    echo [ERROR] MinGit SHA-256 did not match.
+    del /q "%PORTABLE_ZIP%" >nul 2>&1
+    exit /b 1
+)
+
+if exist "%PORTABLE_GIT%" rmdir /s /q "%PORTABLE_GIT%"
+mkdir "%PORTABLE_GIT%" >nul 2>&1
+
+echo [..] Extracting portable MinGit...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; Expand-Archive -LiteralPath '%PORTABLE_ZIP%' -DestinationPath '%PORTABLE_GIT%' -Force"
+if errorlevel 1 (
+    echo [ERROR] MinGit extraction failed.
+    exit /b 1
+)
+
+del /q "%PORTABLE_ZIP%" >nul 2>&1
+
+if not exist "%PORTABLE_GIT%\cmd\git.exe" (
+    echo [ERROR] Extraction finished but cmd\git.exe was not found.
+    exit /b 1
+)
+
+echo [OK] Portable MinGit ready:
+echo   %PORTABLE_GIT%
 exit /b 0
 
 :GIT_FAIL
