@@ -1073,3 +1073,36 @@ Static verification passed:
 - DX logger still prints compatibility state.
 
 **Next user action:** update and rerun `TEST_LATEST_BUILD.bat`. Return the new `spidey-decomp-dxerror.log`; if behavior changes or a new crash appears, return all generated logs.
+
+
+## Full-block helper still not observed; switching to direct retail 32-bpp probe — 2026-09-29
+
+User will provide all generated logs for every test going forward; treat the full log set as the standard test handoff.
+
+Latest run at revision `f04d01c5ee21951abe2a10714fb9035c60f5c682`:
+- clean build/link succeeded;
+- proxy SHA-256 `57231C2CD56FDCA55E1673BEB0ADC6285D20640F52E9D54798273BBDC3AF4BAF`;
+- EXE fingerprint unchanged;
+- live instruction window proves the full 36-byte replacement is installed:
+  - retail block now begins with direct `E8 rel32`;
+  - followed by `mov edi,eax`;
+  - remaining bytes are NOP-filled;
+- DX logger nevertheless still reports `compat_state not_seen`;
+- retail mode globals remain `640x480x16`;
+- primary HRESULT remains `0x80004001`;
+- secondary cleanup crash remains unchanged at `DXSOUND_ShutDown()+0x7`.
+
+Conclusion:
+- stop spending test cycles on the DLL helper/detour path;
+- test the actual compatibility hypothesis using an in-place retail instruction edit with no cross-module call.
+
+**ACTIVE FIX:** restore the original SetDisplayMode argument/call block and patch only its first six bytes:
+- original: `8B 15 EC 78 6B 00` = `mov edx,[0x006B78EC]` (load requested bpp);
+- replacement: `BA 20 00 00 00 90` = `mov edx,32; nop`.
+
+All remaining retail instructions, argument pushes, COM vtable call, EDI assignment, and error handling stay untouched.
+
+Purpose of this probe:
+- conclusively determine whether 32-bpp SetDisplayMode works on the current Windows/DirectDraw stack;
+- if the line-1005 error disappears or moves, 16-bpp mode switching is the compatibility blocker;
+- if E_NOTIMPL remains at the same site, the blocker is SetDisplayMode/exclusive mode itself rather than color depth.
