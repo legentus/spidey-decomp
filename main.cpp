@@ -1029,31 +1029,19 @@ static void SpideyInstallWindowedDirectDrawCompat()
 	matchedPush[1] =
 		0x03;
 
-	long dxInitWrapperRel =
-		(long)(
-			(unsigned char*)SpideyDiagDXINITDirectX8 -
-			(matchedCall + 5));
-	*(long*)(matchedCall + 1) =
-		dxInitWrapperRel;
-
 	FlushInstructionCache(
 		GetCurrentProcess(),
 		matchedPush,
 		2);
-	FlushInstructionCache(
-		GetCurrentProcess(),
-		matchedCall,
-		5);
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX retail_target=0x%08lX wrapper=0x%08lX old_arg=2 new_arg=3\n",
+			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX target=0x%08lX old_arg=2 new_arg=3\n",
 			(unsigned long)matchedPush,
 			(unsigned long)matchedCall,
-			callTarget,
-			(unsigned long)SpideyDiagDXINITDirectX8);
+			callTarget);
 		fclose(f);
 	}
 
@@ -1648,29 +1636,14 @@ void game_patches(void)
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
 
-	SpideyRedirectDirectCalls(
-		0x004718B0,
-		(void*)SpideyDiagSFXInit,
-		"SFX_Init");
-	SpideyRedirectDirectCalls(
-		0x004719B0,
-		(void*)SpideyDiagSFXSpoolInLevel,
-		"SFX_SpoolInLevelSFX");
-
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
 	PATCH_PUSH_RET(0x004FC820, SpideyDiagDisplayD3DError);
 
-	PATCH_PUSH_RET(0x00501890, SpideyXInputSetupController);
-	PATCH_PUSH_RET(0x00501E50, SpideyXInputPollController);
-	PATCH_PUSH_RET(0x00501FB0, SpideyXInputGetControllerButtonState);
-	PATCH_PUSH_RET(0x00502210, SpideyXInputGetNumControllerButtons);
-	PATCH_PUSH_RET(0x00501FC0, SpideyXInputSetupForceFeedback);
-	PATCH_PUSH_RET(0x005021A0, SpideyXInputStartForceFeedback);
-	PATCH_PUSH_RET(0x005021E0, SpideyXInputStopForceFeedback);
-
-	// Retail initActionMaps: replace only the sprintf("button %i") call.
-	PATCH_CALL(0x0050D28C, SpideyXboxFormatButtonName);
+	// XInput/Xbox backend is compiled but intentionally not activated here.
+	// Re-enable its hooks only after the known-good startup baseline is
+	// reconfirmed; the 2026-09-29 combined feature test regressed to a
+	// black screen and later failed in the texture allocation path.
 #endif
 
 	patch_alloc();
