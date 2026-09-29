@@ -755,47 +755,14 @@ static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
 	return hr;
 }
 
-static HRESULT __cdecl SpideyCompatSetDisplayModeFromGlobals()
-{
-	LPDIRECTDRAW7 dd =
-		*(LPDIRECTDRAW7*)0x006B7900;
-
-	DWORD width =
-		*(DWORD*)0x006B78E4;
-	DWORD height =
-		*(DWORD*)0x006B78E8;
-	DWORD bpp =
-		*(DWORD*)0x006B78EC;
-
-	return SpideyCompatSetDisplayModeHelper(
-		dd,
-		width,
-		height,
-		bpp,
-		0,
-		0);
-}
-
 static void SpideyInstallSetDisplayModeCompat()
 {
 	unsigned char* site =
 		(unsigned char*)0x004FFB75;
 
-	const unsigned char expected[36] =
+	const unsigned char expected[6] =
 	{
-		0x8B, 0x15, 0xEC, 0x78, 0x6B, 0x00,
-		0xA1, 0x00, 0x79, 0x6B, 0x00,
-		0x53,
-		0x53,
-		0x8B, 0x08,
-		0x52,
-		0x8B, 0x15, 0xE8, 0x78, 0x6B, 0x00,
-		0x52,
-		0x8B, 0x15, 0xE4, 0x78, 0x6B, 0x00,
-		0x52,
-		0x50,
-		0xFF, 0x51, 0x54,
-		0x8B, 0xF8
+		0x8B, 0x15, 0xEC, 0x78, 0x6B, 0x00
 	};
 
 	if (memcmp(site, expected, sizeof(expected)) != 0)
@@ -808,50 +775,44 @@ static void SpideyInstallSetDisplayModeCompat()
 		{
 			fprintf(
 				f,
-				"SetDisplayMode block patch NOT installed: byte mismatch at 0x004FFB75\n");
-			fprintf(f, "actual=");
-
-			for (int i = 0; i < 36; ++i)
-			{
-				fprintf(f, "%02X", site[i]);
-				if (i != 35)
-					fputc(' ', f);
-			}
-
-			fputc('\n', f);
+				"Direct 32-bpp probe NOT installed: unexpected bytes at 0x004FFB75: %02X %02X %02X %02X %02X %02X\n",
+				site[0],
+				site[1],
+				site[2],
+				site[3],
+				site[4],
+				site[5]);
 			fclose(f);
 		}
 
 		puts(
-			"[!] SetDisplayMode compatibility block skipped: byte mismatch");
+			"[!] Direct 32-bpp SetDisplayMode probe skipped: byte mismatch");
 		return;
 	}
 
-	// Replace the entire retail argument-setup + COM call block with:
-	//     call SpideyCompatSetDisplayModeFromGlobals
-	//     mov  edi,eax
-	//     nop ... through 0x004FFB98
+	// Original:
+	//   mov edx, dword ptr [0x006B78EC]  ; retail gColorCount
 	//
-	// This deliberately avoids forwarding the original stack through a naked
-	// thunk. The normal C++ helper reads the exact retail mode globals itself.
-	PATCH_CALL(
-		0x004FFB75,
-		SpideyCompatSetDisplayModeFromGlobals);
-
-	site[5] = 0x8B;
-	site[6] = 0xF8;
-	memset(
-		site + 7,
-		0x90,
-		29);
+	// Probe:
+	//   mov edx, 32
+	//   nop
+	//
+	// Everything after this instruction remains retail code, including the
+	// original COM vtable SetDisplayMode call and HRESULT handling.
+	site[0] = 0xBA;
+	site[1] = 0x20;
+	site[2] = 0x00;
+	site[3] = 0x00;
+	site[4] = 0x00;
+	site[5] = 0x90;
 
 	FlushInstructionCache(
 		GetCurrentProcess(),
 		site,
-		36);
+		6);
 
 	puts(
-		"[*] Installed SetDisplayMode full-block 16->32 bpp compatibility fallback");
+		"[*] Installed direct retail SetDisplayMode 32-bpp probe");
 }
 #endif
 
