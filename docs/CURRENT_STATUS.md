@@ -473,3 +473,19 @@ Observed successful baseline:
 This is the first confirmed build/install/launch baseline for the local Spider-Man dev workflow.
 
 **Next frontier:** capture/verify the runtime console assertions and whether the game reaches menu/gameplay cleanly under the proxy. Once confirmed, perform one low-risk deliberate source-level proof change before choosing the first real gameplay bug.
+
+
+## Disc-image auto-mount workflow — 2026-09-29
+
+User accepted the non-crack compatibility path: automatically mount a backup image of their own Spider-Man disc before launch.
+
+Planned TEST_LATEST_BUILD behavior:
+1. read `SPIDEY_DISC_IMAGE` from the local config;
+2. if missing, prompt once for an ISO path and save it locally;
+3. mount the ISO with Windows' built-in disk-image support;
+4. build/install the current proxy as usual;
+5. launch `SpideyPC.exe`;
+6. wait for the game process to exit;
+7. unmount the ISO only if this script mounted it.
+
+The disc image path remains local-only and is not committed.
