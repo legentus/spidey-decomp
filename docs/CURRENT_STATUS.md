@@ -1032,3 +1032,44 @@ Conclusion:
 6. exact original 36-byte sequence is validated before patching.
 
 This removes all custom stack argument forwarding from the compatibility path.
+
+
+## Full-block SetDisplayMode compatibility helper implemented — 2026-09-29
+
+Commit:
+`41f9a8b296b85ff77dfdac861ba640efcc5c1e47`
+
+The previous naked forwarding thunk has been removed entirely.
+
+New patch strategy:
+- validates the exact original 36-byte retail sequence at `0x004FFB75..0x004FFB98`;
+- that sequence covers:
+  - loading retail bpp/width/height/lpDD globals;
+  - pushing SetDisplayMode arguments;
+  - indirect COM call through vtable slot +0x54;
+  - `mov edi,eax`;
+- replaces the whole sequence with:
+  - `call SpideyCompatSetDisplayModeFromGlobals`;
+  - `mov edi,eax`;
+  - NOP padding through `0x004FFB98`;
+- the normal C++ helper reads exact retail globals itself:
+  - lpDD `0x006B7900`
+  - width `0x006B78E4`
+  - height `0x006B78E8`
+  - bpp `0x006B78EC`;
+- helper performs original SetDisplayMode call;
+- if and only if first result is DDERR_UNSUPPORTED and bpp is 16, retries same mode at 32 bpp;
+- successful 32-bpp retry updates retail bpp global to 32;
+- helper attempt state remains embedded in the proven DX error logger.
+
+Static verification passed:
+- old naked thunk removed;
+- zero-argument retail-global helper present;
+- 36-byte exact signature guard present;
+- direct helper call begins at 0x004FFB75;
+- `mov edi,eax` restored immediately after helper call;
+- remaining 29 bytes are NOP-filled;
+- instruction cache flush covers all 36 bytes;
+- DX logger still prints compatibility state.
+
+**Next user action:** update and rerun `TEST_LATEST_BUILD.bat`. Return the new `spidey-decomp-dxerror.log`; if behavior changes or a new crash appears, return all generated logs.
