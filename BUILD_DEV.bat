@@ -8,29 +8,41 @@ echo   Spider-Man 2000 Dev - Build Matching Proxy
 echo ============================================================
 echo.
 
+call :FIND_CSCRIPT
+if not defined CSCRIPT_EXE (
+    echo [ERROR] Windows Script Host cscript.exe could not be found.
+    goto :FAIL
+)
+
+if not exist "%~dp0scripts\download_file.vbs" (
+    echo [ERROR] scripts\download_file.vbs is missing.
+    echo Run UPDATE_PROJECT.bat with the latest bootstrap package.
+    goto :FAIL
+)
+if not exist "%~dp0scripts\extract_zip.vbs" (
+    echo [ERROR] scripts\extract_zip.vbs is missing.
+    echo Run UPDATE_PROJECT.bat with the latest bootstrap package.
+    goto :FAIL
+)
+
 set "TOOLCHAIN_ROOT=%LocalAppData%\Spidey2000Dev\MatchingVS"
 set "TOOLCHAIN_ZIP=%TEMP%\spidey-vs-v1.0.zip"
 set "TOOLCHAIN_URL=https://github.com/krystalgamer/spidey-decomp-vs/releases/download/v1.0/spidey-vs.zip"
 
 if not exist "%TOOLCHAIN_ROOT%\BIN\nmake.exe" (
     echo [..] Matching compiler toolchain is not installed locally.
-    call :REQUIRE_TOOL curl.exe
-    if errorlevel 1 goto :FAIL
-    call :REQUIRE_TOOL tar.exe
-    if errorlevel 1 goto :FAIL
-
     if exist "%TOOLCHAIN_ROOT%" rmdir /s /q "%TOOLCHAIN_ROOT%"
     mkdir "%TOOLCHAIN_ROOT%" >nul 2>&1
 
     echo [..] Downloading preserved matching compiler toolchain...
-    curl.exe -L --fail --retry 3 --retry-delay 2 -o "%TOOLCHAIN_ZIP%" "%TOOLCHAIN_URL%"
+    "%CSCRIPT_EXE%" //nologo "%~dp0scripts\download_file.vbs" "%TOOLCHAIN_URL%" "%TOOLCHAIN_ZIP%"
     if errorlevel 1 (
         echo [ERROR] Toolchain download failed.
         goto :FAIL
     )
 
     echo [..] Extracting matching compiler toolchain...
-    tar.exe -xf "%TOOLCHAIN_ZIP%" -C "%TOOLCHAIN_ROOT%"
+    "%CSCRIPT_EXE%" //nologo "%~dp0scripts\extract_zip.vbs" "%TOOLCHAIN_ZIP%" "%TOOLCHAIN_ROOT%" "BIN\nmake.exe"
     if errorlevel 1 (
         echo [ERROR] Toolchain extraction failed.
         goto :FAIL
@@ -47,10 +59,14 @@ echo [OK] Matching toolchain:
 echo   %TOOLCHAIN_ROOT%
 echo.
 
-call :FIND_GIT
 set "VERSION=LOCAL"
-if defined GIT_EXE (
-    for /f "delims=" %%A in ('git.exe rev-parse HEAD 2^>nul') do set "VERSION=%%A"
+if exist "%~dp0LOCAL_DEV_REVISION.txt" (
+    set /p VERSION=<"%~dp0LOCAL_DEV_REVISION.txt"
+) else (
+    call :FIND_GIT
+    if defined GIT_EXE (
+        for /f "delims=" %%A in ('git.exe rev-parse HEAD 2^>nul') do set "VERSION=%%A"
+    )
 )
 
 set "RUNTIME_HEADER=%CD%\runtime_version.h"
@@ -100,13 +116,18 @@ echo ============================================================
 echo Artifact:
 echo   %CD%\out\matching\binkw32.dll
 echo.
-where certutil.exe >nul 2>&1
-if not errorlevel 1 (
+if exist "%SystemRoot%\System32\certutil.exe" (
     echo SHA-256:
-    certutil.exe -hashfile "%CD%\out\matching\binkw32.dll" SHA256
+    "%SystemRoot%\System32\certutil.exe" -hashfile "%CD%\out\matching\binkw32.dll" SHA256
 )
 echo.
 if not defined SPIDEY_NO_PAUSE pause
+exit /b 0
+
+:FIND_CSCRIPT
+set "CSCRIPT_EXE="
+if exist "%SystemRoot%\System32\cscript.exe" set "CSCRIPT_EXE=%SystemRoot%\System32\cscript.exe"
+if not defined CSCRIPT_EXE if exist "%SystemRoot%\Sysnative\cscript.exe" set "CSCRIPT_EXE=%SystemRoot%\Sysnative\cscript.exe"
 exit /b 0
 
 :FIND_GIT
@@ -117,14 +138,6 @@ if not defined GIT_EXE if exist "%ProgramFiles(x86)%\Git\cmd\git.exe" set "GIT_E
 if not defined GIT_EXE if exist "%LocalAppData%\Programs\Git\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Programs\Git\cmd\git.exe"
 if not defined GIT_EXE if exist "%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe"
 if defined GIT_EXE for %%D in ("%GIT_EXE%") do set "PATH=%%~dpD;%PATH%"
-exit /b 0
-
-:REQUIRE_TOOL
-where %~1 >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Required Windows tool was not found: %~1
-    exit /b 1
-)
 exit /b 0
 
 :FAIL
