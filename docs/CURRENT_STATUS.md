@@ -698,3 +698,36 @@ Important control-flow finding:
 - `displayD3DError` 0x004FC820
 
 The wrappers will record HRESULT + original source file + original source line to `spidey-decomp-dxerror.log` before normal error handling continues.
+
+
+## DirectX first-failure logger ready — 2026-09-29
+
+Latest crash analysis:
+- clean rebuild confirmed by visible full compile + link;
+- fresh proxy SHA-256 `8279675802F6E838B9041BA66F9DE82B8FA678698BB26DE5BF318240E755BEE8`;
+- crash captured at `0x00503AF7`;
+- mapped to `DXSOUND_ShutDown()+0x7`;
+- access type: read;
+- target address: `0x00000000`;
+- this is a secondary cleanup crash caused by null `g_pDSBuffer`.
+
+DirectX error macros call global shutdown on failed HRESULTs, so the real bug is an earlier DirectX failure. The observed register value `0x80004001` suggests E_NOTIMPL but is not sufficient to identify the exact API call.
+
+New diagnostics:
+- retail `displayDIError` at `0x004FC240` hooked;
+- retail `displayDSError` at `0x004FC630` hooked;
+- retail `displayD3DError` at `0x004FC820` hooked;
+- wrappers append kind/HRESULT/original source file/original source line to `spidey-decomp-dxerror.log`;
+- normal reconstructed error display still runs afterward;
+- latest-test launcher removes stale DirectX logs before launch and copies the new log into the timestamped session folder after exit.
+
+Commits:
+- `4bc1e3039f44032038db849e62cb1ea07dbe3d75` — DirectX first-failure hooks;
+- `42a1f715ccc1222fb6118a7a20f5e4756e8543ec` — collect DirectX error log.
+
+Static verification:
+- each retail error address patched exactly once;
+- logger path present;
+- launcher cleanup/copy path present.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. Return the new `spidey-decomp-dxerror.log` plus the crash log and launcher output.
