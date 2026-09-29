@@ -418,3 +418,20 @@ Changes:
 Recovery from the user's current local state:
 1. run `UPDATE_SPIDEY_PROJECT.bat` once by itself so the fixed updater is pulled into the local project;
 2. then run `TEST_LATEST_BUILD.bat` again.
+
+
+## First successful full build; install blocked by Program Files permissions — 2026-09-29
+
+User's latest TEST_LATEST_BUILD run reached the actual build and produced a proxy successfully.
+
+Observed:
+- updater reported local/remote revision `16c61b783962d845d9c0056db463b4109fb1585b` and `[OK] Already current`;
+- configured game path: `C:\Program Files (x86)\Activision\Spider-Man`;
+- preserved matching toolchain downloaded/extracted successfully;
+- full NMAKE/MSVC6-era build completed successfully;
+- linker produced `Release\spider.dll`;
+- staged proxy SHA-256:
+  `5C444AE81948E054B835C8E0DD2D31C2098EEA063B7BF9B896B5BDE3873F1B72`;
+- first install attempt failed at renaming retail `binkw32.dll` to `binkw32_.dll` with AccessDenied because the game is installed under Program Files (x86).
+
+**ACTIVE FIX:** TEST_LATEST_BUILD should detect that the configured game directory is not writable and automatically relaunch itself elevated once, then continue the update/build/install/launch workflow. The user should not have to manually right-click Run as administrator.
