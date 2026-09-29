@@ -466,15 +466,17 @@ INLINE i32 Font::heightAboveBaseline(char* pStr)
 	return (max_h * this->field_34) >> 12;
 }
 
-// @Ok
-// Runtime-validated fix: the old temporary call-through invoked the retail
-// C++ instance method as a free function and therefore did not pass this in
-// ECX. Options-menu text measurement reliably crashed inside retail
-// Font::height. Use the reconstructed implementation directly.
+// @SMALLTODO
+// Preserve retail Font::height behavior, but call the C++ instance method with
+// the correct x86 thiscall register convention. FASTCALL supplies this in ECX
+// and a dummy EDX argument, matching the proven Font::width trampoline pattern.
 i32 Font::height(char* txt)
 {
-	return this->heightAboveBaseline(txt) +
-		this->heightBelowBaseline(txt);
+	typedef i32 (FASTCALL *func_ptr)(Font*, void*, char*);
+
+	func_ptr func = (func_ptr)0x0043EAF0;
+
+	return func(this, 0, txt);
 }
 
 // @SMALLTODO
