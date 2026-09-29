@@ -548,3 +548,6 @@ Next step:
 - add a pre-launch compatibility diagnostic for the mounted optical drive;
 - support a fuller virtual optical-drive backend when the built-in Windows mount is not compatible;
 - preserve the current automatic mount/unmount workflow.
+
+
+Latest test-runner update: commit 9bcdaacc9fccf59384cc6813fb91cd31cf3443ad adds pre-launch disc compatibility diagnostics and an alternate virtual-drive backend. Next action: update locally and rerun TEST_LATEST_BUILD.bat.
