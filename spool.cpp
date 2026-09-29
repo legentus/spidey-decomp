@@ -11,6 +11,7 @@
 #include "my_assert.h"
 #include "SpideyDX.h"
 #include "psx_types.h"
+#include "bit.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -67,6 +68,158 @@ EXPORT i32 CurrentSuit;
 #define G_CURRENTSUIT (*reinterpret_cast<i32*>(0x005559DC))
 
 EXPORT u8 gGiveDefaultTexture;
+
+#ifdef _WIN32
+static Texture** gSpideyRetailTextureChecksumHashTable = 0;
+static i32 gSpideyRetailTextureHashTableResolved = 0;
+
+static void SpideyLogTextureCompat(
+		const char* message,
+		u32 a = 0,
+		u32 b = 0,
+		u32 d = 0)
+{
+	FILE* f = fopen("spidey-decomp-compat.log", "a");
+	if (!f)
+		return;
+
+	fprintf(f, message, a, b, d);
+	fputc('\n', f);
+	fclose(f);
+}
+
+static Texture** SpideyResolveRetailTextureHashTable(void)
+{
+	if (gSpideyRetailTextureHashTableResolved)
+		return gSpideyRetailTextureChecksumHashTable;
+
+	gSpideyRetailTextureHashTableResolved = 1;
+
+	// The reconstructed global layout places the 512-entry pointer table
+	// immediately before retail G_LOWGRAPHICS (0x006B78F8), which implies
+	// 0x006B70F8. Do not trust that inference by itself: verify that the
+	// untouched retail Spool_FindTextureEntry code actually embeds this
+	// absolute address before using it.
+	const u32 expectedBase = 0x006B70F8;
+	const unsigned char* retailCode =
+		reinterpret_cast<const unsigned char*>(0x004C9460);
+	const i32 retailSize = 132;
+	i32 found = 0;
+
+	__try
+	{
+		for (i32 i = 0; i <= retailSize - 4; i++)
+		{
+			u32 value =
+				*reinterpret_cast<const u32*>(retailCode + i);
+
+			if (value == expectedBase)
+			{
+				found = 1;
+				break;
+			}
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		found = 0;
+	}
+
+	if (found)
+	{
+		gSpideyRetailTextureChecksumHashTable =
+			reinterpret_cast<Texture**>(expectedBase);
+
+		SpideyLogTextureCompat(
+			"texture_hash_table verified retail_base=0x%08X",
+			expectedBase);
+		return gSpideyRetailTextureChecksumHashTable;
+	}
+
+	FILE* f = fopen("spidey-decomp-compat.log", "a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"texture_hash_table UNRESOLVED expected_base=0x%08X retail_code=",
+			expectedBase);
+
+		__try
+		{
+			for (i32 i = 0; i < retailSize; i++)
+			{
+				fprintf(f, "%02X", retailCode[i]);
+				if (i != retailSize - 1)
+					fputc(' ', f);
+			}
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			fprintf(f, "<unreadable>");
+		}
+
+		fputc('\n', f);
+		fclose(f);
+	}
+
+	return 0;
+}
+
+static Texture* SpideyFindTextureInHashTable(
+		Texture** table,
+		u32 checksum)
+{
+	if (!table)
+		return 0;
+
+	Texture* pSearch = 0;
+
+	__try
+	{
+		pSearch = table[checksum & 511];
+
+		i32 guard = 0;
+		while (pSearch && guard < 1024)
+		{
+			if (pSearch->Checksum == checksum)
+				return pSearch;
+
+			pSearch = pSearch->pNext;
+			guard++;
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0;
+	}
+
+	return 0;
+}
+#endif
+
+static Texture* SpideyGetDefaultTexture(void)
+{
+	SAnimFrame* pAnim = 0;
+
+#ifdef _WIN32
+	__try
+	{
+		pAnim = G_ANIM_TABLE[13];
+		if (pAnim && pAnim->pTexture)
+			return pAnim->pTexture;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		pAnim = 0;
+	}
+#endif
+
+	pAnim = gAnimTable[13];
+	if (pAnim)
+		return pAnim->pTexture;
+
+	return 0;
+}
 
 EXPORT TextureEntry gTextureEntries[256];
 
@@ -1072,25 +1225,61 @@ void Spool_ClearAllPSXs(void)
 // hash-table lookup directly.
 Texture *Spool_FindTextureEntry(u32 checksum)
 {
-	Texture *pSearch;
+	Texture* pSearch = 0;
+
+#ifdef _WIN32
+	Texture** retailTable =
+		SpideyResolveRetailTextureHashTable();
+
+	pSearch =
+		SpideyFindTextureInHashTable(
+			retailTable,
+			checksum);
+
+	if (pSearch)
+		return pSearch;
+#endif
+
+	// Keep the reconstructed table as a secondary path for code that has
+	// populated DLL-owned spool state.
 	for (pSearch = TextureChecksumHashTable[checksum & 511];
 			pSearch;
 			pSearch = pSearch->pNext)
 	{
 		if (pSearch->Checksum == checksum)
-			break;
+			return pSearch;
 	}
 
-	if (!pSearch)
+	if (!gGiveDefaultTexture)
 	{
-		if (!gGiveDefaultTexture)
-		{
-			DoAssert(0, "Can't find texture from checksum %ld", checksum);
-			return gAnimTable[13]->pTexture;
-		}
+		Texture* pDefault =
+			SpideyGetDefaultTexture();
+
+#ifdef _WIN32
+		SpideyLogTextureCompat(
+			"texture_lookup MISS checksum=0x%08X default=0x%08X retail_table=0x%08X",
+			checksum,
+			reinterpret_cast<u32>(pDefault),
+			reinterpret_cast<u32>(gSpideyRetailTextureChecksumHashTable));
+#endif
+
+		DoAssert(
+			pDefault != 0,
+			"Can't find texture from checksum %ld",
+			checksum);
+
+		return pDefault;
 	}
 
-	return pSearch;
+#ifdef _WIN32
+	SpideyLogTextureCompat(
+		"texture_lookup MISS checksum=0x%08X default_disabled=1 retail_table=0x%08X",
+		checksum,
+		reinterpret_cast<u32>(gSpideyRetailTextureChecksumHashTable),
+		0);
+#endif
+
+	return 0;
 }
 
 // @Ok
@@ -1103,15 +1292,21 @@ Texture *Spool_FindTextureEntry(char *name)
 	i32 index;
 	for (index = 0; index < 256; index++)
 	{
-		TextureEntry *currentEntry = &gTextureEntries[index];
-		if (!strcmp(currentEntry->Name, localName) && currentEntry->Active)
+		TextureEntry* currentEntry =
+			&G_TEXTUREENTRIES[index];
+
+		if (!strcmp(currentEntry->Name, localName) &&
+			currentEntry->Active)
+		{
 			break;
+		}
 	}
 
 	if (index >= 256)
-		return gAnimTable[13]->pTexture;
+		return SpideyGetDefaultTexture();
 
-	return Spool_FindTextureEntry(gTextureEntries[index].Checksum);
+	return Spool_FindTextureEntry(
+		G_TEXTUREENTRIES[index].Checksum);
 }
 
 // @Ok
