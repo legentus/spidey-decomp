@@ -286,3 +286,23 @@ User's environment also does not expose `curl.exe`. Continuing to add prerequisi
 - The user's normal update workflow remains a single `UPDATE_PROJECT.bat`.
 
 This is now preferred over maintaining a local Git clone because the user's goal is a self-updating working copy, not local source-control operations.
+
+
+## DAH Workflow Review / Root Cause — 2026-09-29
+
+Reviewed the actual working DAH port workflow in `legentus/DAH-Port`:
+- `UPDATE_DAH_PORT.bat` is intentionally tiny and delegates to `tools/UPDATE_DAH_PORT.ps1`.
+- `TEST_LATEST_BUILD.bat` is intentionally tiny and delegates to `tools/TEST_LATEST_BUILD.ps1`.
+- The real logic lives in the tools scripts; the user-facing BAT layer stays stable.
+
+Important correction for Spider-Man:
+- Earlier failures of `where powershell.exe` and `where curl.exe` do **not** prove those Windows components are absent.
+- On normal Windows they live under explicit system paths such as:
+  - `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`
+  - `%SystemRoot%\System32\curl.exe`
+  - `%SystemRoot%\System32\tar.exe`
+  - `%SystemRoot%\System32\certutil.exe`
+  - `%SystemRoot%\System32\cscript.exe`
+- A damaged/minimal PATH can therefore make `where` fail even though the tools exist.
+
+**New direction:** mirror the proven DAH pattern. User-facing BATs will explicitly repair/discover Windows system paths first, then delegate to stable tool scripts. Stop adding layers of Git installers/portable prerequisites.
