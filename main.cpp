@@ -706,6 +706,71 @@ int main()
 
 #else
 
+
+#ifdef _WIN32
+// Diagnostic only: preserve enough information from an unhandled exception
+// to identify the failing module/address in local development builds.
+static LONG WINAPI SpideyUnhandledExceptionFilter(EXCEPTION_POINTERS* info)
+{
+    FILE* f = fopen("spidey-decomp-crash.log", "w");
+    if (!f)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    fprintf(f, "spidey-decomp native crash\n");
+
+    if (info && info->ExceptionRecord)
+    {
+        fprintf(f, "exception_code=0x%08lX\n", info->ExceptionRecord->ExceptionCode);
+        fprintf(f, "exception_address=0x%08lX\n",
+            (unsigned long)info->ExceptionRecord->ExceptionAddress);
+
+        MEMORY_BASIC_INFORMATION mbi;
+        memset(&mbi, 0, sizeof(mbi));
+
+        if (VirtualQuery(
+                info->ExceptionRecord->ExceptionAddress,
+                &mbi,
+                sizeof(mbi)) == sizeof(mbi))
+        {
+            char modulePath[MAX_PATH];
+            modulePath[0] = '\0';
+
+            HMODULE module = (HMODULE)mbi.AllocationBase;
+            if (GetModuleFileNameA(module, modulePath, sizeof(modulePath)))
+            {
+                fprintf(f, "fault_module=%s\n", modulePath);
+                fprintf(f, "fault_module_base=0x%08lX\n",
+                    (unsigned long)module);
+                fprintf(f, "fault_module_offset=0x%08lX\n",
+                    (unsigned long)info->ExceptionRecord->ExceptionAddress -
+                    (unsigned long)module);
+            }
+        }
+    }
+
+    if (info && info->ContextRecord)
+    {
+        CONTEXT* c = info->ContextRecord;
+
+#if defined(_M_IX86)
+        fprintf(f, "EAX=0x%08lX\n", c->Eax);
+        fprintf(f, "EBX=0x%08lX\n", c->Ebx);
+        fprintf(f, "ECX=0x%08lX\n", c->Ecx);
+        fprintf(f, "EDX=0x%08lX\n", c->Edx);
+        fprintf(f, "ESI=0x%08lX\n", c->Esi);
+        fprintf(f, "EDI=0x%08lX\n", c->Edi);
+        fprintf(f, "EBP=0x%08lX\n", c->Ebp);
+        fprintf(f, "ESP=0x%08lX\n", c->Esp);
+        fprintf(f, "EIP=0x%08lX\n", c->Eip);
+        fprintf(f, "EFLAGS=0x%08lX\n", c->EFlags);
+#endif
+    }
+
+    fclose(f);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+#endif
+
 HMODULE bink_dll;
 
 BOOL WINAPI DllMain(
@@ -727,6 +792,7 @@ BOOL WINAPI DllMain(
 			AllocConsole();
 			SetConsoleTitle("spidey-decomp - " RUNTIME_VERSION);
 			freopen("CONOUT$", "w", stdout);
+			SetUnhandledExceptionFilter(SpideyUnhandledExceptionFilter);
 
 			bink_dll = GetModuleHandleA("binkw32.dll");
 
