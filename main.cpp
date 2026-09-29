@@ -710,59 +710,102 @@ int main()
 #ifdef _WIN32
 // Diagnostic only: preserve enough information from an unhandled exception
 // to identify the failing module/address in local development builds.
-static LONG WINAPI SpideyUnhandledExceptionFilter(EXCEPTION_POINTERS* info)
+static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
 {
+    if (!info || !info->ExceptionRecord)
+        return EXCEPTION_CONTINUE_SEARCH;
+
+    if (info->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION)
+        return EXCEPTION_CONTINUE_SEARCH;
+
     FILE* f = fopen("spidey-decomp-crash.log", "w");
     if (!f)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    fprintf(f, "spidey-decomp native crash\n");
+    fprintf(f, "spidey-decomp access violation\n");
+    fprintf(f, "exception_code=0x%08lX\n", info->ExceptionRecord->ExceptionCode);
+    fprintf(f, "exception_address=0x%08lX\n",
+        (unsigned long)info->ExceptionRecord->ExceptionAddress);
 
-    if (info && info->ExceptionRecord)
+    if (info->ExceptionRecord->NumberParameters >= 2)
     {
-        fprintf(f, "exception_code=0x%08lX\n", info->ExceptionRecord->ExceptionCode);
-        fprintf(f, "exception_address=0x%08lX\n",
-            (unsigned long)info->ExceptionRecord->ExceptionAddress);
+        unsigned long op = (unsigned long)info->ExceptionRecord->ExceptionInformation[0];
+        unsigned long target = (unsigned long)info->ExceptionRecord->ExceptionInformation[1];
 
-        MEMORY_BASIC_INFORMATION mbi;
-        memset(&mbi, 0, sizeof(mbi));
+        const char* opName = "unknown";
+        if (op == 0)
+            opName = "read";
+        else if (op == 1)
+            opName = "write";
+        else if (op == 8)
+            opName = "execute";
 
-        if (VirtualQuery(
-                info->ExceptionRecord->ExceptionAddress,
-                &mbi,
-                sizeof(mbi)) == sizeof(mbi))
+        fprintf(f, "access_operation=%s\n", opName);
+        fprintf(f, "access_target=0x%08lX\n", target);
+    }
+
+    MEMORY_BASIC_INFORMATION mbi;
+    memset(&mbi, 0, sizeof(mbi));
+
+    if (VirtualQuery(
+            info->ExceptionRecord->ExceptionAddress,
+            &mbi,
+            sizeof(mbi)) == sizeof(mbi))
+    {
+        char modulePath[MAX_PATH];
+        modulePath[0] = '\0';
+
+        HMODULE module = (HMODULE)mbi.AllocationBase;
+        if (GetModuleFileNameA(module, modulePath, sizeof(modulePath)))
         {
-            char modulePath[MAX_PATH];
-            modulePath[0] = '\0';
-
-            HMODULE module = (HMODULE)mbi.AllocationBase;
-            if (GetModuleFileNameA(module, modulePath, sizeof(modulePath)))
-            {
-                fprintf(f, "fault_module=%s\n", modulePath);
-                fprintf(f, "fault_module_base=0x%08lX\n",
-                    (unsigned long)module);
-                fprintf(f, "fault_module_offset=0x%08lX\n",
-                    (unsigned long)info->ExceptionRecord->ExceptionAddress -
-                    (unsigned long)module);
-            }
+            fprintf(f, "fault_module=%s\n", modulePath);
+            fprintf(f, "fault_module_base=0x%08lX\n",
+                (unsigned long)module);
+            fprintf(f, "fault_module_offset=0x%08lX\n",
+                (unsigned long)info->ExceptionRecord->ExceptionAddress -
+                (unsigned long)module);
         }
     }
 
-    if (info && info->ContextRecord)
+    if (info->ContextRecord)
     {
-        CONTEXT* c = info->ContextRecord;
+        CONTEXT* ctx = info->ContextRecord;
 
 #if defined(_M_IX86)
-        fprintf(f, "EAX=0x%08lX\n", c->Eax);
-        fprintf(f, "EBX=0x%08lX\n", c->Ebx);
-        fprintf(f, "ECX=0x%08lX\n", c->Ecx);
-        fprintf(f, "EDX=0x%08lX\n", c->Edx);
-        fprintf(f, "ESI=0x%08lX\n", c->Esi);
-        fprintf(f, "EDI=0x%08lX\n", c->Edi);
-        fprintf(f, "EBP=0x%08lX\n", c->Ebp);
-        fprintf(f, "ESP=0x%08lX\n", c->Esp);
-        fprintf(f, "EIP=0x%08lX\n", c->Eip);
-        fprintf(f, "EFLAGS=0x%08lX\n", c->EFlags);
+        fprintf(f, "EAX=0x%08lX\n", ctx->Eax);
+        fprintf(f, "EBX=0x%08lX\n", ctx->Ebx);
+        fprintf(f, "ECX=0x%08lX\n", ctx->Ecx);
+        fprintf(f, "EDX=0x%08lX\n", ctx->Edx);
+        fprintf(f, "ESI=0x%08lX\n", ctx->Esi);
+        fprintf(f, "EDI=0x%08lX\n", ctx->Edi);
+        fprintf(f, "EBP=0x%08lX\n", ctx->Ebp);
+        fprintf(f, "ESP=0x%08lX\n", ctx->Esp);
+        fprintf(f, "EIP=0x%08lX\n", ctx->Eip);
+        fprintf(f, "EFLAGS=0x%08lX\n", ctx->EFlags);
+
+        fprintf(f, "stack_dwords=");
+        __try
+        {
+            unsigned long* sp = (unsigned long*)ctx->Esp;
+            for (int i = 0; i < 16; ++i)
+            {
+                fprintf(f, "%08lX", sp[i]);
+                if (i != 15)
+                    fputc(',', f);
+            }
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER)
+        {
+            fprintf(f, "<unreadable>");
+        }
+        fputc('\n', f);
+#endif
+    }
+
+    fflush(f);
+    fclose(f);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 #endif
     }
 
@@ -792,7 +835,7 @@ BOOL WINAPI DllMain(
 			AllocConsole();
 			SetConsoleTitle("spidey-decomp - " RUNTIME_VERSION);
 			freopen("CONOUT$", "w", stdout);
-			SetUnhandledExceptionFilter(SpideyUnhandledExceptionFilter);
+			AddVectoredExceptionHandler(1, SpideyVectoredExceptionHandler);
 
 			bink_dll = GetModuleHandleA("binkw32.dll");
 
