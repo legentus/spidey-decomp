@@ -670,3 +670,31 @@ Static verification passed:
 - fingerprint and crash-log collection paths present.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. The build should now visibly perform a full CLEAN, compile, and `link.exe`. The proxy SHA should differ from the stale `5508A0BE...` build. After the crash, return the launcher output and `spidey-decomp-crash.log` from the timestamped session folder.
+
+
+## First actionable crash mapped — 2026-09-29
+
+Clean rebuild/runtime diagnostics succeeded:
+- fresh proxy SHA-256: `8279675802F6E838B9041BA66F9DE82B8FA678698BB26DE5BF318240E755BEE8`;
+- exact EXE fingerprint unchanged;
+- native crash log captured.
+
+Crash:
+- exception `0xC0000005`;
+- fault address `0x00503AF7`;
+- null read target `0x00000000`;
+- mapped through `tools/names.json` to `DXSOUND_ShutDown()+0x7`;
+- retail/reconstructed shutdown immediately dereferences `g_pDSBuffer->Stop()`, so this is a secondary cleanup crash caused by a null primary sound buffer.
+
+Important control-flow finding:
+- the game's DirectX error macros call `DXINIT_ShutDown()` on any failed HRESULT;
+- that shutdown path reaches `DXSOUND_ShutDown()`;
+- if failure occurs before `DXSOUND_Init()` creates `g_pDSBuffer`, cleanup itself crashes;
+- observed register `EDI=0x80004001` is consistent with a preceding `E_NOTIMPL` HRESULT, but the exact first failing DirectX call is not yet proven.
+
+**ACTIVE DIAGNOSTIC:** hook the retail error reporters at their mapped addresses:
+- `displayDIError` 0x004FC240
+- `displayDSError` 0x004FC630
+- `displayD3DError` 0x004FC820
+
+The wrappers will record HRESULT + original source file + original source line to `spidey-decomp-dxerror.log` before normal error handling continues.
