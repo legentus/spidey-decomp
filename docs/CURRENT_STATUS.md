@@ -890,3 +890,52 @@ Thus the primary startup blocker is specifically `IDirectDraw7::SetDisplayMode` 
 7. logs both attempts/results for the test session.
 
 This is deliberately narrower than forcing windowed mode or globally ignoring DirectDraw failures.
+
+
+## First DirectDraw compatibility fix implemented — 2026-09-29
+
+Root failure proven from retail runtime bytes:
+- `IDirectDraw7::SetDisplayMode` call at `0x004FFB94`;
+- requested mode is passed from retail globals:
+  - width `0x006B78E4`
+  - height `0x006B78E8`
+  - bpp `0x006B78EC`;
+- returned HRESULT `DDERR_UNSUPPORTED / E_NOTIMPL`.
+
+Compatibility implementation commit:
+`edab1663977c21afff7e2a051d0ee740e410097c`
+
+Behavior:
+- validates exact retail bytes at `0x004FFB94` are `FF 51 54 8B F8`;
+- if bytes differ, refuses to install and logs the mismatch;
+- replaces only those five bytes with a call to an x86 compatibility thunk;
+- thunk calls the original `IDirectDraw7::SetDisplayMode` through the live retail COM object;
+- original requested mode remains the first attempt;
+- only when result is `DDERR_UNSUPPORTED` and requested bpp is 16:
+  - retries same width/height/refresh/flags at 32 bpp;
+  - if retry succeeds, writes 32 to retail `gColorCount` at `0x006B78EC`;
+- thunk reproduces overwritten `mov edi,eax`;
+- thunk performs original six-argument stdcall cleanup and resumes at `0x004FFB99`;
+- instruction cache is flushed after patching;
+- no global DirectDraw errors are ignored;
+- no windowed-mode forcing is applied.
+
+Compatibility log:
+`spidey-decomp-compat.log`
+
+Example expected successful line:
+`SetDisplayMode 640x480x16 first=0x80004001 retry_bpp=32 retry=0x00000000`
+
+Launcher collection commit:
+`63298fb64d6281bd31681f99f041791cb82014b4`
+
+Static verification passed:
+- exact byte guard present;
+- exact retail call site present;
+- retry condition limited to unsupported 16-bpp mode;
+- retail bpp global updated only after successful 32-bpp retry;
+- EDI/result semantics restored;
+- original 24-byte stdcall argument cleanup preserved;
+- launcher removes stale compat logs and copies the new one into the timestamped test folder.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat` then `TEST_LATEST_BUILD.bat`. If the game progresses farther, return the launcher output and all generated diagnostic logs. If it still exits at startup, `spidey-decomp-compat.log` is the primary file needed.
