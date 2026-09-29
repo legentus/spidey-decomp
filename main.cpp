@@ -755,64 +755,151 @@ static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
 	return hr;
 }
 
-static void SpideyInstallSetDisplayModeCompat()
+static void SpideyInstallWindowedDirectDrawCompat()
 {
-	unsigned char* site =
-		(unsigned char*)0x004FFB75;
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	const unsigned long dxInitAddress =
+		0x004FDE90;
 
-	const unsigned char expected[6] =
+	unsigned char* matchedPush =
+		0;
+	unsigned char* matchedCall =
+		0;
+	int matchingCalls =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
 	{
-		0x8B, 0x15, 0xEC, 0x78, 0x6B, 0x00
-	};
+		if (p[0] != 0xE8)
+			continue;
 
-	if (memcmp(site, expected, sizeof(expected)) != 0)
+		long rel =
+			*(long*)(p + 1);
+
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != dxInitAddress)
+			continue;
+
+		// The retail RealWinMain call is reconstructed as:
+		//     DXINIT_DirectX8(hwnd, hInstance, 2);
+		//
+		// For cdecl, the right-to-left argument setup puts "push 2"
+		// somewhere shortly before this direct call. Search only a small
+		// bounded window and require a unique candidate.
+		unsigned char* windowStart =
+			p >= textStart + 20 ? p - 20 : textStart;
+
+		unsigned char* pushTwo =
+			0;
+		int pushTwoCount =
+			0;
+
+		for (unsigned char* q = windowStart;
+			 q + 2 <= p;
+			 ++q)
+		{
+			if (q[0] == 0x6A &&
+				q[1] == 0x02)
+			{
+				pushTwo =
+					q;
+				pushTwoCount++;
+			}
+		}
+
+		if (pushTwoCount == 1)
+		{
+			matchedPush =
+				pushTwo;
+			matchedCall =
+				p;
+			matchingCalls++;
+		}
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (matchingCalls != 1 ||
+		!matchedPush ||
+		!matchedCall)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
-
 		if (f)
 		{
 			fprintf(
 				f,
-				"Direct 32-bpp probe NOT installed: unexpected bytes at 0x004FFB75: %02X %02X %02X %02X %02X %02X\n",
-				site[0],
-				site[1],
-				site[2],
-				site[3],
-				site[4],
-				site[5]);
+				"Windowed DirectDraw patch NOT installed: expected 1 DXINIT_DirectX8 call with one nearby push 2, found %d\n",
+				matchingCalls);
+			fclose(f);
+		}
+
+		printf(
+			"[!] Windowed DirectDraw compatibility patch skipped: ambiguous DXINIT_DirectX8 call count %d\n",
+			matchingCalls);
+		return;
+	}
+
+	unsigned long callTarget =
+		(unsigned long)(
+			matchedCall +
+			5 +
+			*(long*)(matchedCall + 1));
+
+	if (matchedPush[0] != 0x6A ||
+		matchedPush[1] != 0x02 ||
+		callTarget != dxInitAddress)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"Windowed DirectDraw patch NOT installed: verification failed push=%08lX call=%08lX target=%08lX\n",
+				(unsigned long)matchedPush,
+				(unsigned long)matchedCall,
+				callTarget);
 			fclose(f);
 		}
 
 		puts(
-			"[!] Direct 32-bpp SetDisplayMode probe skipped: byte mismatch");
+			"[!] Windowed DirectDraw compatibility patch skipped: verification failed");
 		return;
 	}
 
-	// Original:
-	//   mov edx, dword ptr [0x006B78EC]  ; retail gColorCount
-	//
-	// Probe:
-	//   mov edx, 32
-	//   nop
-	//
-	// Everything after this instruction remains retail code, including the
-	// original COM vtable SetDisplayMode call and HRESULT handling.
-	site[0] = 0xBA;
-	site[1] = 0x20;
-	site[2] = 0x00;
-	site[3] = 0x00;
-	site[4] = 0x00;
-	site[5] = 0x90;
+	// Change RealWinMain's third DXINIT_DirectX8 argument from 2 to 3.
+	// DXINIT_DirectX8 stores:
+	//     gDxOptionRelated = a3 & 1;
+	// so this preserves bit 1 while enabling the game's own windowed
+	// DirectDraw initialization path.
+	matchedPush[1] =
+		0x03;
 
 	FlushInstructionCache(
 		GetCurrentProcess(),
-		site,
-		6);
+		matchedPush,
+		2);
 
-	puts(
-		"[*] Installed direct retail SetDisplayMode 32-bpp probe");
+	if (f)
+	{
+		fprintf(
+			f,
+			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX target=0x%08lX old_arg=2 new_arg=3\n",
+			(unsigned long)matchedPush,
+			(unsigned long)matchedCall,
+			callTarget);
+		fclose(f);
+	}
+
+	printf(
+		"[*] Windowed DirectDraw compatibility patch: DXINIT_DirectX8 arg 2->3 at 0x%08lX\n",
+		(unsigned long)matchedPush);
 }
 #endif
 
@@ -968,7 +1055,7 @@ void game_patches(void)
 	//PATCH_CALL(0x004707BE, my_video_player);
 
 #ifdef _WIN32
-	SpideyInstallSetDisplayModeCompat();
+	SpideyInstallWindowedDirectDrawCompat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
