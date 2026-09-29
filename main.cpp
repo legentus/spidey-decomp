@@ -661,6 +661,28 @@ static void SpideyAppendDxErrorWithCaller(
 		line,
 		callerReturn,
 		callSite);
+
+	fprintf(f, "code_window_base=0x%08lX\n", callSite - 96);
+	fprintf(f, "code_window_bytes=");
+
+	__try
+	{
+		const unsigned char* p =
+			(const unsigned char*)(callSite - 96);
+
+		for (int i = 0; i < 160; ++i)
+		{
+			fprintf(f, "%02X", p[i]);
+			if (i != 159)
+				fputc(' ', f);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		fprintf(f, "<unreadable>");
+	}
+
+	fputc('\n', f);
 	fflush(f);
 	fclose(f);
 }
