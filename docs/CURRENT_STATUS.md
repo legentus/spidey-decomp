@@ -961,3 +961,45 @@ Interpretation:
   2. 16->32 retry ran and also returned E_NOTIMPL.
 
 **ACTIVE FIX/DIAGNOSTIC:** record SetDisplayMode arguments and first/retry HRESULTs in static runtime state inside the proxy, then append that state through the already-proven DirectX error logger. This avoids relying on a separate compatibility log file and will conclusively distinguish those two cases on the next run.
+
+
+## SetDisplayMode attempt state now embedded in proven DX logger — 2026-09-29
+
+Commit:
+`cf319fed1a753cc16d91802b211b5681ae51b4fe`
+
+Reason:
+- the SetDisplayMode compatibility thunk is definitely installed in live retail code;
+- the game still returns `0x80004001`;
+- the separate `spidey-decomp-compat.log` did not appear, so it cannot be trusted as the sole diagnostic channel.
+
+New runtime state captured by the proxy:
+- whether compatibility helper executed;
+- requested width;
+- requested height;
+- requested bpp;
+- requested refresh;
+- requested flags;
+- first SetDisplayMode HRESULT;
+- whether 32-bpp retry was attempted;
+- retry HRESULT.
+
+The already-working `spidey-decomp-dxerror.log` now prints that state as:
+`compat_state width=... height=... bpp=... first=... retry_attempted=... retry=...`
+
+It also independently reads the retail mode globals:
+- `0x006B78E4` width
+- `0x006B78E8` height
+- `0x006B78EC` bpp
+
+This makes the next test conclusive even if the standalone compat log is still absent.
+
+Static verification:
+- seen: PASS
+- first: PASS
+- retryFlag: PASS
+- retryResult: PASS
+- compatState: PASS
+- retailGlobals: PASS
+
+**Next user action:** update and rerun `TEST_LATEST_BUILD.bat`, then return only the new `spidey-decomp-dxerror.log` unless the crash behavior changes.
