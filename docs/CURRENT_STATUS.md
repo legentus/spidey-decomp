@@ -306,3 +306,50 @@ Important correction for Spider-Man:
 - A damaged/minimal PATH can therefore make `where` fail even though the tools exist.
 
 **New direction:** mirror the proven DAH pattern. User-facing BATs will explicitly repair/discover Windows system paths first, then delegate to stable tool scripts. Stop adding layers of Git installers/portable prerequisites.
+
+
+## DAH-style workflow conversion completed
+
+The Spider-Man local workflow now mirrors the proven DAH port structure:
+
+User-facing BATs:
+- `GET_SPIDEY_PROJECT.bat` — first-time bootstrap wrapper
+- `UPDATE_SPIDEY_PROJECT.bat` — update-only wrapper
+- `TEST_LATEST_BUILD.bat` — update -> restart if workflow changed -> build -> install -> launch
+- legacy names `UPDATE_PROJECT.bat` and `BUILD_AND_INSTALL.bat` now forward to the new workflow
+
+Real logic:
+- `tools/BOOTSTRAP_SPIDEY_PROJECT.ps1`
+- `tools/UPDATE_SPIDEY_PROJECT.ps1`
+- `tools/TEST_LATEST_BUILD.ps1`
+
+Key fix from DAH review:
+- BAT wrappers no longer depend on PATH to find PowerShell.
+- They explicitly check standard Windows locations:
+  - `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`
+  - `%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe`
+  - `%SystemRoot%\SysWOW64\WindowsPowerShell\v1.0\powershell.exe`
+- They also prepend standard Windows system directories to PATH before launching the tool script.
+
+Local source updates do not require Git:
+- updater downloads the `dev` branch ZIP from GitHub;
+- records the exact remote commit in `LOCAL_DEV_REVISION.txt`;
+- preserves `spidey_local_config.bat`, logs, build outputs, and local revision state;
+- `TEST_LATEST_BUILD.ps1` restarts itself after an update exactly like the DAH workflow.
+
+Latest-test behavior:
+1. update local project;
+2. restart if the workflow changed;
+3. read/configure retail Spider-Man folder;
+4. download preserved matching compiler if needed;
+5. build `Release\spider.dll`;
+6. stage/install it as `binkw32.dll`;
+7. preserve retail Bink as `binkw32_.dll`;
+8. record revision + proxy SHA-256 under `logs\<timestamp>`;
+9. launch `SpideyPC.exe`.
+
+Latest safety cleanup:
+- bootstrap refuses to mirror into a non-empty unrelated folder;
+- `LOCAL_DEV_REVISION.txt` and `logs/` are ignored.
+
+**Next user action:** use the newly packaged DAH-style bootstrap containing only `GET_SPIDEY_PROJECT.bat` and `tools\BOOTSTRAP_SPIDEY_PROJECT.ps1`. Discard all earlier bootstrap ZIPs.
