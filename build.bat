@@ -1,5 +1,9 @@
 setlocal
-set MSVCDir=C:\vs
+if defined SPIDEY_MSVC_ROOT (
+    set MSVCDir=%SPIDEY_MSVC_ROOT%
+) else (
+    set MSVCDir=C:\vs
+)
 
 set PATH=%MSDevDir%\BIN;%MSVCDir%\BIN;%PATH%
 
