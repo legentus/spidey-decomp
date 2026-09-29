@@ -1325,3 +1325,26 @@ Next runtime test:
 - let the game reach the title/menu normally;
 - do not assume Enter is required; simply note whether it crashes on its own or after input;
 - provide all generated logs, including the new `proxy-link-map.txt`.
+
+
+## Stack overflow fixed; missing-texture path now exposes access violation — 2026-09-29
+
+Latest test at revision `446608a2b34fea0a5153ee9f41e670134d8c6af5`:
+- clean forced build/link succeeded;
+- proxy SHA-256 `0D022AAAA2CF37FC96E2B19A1EBF1DA89446CEE49148403C4A04D1CE136ED513`;
+- EXE fingerprint unchanged;
+- windowed DirectDraw compatibility patch still installs correctly;
+- title screen remains reachable;
+- user reports the game says it cannot find a texture after Enter;
+- previous stack overflow is gone;
+- new crash is `0xC0000005` at DLL address `0x1004DB78`;
+- access is a read from `0x00000004`;
+- crash stack contains checksum `0xE90B5F6E`.
+
+This is strong evidence that removing the retail `0x004C9460` call-through broke the recursion successfully and exposed the next real issue in the reconstructed texture-miss fallback.
+
+ACTIVE NEXT STEP:
+1. resolve `0x1004DB78` against the captured `proxy-link-map.txt`;
+2. inspect the exact source operation at that symbol/offset;
+3. harden the missing-texture fallback so an absent checksum does not dereference an unavailable default texture;
+4. preserve logging of the missing checksum for later asset-table correctness work.
