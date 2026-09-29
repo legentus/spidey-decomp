@@ -8,9 +8,14 @@ echo   Spider-Man 2000 Dev - Update Project
 echo ============================================================
 echo.
 
-where git.exe >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Git for Windows was not found in PATH.
+set "GIT_EXE="
+for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined GIT_EXE set "GIT_EXE=%%G"
+if not defined GIT_EXE if exist "%ProgramFiles%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles%\Git\cmd\git.exe"
+if not defined GIT_EXE if exist "%LocalAppData%\Programs\Git\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Programs\Git\cmd\git.exe"
+
+if not defined GIT_EXE (
+    echo [ERROR] Git for Windows was not found.
+    echo Run the latest GET_SPIDEY_PROJECT.bat bootstrap to install it automatically.
     goto :FAIL
 )
 
@@ -20,7 +25,7 @@ if not exist ".git" (
     goto :FAIL
 )
 
-for /f "delims=" %%A in ('git remote get-url origin 2^>nul') do set "ORIGIN_URL=%%A"
+for /f "delims=" %%A in ('"%GIT_EXE%" remote get-url origin 2^>nul') do set "ORIGIN_URL=%%A"
 echo Repository:
 echo   %CD%
 echo Origin:
@@ -28,37 +33,37 @@ echo   %ORIGIN_URL%
 echo.
 
 set "DIRTY="
-for /f "delims=" %%A in ('git status --porcelain --untracked-files=no') do set "DIRTY=1"
+for /f "delims=" %%A in ('"%GIT_EXE%" status --porcelain --untracked-files=no') do set "DIRTY=1"
 if defined DIRTY (
     echo [ERROR] Tracked local files have uncommitted changes.
     echo The updater will not overwrite or stash them automatically.
     echo.
-    git status --short
+    "%GIT_EXE%" status --short
     goto :FAIL
 )
 
 echo [..] Fetching latest dev branch...
-git fetch origin dev
+"%GIT_EXE%" fetch origin dev
 if errorlevel 1 goto :GIT_FAIL
 
-git show-ref --verify --quiet refs/heads/dev
+"%GIT_EXE%" show-ref --verify --quiet refs/heads/dev
 if errorlevel 1 (
     echo [..] Creating local dev branch from origin/dev...
-    git checkout -b dev --track origin/dev
+    "%GIT_EXE%" checkout -b dev --track origin/dev
     if errorlevel 1 goto :GIT_FAIL
 ) else (
-    git checkout dev
+    "%GIT_EXE%" checkout dev
     if errorlevel 1 goto :GIT_FAIL
 )
 
 echo [..] Fast-forwarding to origin/dev...
-git pull --ff-only origin dev
+"%GIT_EXE%" pull --ff-only origin dev
 if errorlevel 1 goto :GIT_FAIL
 
-git submodule update --init --recursive
+"%GIT_EXE%" submodule update --init --recursive
 if errorlevel 1 goto :GIT_FAIL
 
-for /f "delims=" %%A in ('git rev-parse --short HEAD') do set "CURRENT_COMMIT=%%A"
+for /f "delims=" %%A in ('"%GIT_EXE%" rev-parse --short HEAD') do set "CURRENT_COMMIT=%%A"
 
 echo.
 echo [OK] Project is up to date.
