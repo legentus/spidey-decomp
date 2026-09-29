@@ -379,3 +379,27 @@ Baseline success criteria:
 8. game reaches menu/gameplay without immediate failure.
 
 Do not make gameplay/source changes until this exact baseline is captured.
+
+
+## First TEST_LATEST_BUILD run — updater false failure — 2026-09-29
+
+User ran `TEST_LATEST_BUILD.bat` from:
+`F:\Spider-Man 2000 Recomp\project main`
+
+Observed:
+- local revision before update: `94a77b0b3271c57d5eb40bb835969bf1fa9cfd8e`
+- remote revision: `3c13230edf34ae2241c43bcc0b2059a387169f4d`
+- dev archive downloaded successfully;
+- archive extracted successfully;
+- local project refresh completed successfully;
+- updater printed `[OK] Local project is current.`;
+- immediately afterward the parent latest-test script printed `[ERROR] Update failed.`;
+- process exit code was 3.
+
+Root cause identified:
+- `robocopy` uses exit codes 0-7 for successful/acceptable outcomes.
+- the updater correctly treated codes below 8 as success, but left `$LASTEXITCODE` equal to robocopy's code (3 in this run).
+- `TEST_LATEST_BUILD.ps1` then checked that stale `$LASTEXITCODE` and misclassified the successful update as a failure.
+- the updater also has a success-path `exit 0` when already current; because the updater is invoked inside the latest-test PowerShell process, that should be replaced with a normal return so it cannot terminate the parent test workflow.
+
+**ACTIVE FIX:** normalize `$global:LASTEXITCODE = 0` on all successful updater returns and avoid `exit` on successful updater paths.
