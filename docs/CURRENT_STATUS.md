@@ -186,3 +186,16 @@ First user run of the standalone bootstrap stopped because `git.exe` was not in 
 5. continues cloning/updating `legentus/spidey-decomp` branch `dev` in the same run.
 
 User should not need to manually install Git or edit PATH.
+
+
+### Bootstrap Git dependency fix completed
+
+Committed fixes:
+- `GET_SPIDEY_PROJECT.bat` now auto-detects Git, auto-installs Git for Windows when absent, and continues the clone/update in the same run.
+- `UPDATE_PROJECT.bat` now finds Git in standard install locations even when PATH is stale.
+- `SETUP_FIRST_TIME.bat` no longer tells the user to install Git manually.
+- Git path quoting was hardened for installs under `C:\Program Files`.
+
+Latest bootstrap commit: `2309c4613a9e97d25206ae3211ed46ca794802e7`.
+
+**Next user action:** discard the old bootstrap ZIP/BAT, run the newly generated `GET_SPIDEY_PROJECT.bat`, and report the complete output if it stops again.
