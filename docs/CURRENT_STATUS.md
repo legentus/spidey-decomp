@@ -1704,3 +1704,59 @@ IMMEDIATE NEXT ACTION:
 2. identify which new change owns that instruction;
 3. revert/fix only the crashing regression before further feature work;
 4. preserve the audio evidence, because it already proves DirectSound initialization and bank loading are succeeding.
+
+
+## Black-screen regression mapped + startup-active experiments parked — 2026-09-29
+
+Exact crash mapping from uploaded current-build linker map:
+- proxy crash: `0x1002C8D1`;
+- current `DCMem_New` start: `0x1002C880`;
+- fault offset: `DCMem_New + 0x51`;
+- stack return `0x10037B33`;
+- current `PCTex_CreateTexture256` start: `0x100379A0`;
+- caller offset: `PCTex_CreateTexture256 + 0x193`.
+
+The source and original retail machine code establish the failure mechanism:
+- `PCTex_CreateTexture256` allocates its temporary converted texture buffer with
+  `DCMem_New(2 * rounded_width * rounded_height, 0, 1, 0, 1)`;
+- `DCMem_New` calls `Mem_CoreNew`;
+- `DCMem_New` has no null check before calculating its alignment result;
+- if the underlying allocation returns null, the aligned result becomes `0x20` and it writes the alignment byte to `0x1F`;
+- current crash log is exactly a write AV to `0x0000001F`.
+
+This identifies the immediate fault but does NOT yet prove why the underlying texture allocation failed.
+
+Important regression-scope facts:
+- `PCTex_CreateTexture256` and `DCMem_New` were already active in the previously playable build;
+- therefore the crash is most likely an exposed consequence of one of the newly activated startup paths rather than a newly introduced allocator implementation;
+- audio diagnostics already established that DirectSound initialized correctly and sample banks loaded before the crash;
+- XInput DLL loaded but no controller connection was logged.
+
+Stability rollback / bisect commits:
+
+`50e5ea75f25e20c7792b7ba320c00697b7b8aceb`
+- keeps exact decoded retail texture table address `0x006AB934` and verification;
+- disables runtime consumption of that table for now;
+- restores prior DLL-owned default-texture gating behavior;
+- reason: previous playable build had the retail table unresolved, while the failed build was first to actively consume the decoded retail table.
+
+`7eef8ba810b23727a976dfe593849c7c3114834b`
+- restores direct retail `DXINIT_DirectX8` call flow;
+- keeps only the proven RealWinMain argument patch `2 -> 3`;
+- disables active SFX diagnostic call redirections now that their evidence has been captured;
+- parks XInput/Xbox runtime hooks and Options label hook;
+- XInput/audio implementation remains compiled in source for later one-at-a-time reactivation.
+
+The Options `Font::height` fix remains ACTIVE.
+
+NEXT TEST PURPOSE:
+- confirm known-good title/gameplay startup is restored;
+- test Options crash fix independently of texture/audio/controller experiments.
+
+If startup is restored:
+1. test entering Options and changing settings;
+2. confirm first level still plays;
+3. audio is expected to remain unresolved for this isolation run;
+4. controller phase 1 is intentionally inactive for this isolation run.
+
+If the same `DCMem_New/PCTex_CreateTexture256` crash persists after this rollback, next step is to add narrowly scoped allocation telemetry around the exact PCTex buffer request and game-heap state.
