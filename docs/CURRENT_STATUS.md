@@ -731,3 +731,19 @@ Static verification:
 - launcher cleanup/copy path present.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. Return the new `spidey-decomp-dxerror.log` plus the crash log and launcher output.
+
+
+## Primary DirectX failure confirmed — caller-address diagnostic next — 2026-09-29
+
+Latest test at revision `9cf5b139661f11bd613ef646d2e0f3e2a477ba52`:
+- clean forced rebuild/link succeeded;
+- proxy SHA-256 `3929CF3E440064D1846030A368D5409F2BD3A48B7CA493167F88A1FB5CC875EE`;
+- EXE fingerprint unchanged;
+- DirectX diagnostic captured:
+  `D3D error=0x80004001 file=C:\backup\SpideyPC\SpideyPC\D3d\DXinit.cpp line=1005`;
+- `0x80004001` is E_NOTIMPL;
+- subsequent cleanup still faults at `DXSOUND_ShutDown()+0x7` reading address 0.
+
+The embedded original source line cannot be mapped directly to the current reconstructed source because line numbering has diverged.
+
+**ACTIVE NEXT DIAGNOSTIC:** replace the three DirectX error wrappers with x86 naked trampolines that preserve normal calling semantics while recording the retail return/call-site address. This will identify the exact instruction/API call that produced E_NOTIMPL.
