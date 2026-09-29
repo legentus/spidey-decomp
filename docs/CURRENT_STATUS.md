@@ -792,3 +792,23 @@ Latest user attempt failed before build/test:
 5. add retries/fallback for archive download too.
 
 Because the currently installed updater cannot fetch its own fix when the API path fails, provide a minimal replacement ZIP containing only `tools\UPDATE_SPIDEY_PROJECT.ps1`.
+
+
+### Hardened updater committed
+
+Commit:
+`af7c0e4cf915b0e7187ad6046cc42e1865c7a28a`
+
+New updater behavior:
+- retries GitHub commit API up to 3 times;
+- falls back to `git ls-remote` when Git is available;
+- falls back to Windows `curl.exe` when available;
+- if exact commit SHA still cannot be resolved, does not abort;
+- instead downloads the dev branch archive, refreshes the local tree, and records an `archive-<sha256-prefix>` source identity;
+- archive download itself retries PowerShell transport and falls back to curl;
+- normal exact-SHA tracking remains when GitHub revision lookup succeeds.
+
+Because the installed updater can fail before fetching this change, a minimal replacement ZIP is being provided containing only:
+`tools\UPDATE_SPIDEY_PROJECT.ps1`
+
+**Next user action:** extract that ZIP into the local project root and overwrite the existing updater script, then run `UPDATE_SPIDEY_PROJECT.bat` followed by `TEST_LATEST_BUILD.bat`.
