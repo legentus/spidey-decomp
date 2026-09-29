@@ -250,3 +250,21 @@ Next implementation will use only Windows command-line tools expected on current
 If any of those are missing, the bootstrap will print exactly which tool is unavailable rather than failing generically.
 
 Goal remains: zero manual prerequisites and no admin/system-wide Git install.
+
+
+### PowerShell-free user workflow implemented
+
+Changes committed:
+- `build.bat` now supports a private matching compiler location through `SPIDEY_MSVC_ROOT`: `6c7b9be6e18dace8e986c41be7da4de854b6cc11`
+- `BUILD_DEV.bat` no longer calls PowerShell and downloads/extracts the preserved compiler with `curl.exe` + `tar.exe`: `09d91dd5375dfeb1528241555b0c4d325cdbb7cd`
+- `INSTALL_DEV_BUILD.bat` no longer calls PowerShell: `6ad38bea3b5af1a6a2c9107f40cdf65bd40184a4`
+- `RESTORE_STOCK_GAME.bat` no longer calls PowerShell: `a69f146f6d83ecb4e80b1a22361be9649ae32b20`
+- `GET_SPIDEY_PROJECT.bat` no longer calls PowerShell; portable MinGit setup now uses only `curl.exe`, `certutil.exe`, and `tar.exe`: `79667480f51ba0a130e5df8cd1e172a98a4eb86e`
+
+Private local tools:
+- MinGit: `%LOCALAPPDATA%\Spidey2000Dev\MinGit`
+- preserved matching compiler: `%LOCALAPPDATA%\Spidey2000Dev\MatchingVS`
+
+No administrator rights, PowerShell, system-wide Git installation, or writes to `C:\vs` are required by the new user workflow.
+
+**Next user action:** discard all older bootstrap BATs and run the bootstrap generated from commit `79667480f51ba0a130e5df8cd1e172a98a4eb86e`. Expected path: portable MinGit download -> SHA-256 verification -> tar extraction -> clone `dev` -> configure game folder.
