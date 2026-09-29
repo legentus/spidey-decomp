@@ -13,10 +13,11 @@ for /f "delims=" %%G in ('where git.exe 2^>nul') do if not defined GIT_EXE set "
 if not defined GIT_EXE if exist "%ProgramFiles%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles%\Git\cmd\git.exe"
 if not defined GIT_EXE if exist "%ProgramFiles(x86)%\Git\cmd\git.exe" set "GIT_EXE=%ProgramFiles(x86)%\Git\cmd\git.exe"
 if not defined GIT_EXE if exist "%LocalAppData%\Programs\Git\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Programs\Git\cmd\git.exe"
+if not defined GIT_EXE if exist "%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe" set "GIT_EXE=%LocalAppData%\Spidey2000Dev\MinGit\cmd\git.exe"
 
 if not defined GIT_EXE (
     echo [ERROR] Git for Windows was not found.
-    echo Run the latest GET_SPIDEY_PROJECT.bat bootstrap to install it automatically.
+    echo Run the latest GET_SPIDEY_PROJECT.bat bootstrap to set up portable MinGit automatically.
     goto :FAIL
 )
 
