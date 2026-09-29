@@ -1,5 +1,6 @@
 param(
-    [switch]$PostUpdate
+    [switch]$PostUpdate,
+    [switch]$Elevated
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,34 @@ function Stop-WithPause([string]$Message, [int]$Code = 1) {
     Write-Host ""
     Read-Host "Press Enter to close"
     exit $Code
+}
+
+function Test-DirectoryWritable([string]$Path) {
+    $probe = Join-Path $Path (".spidey-write-test-" + [Guid]::NewGuid().ToString("N") + ".tmp")
+    try {
+        [System.IO.File]::WriteAllBytes($probe, [byte[]]@())
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        return $true
+    } catch {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+}
+
+function Relaunch-Elevated {
+    $psExe = (Get-Process -Id $PID).Path
+    $argLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -PostUpdate -Elevated'
+
+    Write-Host ""
+    Write-Host "[INFO] The Spider-Man game folder requires Administrator access."
+    Write-Host "[..] Requesting elevation so the retail Bink DLL can be preserved and the dev proxy installed..."
+
+    try {
+        $proc = Start-Process -FilePath $psExe -Verb RunAs -ArgumentList $argLine -Wait -PassThru
+        exit $proc.ExitCode
+    } catch {
+        Stop-WithPause "Administrator elevation was cancelled or failed: $($_.Exception.Message)"
+    }
 }
 
 function Read-LocalGameDir {
@@ -132,6 +161,17 @@ $originalBink = Join-Path $gameDir "binkw32_.dll"
 
 if (-not (Test-Path $gameExe)) {
     Stop-WithPause "SpideyPC.exe was not found in '$gameDir'."
+}
+
+if (-not (Test-DirectoryWritable $gameDir)) {
+    if ($Elevated) {
+        Stop-WithPause "The game folder is still not writable even after elevation: '$gameDir'."
+    }
+    Relaunch-Elevated
+}
+
+if ($Elevated) {
+    Write-Host "[OK] Elevated access confirmed for the game folder."
 }
 
 $toolchainRoot = Ensure-MatchingToolchain
