@@ -374,8 +374,13 @@ try {
 ) | Set-Content -Path (Join-Path $sessionDir "test-session.txt") -Encoding UTF8
 
 $crashLog = Join-Path $gameDir "spidey-decomp-crash.log"
+$dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
+
 if (Test-Path $crashLog) {
     Remove-Item -LiteralPath $crashLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $dxErrorLog) {
+    Remove-Item -LiteralPath $dxErrorLog -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host ""
@@ -396,6 +401,12 @@ if (Test-Path $crashLog) {
     Copy-Item -LiteralPath $crashLog -Destination (Join-Path $sessionDir "spidey-decomp-crash.log") -Force
     Write-Host "[CRASH] Native crash log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-crash.log"))
+}
+
+if (Test-Path $dxErrorLog) {
+    Copy-Item -LiteralPath $dxErrorLog -Destination (Join-Path $sessionDir "spidey-decomp-dxerror.log") -Force
+    Write-Host "[DXERR] DirectX error log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-dxerror.log"))
 }
 
 if ($exitCode -eq -1073741819) {
