@@ -775,3 +775,20 @@ Changes:
 - normal error/cleanup behavior is otherwise preserved.
 
 **Next user action:** update and rerun `TEST_LATEST_BUILD.bat`. Return `spidey-decomp-dxerror.log`; its new caller/call-site fields should identify the exact failing DirectDraw/Direct3D instruction.
+
+
+## Updater transport failure — 2026-09-29
+
+Latest user attempt failed before build/test:
+- UPDATE_SPIDEY_PROJECT.ps1 could not query the GitHub dev revision;
+- PowerShell reported: "The underlying connection was closed: An unexpected error occurred on a send.";
+- no source/build/runtime failure occurred.
+
+**ACTIVE FIX:** make GitHub SHA lookup best-effort rather than mandatory:
+1. retry GitHub API several times;
+2. fall back to local Git `ls-remote` when available;
+3. fall back to explicit Windows curl when available;
+4. if exact remote SHA still cannot be resolved, continue by downloading/refeshing the dev branch archive and identify the local source state with the archive SHA-256 instead of aborting;
+5. add retries/fallback for archive download too.
+
+Because the currently installed updater cannot fetch its own fix when the API path fails, provide a minimal replacement ZIP containing only `tools\UPDATE_SPIDEY_PROJECT.ps1`.
