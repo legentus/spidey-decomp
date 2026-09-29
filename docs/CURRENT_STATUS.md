@@ -1003,3 +1003,32 @@ Static verification:
 - retailGlobals: PASS
 
 **Next user action:** update and rerun `TEST_LATEST_BUILD.bat`, then return only the new `spidey-decomp-dxerror.log` unless the crash behavior changes.
+
+
+## Naked SetDisplayMode thunk proven unreliable — replacing with full-block helper — 2026-09-29
+
+Latest uploaded logs:
+- primary D3D error remains `0x80004001`;
+- retail mode globals at failure are `640x480x16`;
+- live retail code contains the installed direct `E8 rel32` compatibility call at the old SetDisplayMode site;
+- however DX logger reports `compat_state not_seen`;
+- secondary crash remains unchanged at `DXSOUND_ShutDown()+0x7`.
+
+Conclusion:
+- patch installation is proven;
+- the current naked thunk/stack-forwarding path is not reaching the C++ compatibility helper correctly;
+- do not infer that the 32-bpp retry itself failed, because the helper never recorded execution.
+
+**ACTIVE FIX:** remove the naked forwarding thunk and replace the complete original 36-byte retail SetDisplayMode argument-setup/call/result block at `0x004FFB75..0x004FFB98` with:
+1. a direct call to a normal zero-argument C++ helper;
+2. helper reads retail globals directly:
+   - lpDD `0x006B7900`
+   - width `0x006B78E4`
+   - height `0x006B78E8`
+   - bpp `0x006B78EC`;
+3. helper performs original SetDisplayMode call and conditional 16->32 retry;
+4. patched retail block executes `mov edi,eax` after the helper call;
+5. remaining bytes are NOP-filled through `0x004FFB98`;
+6. exact original 36-byte sequence is validated before patching.
+
+This removes all custom stack argument forwarding from the compatibility path.
