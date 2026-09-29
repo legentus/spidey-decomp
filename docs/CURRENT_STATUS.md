@@ -1790,3 +1790,60 @@ Immediate next action:
 2. diff startup-affecting code from that revision to current dev;
 3. restore/bisect only those deltas;
 4. do not add new feature work until title/gameplay baseline is recovered.
+
+
+## Exact confirmed-playable runtime restored; Options fix reduced to one trampoline — 2026-09-29
+
+Historical evidence lookup:
+- both user-provided Options-crash sessions were built from revision
+  `35e73ed3c4ca8c06b581df83f0f0913f0c915982`;
+- that is therefore the exact last user-confirmed playable runtime:
+  - splash/title visible;
+  - first level entered;
+  - Spider-Man controllable;
+  - return to main menu worked;
+  - only entering Options crashed.
+
+Diff from that exact baseline to the black-screen tree showed only three runtime C++ files changed:
+- `main.cpp`;
+- `spool.cpp`;
+- `FontTools.cpp`.
+Other differences were docs and launcher logging only.
+
+Recovery commits:
+- `ae7bb3432ecfd03bfa6ebbd8e3122465755f64eb`
+  - restores `main.cpp` byte-for-byte from confirmed playable `35e73ed...`;
+  - removes all active/inactive audio/XInput experiment code from the current runtime file for this isolation build.
+- `2dbb4d896280e82ad921f701213926669a483e9c`
+  - restores `spool.cpp` byte-for-byte from confirmed playable `35e73ed...`;
+  - returns texture lookup/default behavior exactly to the runtime that was known playable.
+- `b8bc0957721c29499737741f1fd9c31740e7cf49`
+  - starts from confirmed-playable `FontTools.cpp`;
+  - changes ONLY the broken `Font::height` retail trampoline;
+  - old broken declaration:
+    `typedef i32 (*func_ptr)(char*);`
+  - new declaration:
+    `typedef i32 (FASTCALL *func_ptr)(Font*, void*, char*);`
+  - call:
+    `return func(this, 0, txt);`
+  - rationale: x86 C++ instance method needs `this` in ECX; this mirrors the already-proven `Font::width` retail trampoline pattern and preserves retail behavior rather than substituting reconstructed height logic.
+
+Mechanical verification:
+- current `main.cpp` == exact contents at playable `35e73ed...`: PASS;
+- current `spool.cpp` == exact contents at playable `35e73ed...`: PASS;
+- old broken Font::height free-function trampoline absent: PASS;
+- FASTCALL Font*/dummy-EDX trampoline present: PASS;
+- compare against playable baseline now shows runtime-code difference ONLY in `FontTools.cpp`;
+- remaining non-runtime differences are documentation and test-log collection.
+
+NEXT TEST:
+1. update/build;
+2. verify splash/title returns;
+3. if title returns, enter Options and change settings;
+4. load first level once;
+5. send all logs.
+
+Interpretation:
+- if black screen STILL occurs, then the single Font::height trampoline change itself is implicated and should be reverted for a pure baseline confirmation;
+- if startup returns, the prior black-screen regression was in the post-playable main/spool experiment set and is now eliminated;
+- audio/controller feature work remains paused until the playable baseline is reconfirmed.
