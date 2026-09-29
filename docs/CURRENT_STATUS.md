@@ -1666,3 +1666,41 @@ Return all logs. New important logs:
 - `spidey-decomp-audio.log`
 - `spidey-decomp-controller.log`
 plus usual compat/runtime/crash/map/session/fingerprint logs.
+
+
+## REGRESSION: black screen + proxy DLL crash — 2026-09-29
+
+Runtime test of revision:
+`8c167ecf781029226ae8cd36a422cf597861e905`
+
+Observed by user:
+- game launched to a black screen;
+- never reached normal playable/title state;
+- eventually crashed.
+
+Crash log:
+- exception `0xC0000005`;
+- write access violation;
+- fault address `0x1002C8D1`;
+- write target `0x0000001F`;
+- fault module is rebuilt proxy `binkw32.dll`;
+- proxy base `0x10000000`;
+- proxy offset `0x0002C8D1`.
+This is a NEW regression in our DLL, not the previous retail Options crash at `0x0043EB29`.
+
+Other evidence from same failed run:
+- retail EXE fingerprint is unchanged;
+- windowed DirectDraw compatibility patch installed;
+- verified texture hash table `0x006AB934` still accepted;
+- XInput DLL `xinput1_4.dll` loaded with rumble support;
+- audio diagnostics show retail DirectSound device + primary buffer are valid;
+- `SFX_Init` loaded 42 buffers;
+- level/menu SFX spool raised this to 44 buffers;
+- no active voices were observed at those diagnostic checkpoints;
+- a D3D diagnostic fired with error value `0x00000004` from retail caller `0x004FDDD4` / probable call site `0x004FDDCF`, before the windowed compatibility state had been marked seen.
+
+IMMEDIATE NEXT ACTION:
+1. map proxy crash `0x1002C8D1` exactly through this run's link map;
+2. identify which new change owns that instruction;
+3. revert/fix only the crashing regression before further feature work;
+4. preserve the audio evidence, because it already proves DirectSound initialization and bank loading are succeeding.
