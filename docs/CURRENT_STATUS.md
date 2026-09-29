@@ -832,3 +832,29 @@ Latest test at revision `13b50f409ab2afccbb4846a9d5a1b34c082c6ea0`:
   - read from `0x00000000`.
 
 **ACTIVE NEXT STEP:** map `0x004FFBAC` inside retail `initDirectDraw7()` to the exact DirectDraw/Direct3D method, then patch/tolerate that specific modern-Windows compatibility failure while preserving diagnostics.
+
+
+## Runtime instruction-window dump added — 2026-09-29
+
+Exact error reporter call site from latest run:
+- caller return: `0x004FFBB1`
+- displayD3DError call site: `0x004FFBAC`
+- HRESULT: `0x80004001` (E_NOTIMPL)
+
+The direct error-report call is not itself the failing COM API call; the failing DirectDraw/Direct3D vtable call occurs earlier in the same retail block.
+
+Commit:
+`e683078040b6e8e96a93aac5d91f1e8abb2f8a67`
+
+The DX error logger now also records:
+- `code_window_base = call_site - 0x60`
+- 160 raw instruction bytes spanning 96 bytes before and 64 bytes after the error-report call.
+
+This will allow offline disassembly of the exact retail code around the failure and identification of the failing COM method/vtable slot without requiring the user to upload the executable.
+
+Static verification passed:
+- code-window base field present;
+- 160-byte dump present;
+- structured exception guard present.
+
+**Next user action:** update and rerun `TEST_LATEST_BUILD.bat`, then return the new `spidey-decomp-dxerror.log`. No additional files should be necessary unless the fault changes.
