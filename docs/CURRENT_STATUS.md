@@ -858,3 +858,35 @@ Static verification passed:
 - structured exception guard present.
 
 **Next user action:** update and rerun `TEST_LATEST_BUILD.bat`, then return the new `spidey-decomp-dxerror.log`. No additional files should be necessary unless the fault changes.
+
+
+## Root DirectDraw failure decoded — compatibility patch selected — 2026-09-29
+
+The 160-byte runtime instruction window conclusively maps the primary failure:
+
+Retail code:
+- `0x004FFB72: call [vtable+0x50]`
+  - `IDirectDraw7::SetCooperativeLevel(hwnd, DDSCL_EXCLUSIVE | DDSCL_FULLSCREEN)`
+- `0x004FFB94: call [vtable+0x54]`
+  - `IDirectDraw7::SetDisplayMode(width, height, bpp, refresh, flags)`
+- return stored in EDI at `0x004FFB97`;
+- failed HRESULT then reaches `displayD3DError` at `0x004FFBAC`.
+
+Argument globals visible directly in the retail instruction stream:
+- `0x006B78E4` = requested width;
+- `0x006B78E8` = requested height;
+- `0x006B78EC` = requested color depth;
+- `0x006B7900` = retail `IDirectDraw7*`.
+
+Thus the primary startup blocker is specifically `IDirectDraw7::SetDisplayMode` returning `DDERR_UNSUPPORTED / E_NOTIMPL`.
+
+**ACTIVE FIX:** patch only the five-byte sequence at `0x004FFB94` (`FF 51 54 8B F8`) with a direct call to a compatibility thunk that:
+1. calls the original `IDirectDraw7::SetDisplayMode` with the untouched requested parameters;
+2. if it succeeds, preserves original behavior;
+3. if it returns `DDERR_UNSUPPORTED` and requested bpp is 16, retries the same mode at 32 bpp;
+4. on successful 32-bpp retry, updates retail `gColorCount` at `0x006B78EC` to 32;
+5. returns the final HRESULT in EAX and mirrors the overwritten `mov edi,eax` behavior before resuming at `0x004FFB99`;
+6. refuses to install if the expected original five bytes are not present;
+7. logs both attempts/results for the test session.
+
+This is deliberately narrower than forcing windowed mode or globally ignoring DirectDraw failures.
