@@ -634,6 +634,172 @@ static int my_video_player(const char*, i32)
 }
 
 #ifdef _WIN32
+static void SpideyAppendCompatLog(
+		DWORD width,
+		DWORD height,
+		DWORD bpp,
+		HRESULT firstResult,
+		HRESULT retryResult,
+		int retried)
+{
+	FILE* f = fopen("spidey-decomp-compat.log", "a");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"SetDisplayMode %lux%lux%lu first=0x%08lX",
+		(unsigned long)width,
+		(unsigned long)height,
+		(unsigned long)bpp,
+		(unsigned long)firstResult);
+
+	if (retried)
+	{
+		fprintf(
+			f,
+			" retry_bpp=32 retry=0x%08lX",
+			(unsigned long)retryResult);
+	}
+
+	fputc('\n', f);
+	fflush(f);
+	fclose(f);
+}
+
+static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
+		LPDIRECTDRAW7 dd,
+		DWORD width,
+		DWORD height,
+		DWORD bpp,
+		DWORD refreshRate,
+		DWORD flags)
+{
+	if (!dd)
+	{
+		SpideyAppendCompatLog(
+			width,
+			height,
+			bpp,
+			E_POINTER,
+			E_POINTER,
+			0);
+		return E_POINTER;
+	}
+
+	HRESULT hr = dd->SetDisplayMode(
+		width,
+		height,
+		bpp,
+		refreshRate,
+		flags);
+
+	if (hr == DDERR_UNSUPPORTED && bpp == 16)
+	{
+		HRESULT retry = dd->SetDisplayMode(
+			width,
+			height,
+			32,
+			refreshRate,
+			flags);
+
+		SpideyAppendCompatLog(
+			width,
+			height,
+			bpp,
+			hr,
+			retry,
+			1);
+
+		if (SUCCEEDED(retry))
+		{
+			// Retail gColorCount. The caller reads this value later while
+			// constructing surfaces and Direct3D state.
+			*(DWORD*)0x006B78EC = 32;
+			return retry;
+		}
+
+		return retry;
+	}
+
+	SpideyAppendCompatLog(
+		width,
+		height,
+		bpp,
+		hr,
+		hr,
+		0);
+	return hr;
+}
+
+// Replaces:
+//   FF 51 54    call dword ptr [ecx+54h] ; IDirectDraw7::SetDisplayMode
+//   8B F8       mov edi,eax
+//
+// The helper performs the original call. This thunk reproduces the overwritten
+// mov edi,eax and the original stdcall stack cleanup before returning to
+// 0x004FFB99.
+__declspec(naked) static void SpideyCompatSetDisplayModeThunk()
+{
+	__asm
+	{
+		push ebp
+		mov ebp, esp
+
+		push dword ptr [ebp+28]
+		push dword ptr [ebp+24]
+		push dword ptr [ebp+20]
+		push dword ptr [ebp+16]
+		push dword ptr [ebp+12]
+		push dword ptr [ebp+8]
+		call SpideyCompatSetDisplayModeHelper
+
+		mov edi, eax
+		mov esp, ebp
+		pop ebp
+		ret 24
+	}
+}
+
+static void SpideyInstallSetDisplayModeCompat()
+{
+	unsigned char* site = (unsigned char*)0x004FFB94;
+	const unsigned char expected[5] =
+	{
+		0xFF, 0x51, 0x54, 0x8B, 0xF8
+	};
+
+	if (memcmp(site, expected, sizeof(expected)) != 0)
+	{
+		FILE* f = fopen("spidey-decomp-compat.log", "a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"SetDisplayMode patch NOT installed: unexpected bytes at 0x004FFB94: %02X %02X %02X %02X %02X\n",
+				site[0],
+				site[1],
+				site[2],
+				site[3],
+				site[4]);
+			fclose(f);
+		}
+
+		puts("[!] SetDisplayMode compatibility patch skipped: byte mismatch");
+		return;
+	}
+
+	PATCH_CALL(0x004FFB94, SpideyCompatSetDisplayModeThunk);
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		(void*)0x004FFB94,
+		5);
+
+	puts("[*] Installed SetDisplayMode 16->32 bpp compatibility fallback");
+}
+#endif
+
+#ifdef _WIN32
 static const char gSpideyDxKindDI[] = "DI";
 static const char gSpideyDxKindDS[] = "DS";
 static const char gSpideyDxKindD3D[] = "D3D";
@@ -752,6 +918,8 @@ void game_patches(void)
 	//PATCH_CALL(0x004707BE, my_video_player);
 
 #ifdef _WIN32
+	SpideyInstallSetDisplayModeCompat();
+
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
 	PATCH_PUSH_RET(0x004FC820, SpideyDiagDisplayD3DError);
