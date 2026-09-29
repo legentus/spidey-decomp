@@ -140,19 +140,176 @@ function Read-LocalDiscImage {
     return $full
 }
 
+function Find-VirtualCloneDrive {
+    $candidates = @()
+
+    try {
+        $appPath = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\VCDMount.exe" -ErrorAction SilentlyContinue
+        if ($appPath -and $appPath.'(default)') {
+            $candidates += [string]$appPath.'(default)'
+        }
+    } catch {
+    }
+
+    try {
+        $appPath32 = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\VCDMount.exe" -ErrorAction SilentlyContinue
+        if ($appPath32 -and $appPath32.'(default)') {
+            $candidates += [string]$appPath32.'(default)'
+        }
+    } catch {
+    }
+
+    $pf86 = [Environment]::GetFolderPath("ProgramFilesX86")
+    $pf = [Environment]::GetFolderPath("ProgramFiles")
+
+    if ($pf86) {
+        $candidates += (Join-Path $pf86 "Elaborate Bytes\VirtualCloneDrive\VCDMount.exe")
+    }
+    if ($pf) {
+        $candidates += (Join-Path $pf "Elaborate Bytes\VirtualCloneDrive\VCDMount.exe")
+    }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return [System.IO.Path]::GetFullPath($candidate)
+        }
+    }
+
+    return $null
+}
+
+function Ensure-LegacyMciType {
+    if ("SpideyLegacyMci" -as [type]) {
+        return
+    }
+
+    Add-Type @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+
+public static class SpideyLegacyMci
+{
+    [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+    public static extern int mciSendString(
+        string command,
+        StringBuilder returnValue,
+        int returnLength,
+        IntPtr winHandle);
+
+    [DllImport("winmm.dll", CharSet = CharSet.Auto)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool mciGetErrorString(
+        int errorCode,
+        StringBuilder errorText,
+        int errorTextSize);
+}
+"@
+}
+
+function Get-MciErrorText([int]$Code) {
+    Ensure-LegacyMciType
+    $buffer = New-Object System.Text.StringBuilder 512
+    if ([SpideyLegacyMci]::mciGetErrorString($Code, $buffer, $buffer.Capacity)) {
+        return $buffer.ToString()
+    }
+    return ("MCI error " + $Code)
+}
+
+function Test-LegacyCdInterface {
+    Ensure-LegacyMciType
+
+    $cdDrives = @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq [System.IO.DriveType]::CDRom })
+    if ($cdDrives.Count -eq 0) {
+        return [PSCustomObject]@{
+            Success = $false
+            DriveLetter = $null
+            Error = "No CD-ROM drives are visible to Windows."
+        }
+    }
+
+    $attempts = @()
+
+    foreach ($drive in $cdDrives) {
+        $root = $drive.Name.TrimEnd('\')
+        $alias = "spideycd" + ([Guid]::NewGuid().ToString("N").Substring(0, 8))
+        $buffer = New-Object System.Text.StringBuilder 512
+        $openCommand = 'open "' + $root + '" type cdaudio alias ' + $alias + ' shareable wait'
+        $openResult = [SpideyLegacyMci]::mciSendString($openCommand, $buffer, $buffer.Capacity, [IntPtr]::Zero)
+
+        if ($openResult -eq 0) {
+            $statusBuffer = New-Object System.Text.StringBuilder 512
+            $statusResult = [SpideyLegacyMci]::mciSendString(
+                ("status " + $alias + " number of tracks wait"),
+                $statusBuffer,
+                $statusBuffer.Capacity,
+                [IntPtr]::Zero)
+
+            [void][SpideyLegacyMci]::mciSendString(
+                ("close " + $alias + " wait"),
+                $buffer,
+                $buffer.Capacity,
+                [IntPtr]::Zero)
+
+            if ($statusResult -eq 0) {
+                return [PSCustomObject]@{
+                    Success = $true
+                    DriveLetter = $root
+                    Error = $null
+                    TrackCount = $statusBuffer.ToString()
+                }
+            }
+
+            $attempts += ($root + " opened, but MCI status failed: " + (Get-MciErrorText $statusResult))
+        } else {
+            $attempts += ($root + " MCI open failed: " + (Get-MciErrorText $openResult))
+        }
+    }
+
+    return [PSCustomObject]@{
+        Success = $false
+        DriveLetter = $null
+        Error = ($attempts -join "; ")
+    }
+}
+
 function Mount-SpideyDiscImage([string]$ImagePath) {
+    $vcdMount = Find-VirtualCloneDrive
+
+    if ($vcdMount) {
+        Write-Host "[INFO] Virtual CloneDrive detected:"
+        Write-Host ("  " + $vcdMount)
+        Write-Host "[..] Mounting Spider-Man disc image through Virtual CloneDrive..."
+
+        & $vcdMount "/d=0" $ImagePath
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithPause "Virtual CloneDrive could not mount the Spider-Man disc image."
+        }
+
+        Start-Sleep -Milliseconds 1200
+
+        return [PSCustomObject]@{
+            ImagePath = $ImagePath
+            MountedByUs = $true
+            DriveLetter = $null
+            Backend = "VirtualCloneDrive"
+            VcdMount = $vcdMount
+            VcdUnit = 0
+        }
+    }
+
     if (-not (Get-Command Get-DiskImage -ErrorAction SilentlyContinue) -or
         -not (Get-Command Mount-DiskImage -ErrorAction SilentlyContinue)) {
-        Stop-WithPause "Windows DiskImage cmdlets are unavailable, so the Spider-Man ISO could not be mounted automatically."
+        Stop-WithPause "No supported disc-image mounter is available."
     }
 
     $diskImage = Get-DiskImage -ImagePath $ImagePath -ErrorAction SilentlyContinue
     $mountedByUs = $false
 
     if ($diskImage -and $diskImage.Attached) {
-        Write-Host "[OK] Spider-Man disc image is already mounted."
+        Write-Host "[OK] Spider-Man disc image is already mounted by Windows."
     } else {
-        Write-Host "[..] Mounting Spider-Man disc image..."
+        Write-Host "[..] Mounting Spider-Man disc image with Windows..."
         Mount-DiskImage -ImagePath $ImagePath -StorageType ISO -ErrorAction Stop | Out-Null
         $mountedByUs = $true
     }
@@ -180,11 +337,25 @@ function Mount-SpideyDiscImage([string]$ImagePath) {
         ImagePath = $ImagePath
         MountedByUs = $mountedByUs
         DriveLetter = $driveLetter
+        Backend = "Windows"
+        VcdMount = $null
+        VcdUnit = $null
     }
 }
 
 function Dismount-SpideyDiscImage($MountInfo) {
     if (-not $MountInfo -or -not $MountInfo.MountedByUs) {
+        return
+    }
+
+    if ($MountInfo.Backend -eq "VirtualCloneDrive") {
+        try {
+            Write-Host "[..] Unmounting Spider-Man disc image from Virtual CloneDrive..."
+            & $MountInfo.VcdMount ("/d=" + $MountInfo.VcdUnit) "/u"
+            Write-Host "[OK] Spider-Man disc image unmounted."
+        } catch {
+            Write-Host "[WARNING] Could not unmount the Virtual CloneDrive image: $($_.Exception.Message)"
+        }
         return
     }
 
@@ -195,7 +366,7 @@ function Dismount-SpideyDiscImage($MountInfo) {
 
     try {
         Write-Host "[..] Unmounting Spider-Man disc image..."
-        Dismount-DiskImage -ImagePath $MountInfo.ImagePath -ErrorAction Stop
+        Dismount-DiskImage -ImagePath $MountInfo.ImagePath -ErrorAction Stop | Out-Null
         Write-Host "[OK] Spider-Man disc image unmounted."
     } catch {
         Write-Host "[WARNING] Could not unmount the Spider-Man disc image: $($_.Exception.Message)"
@@ -376,6 +547,26 @@ New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
 Write-Host ""
 Write-Host "[DISC] Preparing Spider-Man disc image..."
 $mountInfo = Mount-SpideyDiscImage $discImage
+
+Write-Host "[DISC] Checking legacy MCI CD interface..."
+$mciCheck = Test-LegacyCdInterface
+
+if ($mciCheck.Success) {
+    Write-Host ("[OK] Legacy MCI sees CD media on " + $mciCheck.DriveLetter)
+    if ($mciCheck.TrackCount) {
+        Write-Host ("[INFO] MCI reports " + $mciCheck.TrackCount + " track(s).")
+    }
+} else {
+    Dismount-SpideyDiscImage $mountInfo
+
+    if ($mountInfo.Backend -eq "Windows") {
+        Stop-WithPause ("Windows mounted the ISO, but the legacy MCI CD interface cannot use it. " +
+            "Install Virtual CloneDrive, then run TEST_LATEST_BUILD.bat again. MCI detail: " + $mciCheck.Error)
+    }
+
+    Stop-WithPause ("Virtual CloneDrive mounted the image, but the legacy MCI CD interface still rejected it. " +
+        "The image may not preserve the disc layout expected by this retail build. MCI detail: " + $mciCheck.Error)
+}
 
 try {
     Write-Host ""
