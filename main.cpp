@@ -634,8 +634,13 @@ static int my_video_player(const char*, i32)
 }
 
 #ifdef _WIN32
-static void SpideyAppendDxError(
+static const char gSpideyDxKindDI[] = "DI";
+static const char gSpideyDxKindDS[] = "DS";
+static const char gSpideyDxKindD3D[] = "D3D";
+
+static void SpideyAppendDxErrorWithCaller(
 		const char* kind,
+		unsigned long callerReturn,
 		long error,
 		char* file,
 		i32 line)
@@ -644,35 +649,80 @@ static void SpideyAppendDxError(
 	if (!f)
 		return;
 
+	unsigned long callSite =
+		callerReturn >= 5 ? callerReturn - 5 : callerReturn;
+
 	fprintf(
 		f,
-		"%s error=0x%08lX file=%s line=%d\n",
+		"%s error=0x%08lX file=%s line=%d caller_return=0x%08lX call_site=0x%08lX\n",
 		kind,
 		(unsigned long)error,
 		file ? file : "<null>",
-		line);
+		line,
+		callerReturn,
+		callSite);
 	fflush(f);
 	fclose(f);
 }
 
-static void SpideyDiagDisplayDIError(long error, char* file, i32 line)
+__declspec(naked) static void SpideyDiagDisplayDIError(
+		long error,
+		char* file,
+		i32 line)
 {
-	SpideyAppendDxError("DI", error, file, line);
-	displayDIError(error, file, line);
+	__asm
+	{
+		mov eax, [esp]
+		push dword ptr [esp+12]
+		push dword ptr [esp+12]
+		push dword ptr [esp+12]
+		push eax
+		push offset gSpideyDxKindDI
+		call SpideyAppendDxErrorWithCaller
+		add esp, 20
+		jmp displayDIError
+	}
 }
 
-static void SpideyDiagDisplayDSError(long error, char* file, i32 line)
+__declspec(naked) static void SpideyDiagDisplayDSError(
+		long error,
+		char* file,
+		i32 line)
 {
-	SpideyAppendDxError("DS", error, file, line);
-	displayDSError(error, file, line);
+	__asm
+	{
+		mov eax, [esp]
+		push dword ptr [esp+12]
+		push dword ptr [esp+12]
+		push dword ptr [esp+12]
+		push eax
+		push offset gSpideyDxKindDS
+		call SpideyAppendDxErrorWithCaller
+		add esp, 20
+		jmp displayDSError
+	}
 }
 
-static void SpideyDiagDisplayD3DError(long error, char* file, i32 line)
+__declspec(naked) static void SpideyDiagDisplayD3DError(
+		long error,
+		char* file,
+		i32 line)
 {
-	SpideyAppendDxError("D3D", error, file, line);
-	displayD3DError(error, file, line);
+	__asm
+	{
+		mov eax, [esp]
+		push dword ptr [esp+12]
+		push dword ptr [esp+12]
+		push dword ptr [esp+12]
+		push eax
+		push offset gSpideyDxKindD3D
+		call SpideyAppendDxErrorWithCaller
+		add esp, 20
+		jmp displayD3DError
+	}
 }
 #endif
+
 
 // @Bogus
 void game_patches(void)
