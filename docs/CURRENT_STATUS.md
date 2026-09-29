@@ -138,3 +138,37 @@ Planned BAT interface:
 - `RESTORE_STOCK_GAME.bat`
 
 Local game path will be stored in an ignored local config file and never committed.
+
+
+## BAT Workflow — READY
+
+Top-level BAT workflow is now committed on `dev`:
+
+- `SETUP_FIRST_TIME.bat` — configure / change retail game folder.
+- `UPDATE_PROJECT.bat` — fetch + fast-forward local `dev` from the user's fork.
+- `BUILD_DEV.bat` — build the matching proxy.
+- `INSTALL_DEV_BUILD.bat` — install the built proxy into the configured game folder.
+- `BUILD_AND_INSTALL.bat` — build + install in one step.
+- `RUN_GAME.bat` — launch `SpideyPC.exe` with the configured working directory.
+- `RESTORE_STOCK_GAME.bat` — restore the preserved retail Bink DLL.
+- `SPIDEY_DEV_MENU.bat` — numbered menu for all of the above.
+
+`spidey_local_config.bat` is ignored by Git and stores only the local retail game path.
+
+Documentation was rewritten BAT-first at commit `7839787e9730eb2321636b51060a539d9762c88c`.
+
+A standalone bootstrap package was also generated for the user as `Spider-Man-2000-Dev-Bootstrap.zip`; its `GET_SPIDEY_PROJECT.bat` clones `legentus/spidey-decomp` branch `dev` into a local folder (default: Documents\\Spider-Man-2000-Dev), or updates an existing clone, then runs first-time setup.
+
+### Normal local loop
+
+```text
+UPDATE_PROJECT.bat
+        ↓
+BUILD_AND_INSTALL.bat
+        ↓
+RUN_GAME.bat
+```
+
+### Next blocking step
+
+User should bootstrap/clone locally, run the BAT workflow, and report the first build + launch result. Capture the complete build console output and any `spidey-decomp` runtime console output. Do not begin gameplay-source bug fixes until the baseline proxy has been tested against the user's exact retail installation.
