@@ -1520,3 +1520,149 @@ Current priorities:
 1. runtime-test the Options fix while preserving first-level playability;
 2. diagnose/fix total absence of audio;
 3. add XInput/Xbox controller support through the existing PCINPUT/Pad abstraction, preserving remapping support and adding Xbox button prompts/UI.
+
+
+## Audio diagnostics + first XInput/Xbox backend implemented — 2026-09-29
+
+### Audio diagnostic implementation
+
+Retail `DXSOUND_Init` machine code was decoded from the preserved function artifact and gives exact retail globals:
+- `g_pDS = 0x006B7920`;
+- `gDxSoundBuffers[128] = 0x006BBAD4`;
+- `gDxSoundHolder[32] = 0x006BBD50`;
+- `g_pDSBuffer = 0x006BBF1C`.
+
+The retail function:
+- creates the primary buffer through `g_pDS`;
+- calls `SetVolume(0)`;
+- starts the primary buffer looping;
+- already reports failed DirectSound HRESULTs through the hooked DS error reporter.
+
+`SDDXSoundHolder` is verified 12 bytes and its first field is `LPDIRECTSOUNDBUFFER pDSB`, so active-voice diagnostics read the correct field.
+
+Commit:
+`7d42a06b1c70f8c706748926a8bfb3f5754d68ff`
+
+Diagnostic behavior:
+- the existing `DXINIT_DirectX8` call-site compatibility patch now redirects through a wrapper that calls untouched retail `0x004FDE90` and logs DirectSound state afterward;
+- direct retail calls to:
+  - `SFX_Init = 0x004718B0`
+  - `SFX_SpoolInLevelSFX = 0x004719B0`
+  are redirected through behavior-preserving diagnostic wrappers;
+- wrappers call the original retail function, then log:
+  - retail DirectSound device pointer;
+  - primary buffer pointer;
+  - number of non-null loaded sample buffers;
+  - number of active voice buffers;
+- output: `spidey-decomp-audio.log`.
+
+Launcher collection:
+`d32ef72818aecd7c4747ad43b3fe9f8bee79e922`
+
+No reconstructed audio subsystem has been substituted yet; this remains diagnostic-only to preserve the playable retail path.
+
+### XInput / Xbox controller backend phase 1
+
+Retail controller conventions were verified from `DXINPUT_PollController = 0x00501E50` machine code:
+- X/Y axes use range `-1000..+1000`;
+- POV uses DirectInput hundredths-of-degrees;
+- button state semantics:
+  - `0xFF` newly pressed;
+  - `0x7F` held;
+  - `0x80` newly released;
+  - `0x00` idle.
+
+Retail controller entrypoints:
+- setup: `0x00501890`;
+- poll: `0x00501E50`;
+- get button state: `0x00501FB0`;
+- setup FF: `0x00501FC0`;
+- start FF: `0x005021A0`;
+- stop FF: `0x005021E0`;
+- get button count: `0x00502210`.
+
+Implementation commit:
+`568c9c20148a382c77c34e6c246afa9e556222f0`
+
+Backend:
+- dynamically loads `xinput1_4.dll`, then `xinput1_3.dll`, then `xinput9_1_0.dll`;
+- scans users 0..3 and uses first connected XInput controller;
+- keyboard/mouse path remains untouched when no controller exists;
+- left stick converted to retail -1000..+1000 range with XInput deadzone;
+- D-pad converted to retail POV angles;
+- LT/RT exposed as remappable digital buttons with threshold;
+- press/held/release states match retail encoding;
+- XInput rumble integrated with existing force-feedback start/stop interface.
+
+Stable Xbox button index mapping deliberately preserves the retail default action table:
+- 0 = X
+- 1 = A
+- 2 = View
+- 3 = B
+- 4 = Y
+- 5 = LT
+- 6 = LB
+- 7 = RT
+- 8 = LS
+- 9 = RB
+- 10 = RS
+- 11 = Menu
+- 12..15 = D-pad U/D/L/R
+
+This makes existing defaults map naturally:
+- Smart Bomb -> X
+- Jump -> A
+- Crouch -> B
+- Select Weapon -> Y
+- shoulder/trigger actions -> LB/RB/RT
+- Start -> Menu
+
+Xbox configuration UI:
+- retail `initActionMaps = 0x0050D0F0`;
+- exact `sprintf("button %i")` call is at `0x0050D28C`;
+- only that call is redirected to Xbox-name formatter;
+- Options controller mappings show `A/B/X/Y/LB/RB/LT/RT/View/Menu/LS/RS` rather than generic button numbers.
+
+Controller log:
+- `spidey-decomp-controller.log`;
+- records selected XInput DLL, rumble availability and connected user index.
+
+Launcher collection:
+`deee34e11ad38c85c4f22980d32dd212c775a40e`
+
+### Controller feature scope still remaining
+
+Phase 1 covers:
+- XInput detection;
+- left-stick movement;
+- D-pad;
+- Xbox face/shoulder/trigger/Menu/View/stick-click buttons;
+- remapping through the existing game mapping system;
+- Xbox labels in the controller configuration UI;
+- rumble.
+
+Still to implement after runtime validation:
+- right-stick integration where appropriate for Spider-Man's camera/UI semantics;
+- broader in-game Xbox prompt/icon replacement outside the controller configuration screen;
+- persistence/UX edge-case testing across disconnect/reconnect and restored defaults.
+
+### Next runtime test
+
+Run latest update/build and verify:
+1. title -> Options no longer crashes;
+2. changing several Options values works;
+3. first level still loads and remains playable;
+4. note whether any sound is heard;
+5. with Xbox/XInput controller connected:
+   - left-stick movement;
+   - A/B/X/Y;
+   - LB/RB/RT;
+   - Menu/Start;
+   - D-pad/menu navigation;
+   - controller remapping screen and Xbox labels;
+   - rumble if encountered.
+
+Return all logs. New important logs:
+- `spidey-decomp-audio.log`
+- `spidey-decomp-controller.log`
+plus usual compat/runtime/crash/map/session/fingerprint logs.
