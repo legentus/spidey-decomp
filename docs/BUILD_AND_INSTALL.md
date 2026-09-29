@@ -1,75 +1,111 @@
-# Matching Windows Build and Baseline Install
+# Spider-Man 2000 Dev Build — BAT Workflow
 
-This project currently runs reconstructed Spider-Man 2000 PC code through a Bink proxy DLL. The retail executable remains in place while selected functions are redirected into the rebuilt DLL.
+The normal user workflow is now BAT-first. The PowerShell scripts remain underneath as implementation helpers, but you should not need to type PowerShell commands manually.
 
-## 1. Clone and select the development branch
-
-```powershell
-git clone https://github.com/legentus/spidey-decomp.git
-cd spidey-decomp
-git checkout dev
-```
-
-## 2. Build the matching Windows proxy
+## First-time setup
 
 Run:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_matching.ps1
+```text
+SETUP_FIRST_TIME.bat
 ```
 
-The script will:
-
-- download the preserved compiler/toolchain used by upstream CI to `C:\vs` if it is not already present;
-- stamp the current Git commit into the runtime version string;
-- run the existing `build.bat` / `spider.mak` matching build;
-- stage the result as `out\matching\binkw32.dll`;
-- copy symbols to `out\matching\spider.pdb` when produced;
-- print the SHA-256 of the generated proxy.
-
-Do not commit generated DLLs, PDBs, or retail game files.
-
-## 3. Install against a retail Spider-Man 2000 PC directory
-
-Replace the example path with the folder containing `SpideyPC.exe`:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install_dev_proxy.ps1 -GameDir "C:\Games\Spider-Man 2000"
-```
-
-On first install, the helper preserves the retail Bink DLL as:
+Enter the folder containing `SpideyPC.exe`. The path is saved locally in:
 
 ```text
-binkw32_.dll
+spidey_local_config.bat
 ```
 
-and installs the rebuilt proxy as:
+That file is ignored by Git.
+
+## Update your local project
+
+Run:
 
 ```text
-binkw32.dll
+UPDATE_PROJECT.bat
 ```
 
-## 4. Baseline launch
+It fetches and fast-forwards your local `dev` branch from:
 
-Launch `SpideyPC.exe` normally.
-
-Expected proof that the reconstructed DLL executed:
-
-- a console window is allocated;
-- its title contains `spidey-decomp - <commit>`;
-- startup prints `spidey-decomp starting <commit>`;
-- runtime validation runs before patches are applied.
-
-Do not make gameplay-source changes until this baseline launch is confirmed. If validation prints failures or the game crashes, preserve the entire console output and record the exact built DLL SHA-256.
-
-## 5. Restore the retail DLL
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\restore_stock_bink.ps1 -GameDir "C:\Games\Spider-Man 2000"
+```text
+https://github.com/legentus/spidey-decomp
 ```
 
-This removes the active proxy and restores the preserved retail `binkw32.dll`.
+It intentionally refuses to overwrite tracked local modifications.
 
-## GitHub Actions status
+## Build
 
-The `dev` workflow is configured to build automatically and also supports manual dispatch. At the time this document was written, the fork had not reported any `dev` workflow runs yet. If the repository's Actions page shows workflows disabled for the new fork, enable them there; the local build path above does not depend on Actions.
+Run:
+
+```text
+BUILD_DEV.bat
+```
+
+This uses the preserved matching Windows toolchain and stages:
+
+```text
+out\matching\binkw32.dll
+out\matching\spider.pdb
+```
+
+when symbols are produced.
+
+## Build + install
+
+Run:
+
+```text
+BUILD_AND_INSTALL.bat
+```
+
+This builds the current source and safely installs the proxy into the configured retail game folder.
+
+On first install:
+
+```text
+binkw32.dll   -> binkw32_.dll   (preserved retail original)
+new proxy     -> binkw32.dll
+```
+
+## Run
+
+Run:
+
+```text
+RUN_GAME.bat
+```
+
+A `spidey-decomp` console should appear if the proxy loads successfully.
+
+## Restore stock
+
+Run:
+
+```text
+RESTORE_STOCK_GAME.bat
+```
+
+This restores the preserved retail Bink DLL.
+
+## Menu
+
+You can also use:
+
+```text
+SPIDEY_DEV_MENU.bat
+```
+
+for a simple numbered menu covering setup, update, build, install, run, and restore.
+
+## Recommended normal loop
+
+```text
+UPDATE_PROJECT.bat
+        ↓
+BUILD_AND_INSTALL.bat
+        ↓
+RUN_GAME.bat
+```
+
+That is the intended day-to-day development workflow.
