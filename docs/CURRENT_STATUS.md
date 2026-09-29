@@ -489,3 +489,27 @@ Planned TEST_LATEST_BUILD behavior:
 7. unmount the ISO only if this script mounted it.
 
 The disc image path remains local-only and is not committed.
+
+
+### ISO auto-mount implementation completed
+
+Final clean implementation commit:
+`6d5405a419fea28e4e2bf011d099dc1c6be079b5`
+
+`tools/TEST_LATEST_BUILD.ps1` now:
+- reads `SPIDEY_DISC_IMAGE` from `spidey_local_config.bat`;
+- prompts once for the user's Spider-Man ISO if not configured;
+- validates that the file exists and is an `.iso`;
+- saves the ISO path locally;
+- detects whether that ISO is already mounted;
+- mounts it with Windows `Mount-DiskImage` if needed;
+- reports the assigned drive letter when available;
+- launches `SpideyPC.exe`;
+- keeps the image mounted for the full lifetime of the game process;
+- automatically dismounts the ISO after the game exits only when the script mounted it;
+- leaves an already-mounted ISO alone;
+- records the disc-image path in the per-run test-session log.
+
+During implementation a malformed intermediate script commit was detected during verification and immediately replaced before user testing. Commit `6d5405a419fea28e4e2bf011d099dc1c6be079b5` is the clean replacement.
+
+**Next user action:** run `UPDATE_SPIDEY_PROJECT.bat`, then `TEST_LATEST_BUILD.bat`. On the first run only, enter the path to the Spider-Man ISO. Accept the existing UAC prompt for the Program Files game install. Verify that the CD-ROM dialog no longer appears and that the game reaches the menu/gameplay.
