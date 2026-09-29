@@ -450,3 +450,26 @@ Fix commit:
 - preserves the same automatic build/install/launch workflow.
 
 **Next user action:** run `UPDATE_SPIDEY_PROJECT.bat` once to pull this fix, then run `TEST_LATEST_BUILD.bat`. Accept the Windows UAC prompt when it appears. Expected next frontier is actual proxy install + game launch.
+
+
+## First successful proxy install + game launch — 2026-09-29
+
+User ran the fixed elevated `TEST_LATEST_BUILD.bat`.
+
+Observed successful baseline:
+- revision tested: `8a7a069ed2650f8c390b10922b47737cb0bd8c0d`;
+- game: `C:\Program Files (x86)\Activision\Spider-Man\SpideyPC.exe`;
+- elevated game-folder access confirmed;
+- matching toolchain found at `C:\Users\alh60\AppData\Local\Spidey2000Dev\MatchingVS`;
+- incremental rebuild completed successfully;
+- proxy SHA-256 remained:
+  `5C444AE81948E054B835C8E0DD2D31C2098EEA063B7BF9B896B5BDE3873F1B72`;
+- retail `binkw32.dll` was successfully preserved as `binkw32_.dll`;
+- rebuilt proxy installed as live `binkw32.dll`;
+- game launched successfully;
+- session log directory:
+  `F:\Spider-Man 2000 Recomp\project main\logs\20260929-024052`.
+
+This is the first confirmed build/install/launch baseline for the local Spider-Man dev workflow.
+
+**Next frontier:** capture/verify the runtime console assertions and whether the game reaches menu/gameplay cleanly under the proxy. Once confirmed, perform one low-risk deliberate source-level proof change before choosing the first real gameplay bug.
