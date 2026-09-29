@@ -1382,5 +1382,31 @@ BOOL WINAPI DllMain(
 void DoAssert(u8 cond, const char* str, ...)
 {
 	if (!cond)
-		puts(str);
+	{
+		char message[1024];
+		message[0] = '\0';
+
+		va_list args;
+		va_start(args, str);
+		_vsnprintf(
+			message,
+			sizeof(message) - 1,
+			str,
+			args);
+		va_end(args);
+
+		message[sizeof(message) - 1] = '\0';
+
+		puts(message);
+
+		FILE* f = fopen(
+			"spidey-decomp-runtime.log",
+			"a");
+
+		if (f)
+		{
+			fprintf(f, "ASSERT: %s\n", message);
+			fclose(f);
+		}
+	}
 }
