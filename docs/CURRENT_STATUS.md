@@ -403,3 +403,18 @@ Root cause identified:
 - the updater also has a success-path `exit 0` when already current; because the updater is invoked inside the latest-test PowerShell process, that should be replaced with a normal return so it cannot terminate the parent test workflow.
 
 **ACTIVE FIX:** normalize `$global:LASTEXITCODE = 0` on all successful updater returns and avoid `exit` on successful updater paths.
+
+
+### Updater exit-code fix committed
+
+Fix commit:
+`3b90e5d8b39081bb1ca1e3dc053b9d62b813cdb1`
+
+Changes:
+- successful "already current" path now uses `return` instead of `exit 0`;
+- all successful updater completions explicitly set `$global:LASTEXITCODE = 0`;
+- this prevents successful robocopy codes 1-7 (observed code 3) from being misread by `TEST_LATEST_BUILD.ps1` as an update failure.
+
+Recovery from the user's current local state:
+1. run `UPDATE_SPIDEY_PROJECT.bat` once by itself so the fixed updater is pulled into the local project;
+2. then run `TEST_LATEST_BUILD.bat` again.
