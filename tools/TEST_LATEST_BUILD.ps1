@@ -422,6 +422,9 @@ if (Test-Path $compatLog) {
 if ($exitCode -eq -1073741819) {
     Write-Host "[CRASH] Exit code is 0xC0000005 (access violation)."
 }
+elseif ($exitCode -eq -1073741571) {
+    Write-Host "[CRASH] Exit code is 0xC00000FD (stack overflow)."
+}
 
 Write-Host ""
 Read-Host "Press Enter to close this launcher"
