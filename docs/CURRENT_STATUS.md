@@ -62,7 +62,14 @@ We **do not need a standalone fully rebuilt executable before fixing bugs**. We 
 
 **ACTIVE:** establish a reproducible baseline build from our `dev` branch before making gameplay/source changes.
 
-The existing upstream GitHub Actions workflow only runs pushes for `master` and `issa_dll`. Our next repository change is to enable CI for `dev` (and manual dispatch) without touching reconstructed gameplay code.
+CI workflow was updated on `dev` at commit `9748899a10ce5ac708f54e4f9c7d8c4de3845351` to:
+- run on pushes to `dev`;
+- allow manual `workflow_dispatch`;
+- allow PR validation targeting `dev`.
+
+**Observed after the push:** GitHub's Actions-runs API currently reports zero runs for branch `dev`, and the commit has no combined status entries. Therefore the CI build is **not yet verified**. Do not assume the DLL was built. This may require enabling Actions for the newly created fork or another workflow-side fix; exact cause not yet proven.
+
+To avoid blocking progress on fork Actions initialization, the next work item is a local one-command Windows matching-build helper that reproduces the same preserved-toolchain procedure used by upstream CI.
 
 ## Baseline Test Plan
 
@@ -79,4 +86,11 @@ Do **not** move on to a gameplay bug until this baseline is confirmed.
 
 ## Next Action
 
-Modify the GitHub Actions workflow on `dev` so our branch automatically validates and builds the matching Windows proxy DLL. Then inspect the resulting workflow run/artifact and use that exact artifact for the first retail-game baseline test.
+Add a safe local Windows matching-build path on `dev` that:
+1. bootstraps the preserved compiler/toolchain used by upstream CI when needed;
+2. writes `runtime_version.h` from the current Git commit;
+3. runs the existing `build.bat` / `spider.mak` unchanged;
+4. stages the generated proxy as `out\\matching\\binkw32.dll`;
+5. prints a SHA-256 so the exact tested artifact can be recorded.
+
+After that, add a safe install/restore helper for the retail game and perform the first baseline launch.
