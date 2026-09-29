@@ -42,14 +42,6 @@ echo This file is ignored by Git and will stay local to this PC:
 echo   spidey_local_config.bat
 echo.
 
-where git.exe >nul 2>&1
-if errorlevel 1 (
-    echo [WARNING] Git was not found in PATH.
-    echo Install Git for Windows before using UPDATE_PROJECT.bat.
-) else (
-    echo [OK] Git found.
-)
-
 echo.
 echo Setup complete.
 echo Next: run UPDATE_PROJECT.bat, then BUILD_AND_INSTALL.bat.
