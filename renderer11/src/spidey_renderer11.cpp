@@ -86,6 +86,7 @@ namespace
     ID3D11ShaderResourceView* gShadowWhiteSrv = nullptr;
     ID3D11Buffer* gShadowVertexBuffer = nullptr;
     size_t gShadowVertexBufferCapacity = 0;
+    ID3D11Texture2D* gShadowSampleReadback = nullptr;
 
     std::unordered_map<unsigned long long, ID3D11DepthStencilState*> gShadowDepthStates;
     std::unordered_map<unsigned long long, ID3D11BlendState*> gShadowBlendStates;
@@ -215,6 +216,7 @@ namespace
     void ReleaseShadowPipeline()
     {
         ReleaseShadowTargets();
+        SafeRelease(gShadowSampleReadback);
         SafeRelease(gShadowVertexBuffer);
         gShadowVertexBufferCapacity = 0;
         SafeRelease(gShadowWhiteSrv);
@@ -1007,6 +1009,135 @@ namespace
         gShadowHeight = height;
 
         Log("shadow targets ready width=%lu height=%lu", width, height);
+        return true;
+    }
+
+    bool SampleShadowTarget(
+        unsigned long& sampleHash,
+        unsigned long& nonBlack)
+    {
+        sampleHash = 2166136261UL;
+        nonBlack = 0;
+
+        if (!gDevice ||
+            !gContext ||
+            !gShadowColorTexture ||
+            gShadowWidth == 0 ||
+            gShadowHeight == 0)
+        {
+            return false;
+        }
+
+        if (!gShadowSampleReadback)
+        {
+            D3D11_TEXTURE2D_DESC desc = {};
+            desc.Width = 3;
+            desc.Height = 3;
+            desc.MipLevels = 1;
+            desc.ArraySize = 1;
+            desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+            desc.SampleDesc.Count = 1;
+            desc.Usage = D3D11_USAGE_STAGING;
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+            const HRESULT hr =
+                gDevice->CreateTexture2D(
+                    &desc,
+                    nullptr,
+                    &gShadowSampleReadback);
+
+            if (FAILED(hr) || !gShadowSampleReadback)
+            {
+                Log(
+                    "shadow sample_readback create_failed hr=0x%08lX",
+                    static_cast<unsigned long>(hr));
+                SafeRelease(gShadowSampleReadback);
+                return false;
+            }
+        }
+
+        const unsigned long xs[3] =
+        {
+            gShadowWidth / 4UL,
+            gShadowWidth / 2UL,
+            (gShadowWidth * 3UL) / 4UL
+        };
+
+        const unsigned long ys[3] =
+        {
+            gShadowHeight / 4UL,
+            gShadowHeight / 2UL,
+            (gShadowHeight * 3UL) / 4UL
+        };
+
+        for (unsigned long y = 0; y < 3; ++y)
+        {
+            for (unsigned long x = 0; x < 3; ++x)
+            {
+                D3D11_BOX box = {};
+                box.left = xs[x];
+                box.top = ys[y];
+                box.front = 0;
+                box.right = xs[x] + 1;
+                box.bottom = ys[y] + 1;
+                box.back = 1;
+
+                gContext->CopySubresourceRegion(
+                    gShadowSampleReadback,
+                    0,
+                    x,
+                    y,
+                    0,
+                    gShadowColorTexture,
+                    0,
+                    &box);
+            }
+        }
+
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        const HRESULT hr =
+            gContext->Map(
+                gShadowSampleReadback,
+                0,
+                D3D11_MAP_READ,
+                0,
+                &mapped);
+
+        if (FAILED(hr) || !mapped.pData)
+        {
+            Log(
+                "shadow sample_readback map_failed hr=0x%08lX",
+                static_cast<unsigned long>(hr));
+            return false;
+        }
+
+        for (unsigned long y = 0; y < 3; ++y)
+        {
+            const unsigned char* row =
+                static_cast<const unsigned char*>(mapped.pData) +
+                static_cast<size_t>(y) * mapped.RowPitch;
+
+            for (unsigned long x = 0; x < 3; ++x)
+            {
+                const unsigned char* pixel =
+                    row + static_cast<size_t>(x) * 4U;
+
+                const unsigned long colorRef =
+                    static_cast<unsigned long>(pixel[2]) |
+                    (static_cast<unsigned long>(pixel[1]) << 8) |
+                    (static_cast<unsigned long>(pixel[0]) << 16);
+
+                sampleHash ^= colorRef;
+                sampleHash *= 16777619UL;
+
+                if (colorRef != 0)
+                    ++nonBlack;
+            }
+        }
+
+        gContext->Unmap(
+            gShadowSampleReadback,
+            0);
         return true;
     }
 
@@ -2495,6 +2626,13 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         0);
     gContext->RSSetState(nullptr);
 
+    unsigned long sampleHash = 0;
+    unsigned long sampleNonBlack = 0;
+    const int sampled =
+        SampleShadowTarget(
+            sampleHash,
+            sampleNonBlack) ? 1 : 0;
+
     if (frame <= 5 ||
         (frame % 120) == 0 ||
         skippedSubmit ||
@@ -2502,7 +2640,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         rendered != queuedCommands)
     {
         Log(
-            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu",
+            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu sampled=%d sample_hash=0x%08lX nonblack=%lu",
             frame,
             sceneWidth,
             sceneHeight,
@@ -2511,7 +2649,10 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
             skippedSubmit,
             rendered,
             skippedRender,
-            static_cast<unsigned long long>(queuedVertices));
+            static_cast<unsigned long long>(queuedVertices),
+            sampled,
+            sampleHash,
+            sampleNonBlack);
     }
 
     resetFrame();
