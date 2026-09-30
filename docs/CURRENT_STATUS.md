@@ -2959,3 +2959,55 @@ Next implementation:
    - log transition/result even if WM_ACTIVATEAPP is missed;
 4. ensure input log is created at DirectInput initialization so absence itself is diagnostic;
 5. retain legacy frontend canvas, D3D caps fix, texture hash fix, borderless presentation, and modern resolution support.
+
+
+## Fix batch ready: release leaked movie surface + foreground-polled DirectInput recovery — 2026-09-29
+
+Implementation:
+- `f84ee7f885ed6f36faf6ec5656d1c131e563c9c9`
+  - changes the movie-specific flip hook to a dedicated wrapper;
+  - reads the real retail Bink pointer at `0x00AC0BA4`;
+  - when the final movie frame has just been presented, releases the real retail movie surface at `0x00AC0A3C` and clears the slot;
+  - logs surface size and Release() remaining-ref count;
+  - also scans direct retail callers of `PCMOVIE_Stop 0x0050B790` and redirects them through a wrapper that performs the same movie-surface cleanup after the untouched retail stop logic;
+  - this covers both normal movie completion and direct stop/skip paths where available.
+- `52c9f7f7204412668cbfadefd449da998e125383`
+  - adds foreground-window polling as a second DirectInput recovery mechanism;
+  - keyboard/mouse polling compares `GetForegroundWindow()` against `gDxInputHwnd` every poll;
+  - foreground transitions invoke the existing activation handler even if `WM_ACTIVATEAPP` is missed;
+  - polling is suppressed while the game is not foreground;
+  - DirectInput initialization now always creates `spidey-decomp-input.log` with HWND/foreground/focus state.
+- `12986a56b9365ef1c8ce8a549fd273898e9098dd`
+  - old-MSVC compile correction: moves the foreground-sync helper below the `gDxInputHwnd` definition.
+
+Retail evidence behind movie cleanup:
+- retail `PCMOVIE_NextFrame 0x0050B5A0` uses movie surface pointer `0x00AC0A3C`;
+- the function blits that surface into scene `0x006B7908` and calls `DXPOLY_Flip` at `0x0050B71A`;
+- retail `PCMOVIE_Stop 0x0050B790` closes Bink/file state but does not Release the movie surface;
+- DirectDraw teardown later calls Release() on movie DirectDraw object `0x006B7900` and reports remaining refcount 4;
+- multiple startup movies leaking one surface reference each is consistent with that count and with stale movie/display state surviving into the frontend rebuild.
+
+Static verification:
+- movie cleanup references the retail surface/Bink globals, not reconstructed DLL-owned placeholders;
+- final-frame release occurs only after the movie frame has been presented;
+- direct Stop callers use untouched retail Stop first, then surface cleanup;
+- foreground polling compiles against globals declared before use;
+- legacy 640x480 frontend canvas remains enabled;
+- fixed D3D caps, texture hash, borderless presentation, and modern resolution support remain intact.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. observe all startup movies;
+3. check start + main menus for rapidly flashing building/city imagery;
+4. Alt+Tab out for a second, then return and test keyboard + mouse;
+5. upload the full session.
+
+Most useful evidence:
+- `spidey-decomp-present.log`
+  - `movie_surface_release reason=final_frame ... remaining_refs=...`;
+  - `movie_stop_compat patched_calls=...`;
+- `spidey-decomp-dxerror.log`
+  - compare the old movie DirectDraw remaining refcount 4 after cleanup;
+- `spidey-decomp-input.log`
+  - now guaranteed to be created at input initialization;
+  - should show foreground deactivate/reactivate and Acquire results.
