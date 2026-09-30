@@ -4296,3 +4296,45 @@ NEXT FRONTIER — Phase 2C3:
 - retain F10 as an immediate A/B fallback to the D3D7-reference image;
 - keep D3D7 DrawPrimitive executing in the background for one more validation stage;
 - after default-DX11 runtime validation, begin a controlled mode that suppresses original main-scene D3D7 DrawPrimitive while leaving all state/texture/device plumbing intact.
+
+
+## DX11 Phase 2C3 — DX11 geometry is now the default visible renderer — 2026-09-30
+
+Implementation:
+- `gSpideyShadowPreviewEnabled` now defaults to 1;
+- the first Flip synchronizes renderer11 continuous shadow replay before the first shadow EndFrame;
+- the default windowed/compat presentation path is therefore:
+  retail state + primitive interception -> renderer11 DX11 scene -> DXGI swap chain;
+- the old D3D7 scene -> PresentPixels path remains intact as the built-in reference fallback;
+- **F10 now acts as the A/B reference toggle**:
+  - default/on = DX11 geometry visible;
+  - off = D3D7-rendered reference image visible;
+  - toggling DX11 back on keeps the deliberate one-frame warmup to avoid presenting a partially captured frame;
+- original D3D7 DrawPrimitive is still executed in the background in both modes for this validation stage.
+
+Source commit:
+- `4fc226ceb3e11003e6872feef9c1ad7a042a985e` — make DX11 geometry the default visible renderer.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. do **not press F10 initially**;
+3. confirm startup, frontend, level load, HUD, and gameplay all look correct with DX11 now active by default;
+4. play for several minutes;
+5. press F10 once and confirm the old D3D7-reference image appears;
+6. press F10 again and confirm DX11 returns after one warmup frame;
+7. return to frontend / change level if convenient, to validate device/mode transitions while DX11 remains default;
+8. exit normally and provide logs.
+
+Expected markers:
+- `shadow_default frame=... enabled=1 mode=dx11_geometry key=F10_reference_toggle`;
+- renderer: `shadow_continuous enabled=1`;
+- normal default presentation after startup:
+  `dx11_shadow=1 dx11_pixels=0 shadow_preview=1 shadow_ready=1 compat_result=4`;
+- F10 reference mode:
+  `enabled=0` followed by `dx11_shadow=0 dx11_pixels=1 ... compat_result=3`.
+
+If Phase 2C3 passes:
+- begin Phase 2D: controlled suppression of original **main-scene** D3D7 DrawPrimitive while DX11 is authoritative;
+- keep D3D7 state setters, texture/resource creation, and any offscreen passes intact initially;
+- provide a reference-mode switch that re-enables D3D7 draws with a warmup frame;
+- prove the visible game no longer depends on D3D7 geometry rendering before moving scene/depth/resource ownership further into DX11.
