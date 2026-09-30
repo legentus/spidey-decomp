@@ -4174,9 +4174,77 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	const unsigned long frame =
 		++gSpideyPresentFrame;
 
-	// DXPOLY_Flip is called after the retail EndScene/renderScene work, so
-	// the pass-through DrawPrimitive hook has now observed the complete
-	// primitive stream for this presented frame.
+	// DXPOLY_Flip runs after retail EndScene. Transient texture surfaces are
+	// no longer actively bound for drawing here, so this is the safe point
+	// to lock/mirror them and then replay the queued retail primitive stream
+	// into the completely offscreen DX11 shadow target.
+	SpideyProcessPendingTransientSurfaces();
+
+	unsigned long shadowWidth =
+		(unsigned long)*(DWORD*)0x006B78E4;
+	unsigned long shadowHeight =
+		(unsigned long)*(DWORD*)0x006B78E8;
+
+	LPDIRECTDRAWSURFACE7 shadowScene =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
+	if (shadowScene)
+	{
+		DDSURFACEDESC2 shadowDesc;
+		memset(
+			&shadowDesc,
+			0,
+			sizeof(shadowDesc));
+		shadowDesc.dwSize =
+			sizeof(shadowDesc);
+
+		if (SUCCEEDED(
+				shadowScene->GetSurfaceDesc(
+					&shadowDesc)) &&
+			shadowDesc.dwWidth &&
+			shadowDesc.dwHeight)
+		{
+			shadowWidth =
+				(unsigned long)shadowDesc.dwWidth;
+			shadowHeight =
+				(unsigned long)shadowDesc.dwHeight;
+		}
+	}
+
+	int shadowFrameResult =
+		0;
+
+	if (shadowWidth &&
+		shadowHeight)
+	{
+		shadowFrameResult =
+			SpideyRenderer11ShadowEndFrame(
+				frame,
+				shadowWidth,
+				shadowHeight);
+	}
+
+	if ((frame <= 5 ||
+		 (frame % 120) == 0) &&
+		!shadowFrameResult)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"shadow_frame_bridge frame=%lu result=0 target=%lux%lu\n",
+				frame,
+				shadowWidth,
+				shadowHeight);
+			fclose(f);
+		}
+	}
+
+	// The original D3D7 draw path remains authoritative and visible. These
+	// counters describe the same completed retail frame that was shadowed.
 	SpideyFlushRetailD3D7DrawProbeFrame(
 		frame);
 	SpideyInstallRetailD3D7DrawProbe();
