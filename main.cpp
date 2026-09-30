@@ -1975,6 +1975,147 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 }
 
 
+static void SpideyReleaseRetailMovieSurface(
+		const char* reason)
+{
+	LPDIRECTDRAWSURFACE7* slot =
+		(LPDIRECTDRAWSURFACE7*)0x00AC0A3C;
+	LPDIRECTDRAWSURFACE7 surface =
+		*slot;
+
+	if (!surface)
+		return;
+
+	DDSURFACEDESC2 desc;
+	memset(&desc, 0, sizeof(desc));
+	desc.dwSize =
+		sizeof(desc);
+
+	HRESULT descHr =
+		surface->GetSurfaceDesc(
+			&desc);
+
+	ULONG refs =
+		surface->Release();
+	*slot =
+		0;
+
+	FILE* f = fopen(
+		"spidey-decomp-present.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"movie_surface_release reason=%s surface=0x%08lX desc_hr=0x%08lX size=%lux%lu remaining_refs=%lu\n",
+			reason ? reason : "unknown",
+			(unsigned long)surface,
+			(unsigned long)descHr,
+			(unsigned long)desc.dwWidth,
+			(unsigned long)desc.dwHeight,
+			(unsigned long)refs);
+		fclose(f);
+	}
+}
+
+static void __cdecl SpideyDiagMovieFlip(void)
+{
+	HBINK movie =
+		*(HBINK*)0x00AC0BA4;
+	const int finalFrame =
+		movie &&
+		movie->Frames &&
+		movie->FrameNum == movie->Frames;
+
+	SpideyDiagDXPOLYFlip();
+
+	if (finalFrame)
+	{
+		SpideyReleaseRetailMovieSurface(
+			"final_frame");
+	}
+}
+
+typedef void (__cdecl *SpideyRetailMovieStopFn)(void);
+
+static void __cdecl SpideyCompatMovieStop(void)
+{
+	SpideyRetailMovieStopFn retailStop =
+		(SpideyRetailMovieStopFn)0x0050B790;
+
+	retailStop();
+
+	SpideyReleaseRetailMovieSurface(
+		"stop_call");
+}
+
+static void SpideyInstallMovieStopCompat()
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	const unsigned long retailStop =
+		0x0050B790;
+
+	int patched =
+		0;
+
+	FILE* f = fopen(
+		"spidey-decomp-present.log",
+		"a");
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long rel =
+			*(long*)(p + 1);
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != retailStop)
+			continue;
+
+		long newRel =
+			(long)(
+				(unsigned char*)&SpideyCompatMovieStop -
+				(p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+
+		if (f)
+		{
+			fprintf(
+				f,
+				"movie_stop_patch call_site=0x%08lX retail_target=0x0050B790 wrapper=0x%08lX\n",
+				(unsigned long)p,
+				(unsigned long)&SpideyCompatMovieStop);
+		}
+
+		patched++;
+	}
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"movie_stop_compat patched_calls=%d\n",
+			patched);
+		fclose(f);
+	}
+}
+
 static void SpideyInstallMoviePresentCompat()
 {
 	unsigned char* start =
@@ -2029,7 +2170,7 @@ static void SpideyInstallMoviePresentCompat()
 
 	long newRel =
 		(long)(
-			(unsigned char*)&SpideyDiagDXPOLYFlip -
+			(unsigned char*)&SpideyDiagMovieFlip -
 			(match + 5));
 
 	*(long*)(match + 1) =
@@ -2047,7 +2188,7 @@ static void SpideyInstallMoviePresentCompat()
 			"movie_present installed call_site=0x%08lX retail_target=0x%08lX wrapper=0x%08lX\n",
 			(unsigned long)match,
 			retailFlip,
-			(unsigned long)&SpideyDiagDXPOLYFlip);
+			(unsigned long)&SpideyDiagMovieFlip);
 		fclose(f);
 	}
 }
@@ -2288,6 +2429,7 @@ void game_patches(void)
 	SpideyInstallDisplayOptionsCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
+	SpideyInstallMovieStopCompat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
