@@ -2192,6 +2192,25 @@ int SpideyRenderer11ShadowEndFrame(
 			sceneHeight);
 }
 
+void SpideyRenderer11ShadowSetContinuous(
+		int enabled)
+{
+	if (gSpideyRenderer11ShadowSetContinuous)
+		gSpideyRenderer11ShadowSetContinuous(enabled);
+}
+
+int SpideyRenderer11PresentShadow(
+		int preserveAspect,
+		int vsync)
+{
+	if (!gSpideyRenderer11PresentShadow)
+		return 0;
+
+	return gSpideyRenderer11PresentShadow(
+			preserveAspect,
+			vsync);
+}
+
 void SpideyRenderer11ReleaseMirroredTexture(
 		unsigned long textureId)
 {
