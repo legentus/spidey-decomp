@@ -1432,6 +1432,9 @@ typedef int (__cdecl *SpideyRenderer11UpdateTextureFn)(
 		unsigned long,
 		unsigned long,
 		unsigned long);
+typedef int (__cdecl *SpideyRenderer11AssociateTextureHandleFn)(
+		unsigned long,
+		unsigned long);
 typedef void (__cdecl *SpideyRenderer11ReleaseTextureFn)(
 		unsigned long);
 typedef void (__cdecl *SpideyRenderer11ReleaseAllTexturesFn)(void);
@@ -1443,6 +1446,7 @@ static SpideyRenderer11ResizeFn gSpideyRenderer11Resize = 0;
 static SpideyRenderer11PresentPixelsFn gSpideyRenderer11PresentPixels = 0;
 static SpideyRenderer11PresentHdcFn gSpideyRenderer11PresentHdc = 0;
 static SpideyRenderer11UpdateTextureFn gSpideyRenderer11UpdateTexture = 0;
+static SpideyRenderer11AssociateTextureHandleFn gSpideyRenderer11AssociateTextureHandle = 0;
 static SpideyRenderer11ReleaseTextureFn gSpideyRenderer11ReleaseTexture = 0;
 static SpideyRenderer11ReleaseAllTexturesFn gSpideyRenderer11ReleaseAllTextures = 0;
 static SpideyRenderer11GetResidentTextureCountFn gSpideyRenderer11GetResidentTextureCount = 0;
@@ -1521,6 +1525,11 @@ static int SpideyProbeRenderer11Bridge()
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_UpdateTexture");
 
+	gSpideyRenderer11AssociateTextureHandle =
+		(SpideyRenderer11AssociateTextureHandleFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_AssociateTextureHandle");
+
 	gSpideyRenderer11ReleaseTexture =
 		(SpideyRenderer11ReleaseTextureFn)GetProcAddress(
 			gSpideyRenderer11Module,
@@ -1549,6 +1558,7 @@ static int SpideyProbeRenderer11Bridge()
 		!gSpideyRenderer11PresentPixels ||
 		!gSpideyRenderer11PresentHdc ||
 		!gSpideyRenderer11UpdateTexture ||
+		!gSpideyRenderer11AssociateTextureHandle ||
 		!gSpideyRenderer11ReleaseTexture ||
 		!gSpideyRenderer11ReleaseAllTextures ||
 		!gSpideyRenderer11GetResidentTextureCount ||
@@ -1558,7 +1568,7 @@ static int SpideyProbeRenderer11Bridge()
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
 				(unsigned long)probe,
@@ -1567,6 +1577,7 @@ static int SpideyProbeRenderer11Bridge()
 				(unsigned long)gSpideyRenderer11PresentPixels,
 				(unsigned long)gSpideyRenderer11PresentHdc,
 				(unsigned long)gSpideyRenderer11UpdateTexture,
+				(unsigned long)gSpideyRenderer11AssociateTextureHandle,
 				(unsigned long)gSpideyRenderer11ReleaseTexture,
 				(unsigned long)gSpideyRenderer11ReleaseAllTextures,
 				(unsigned long)gSpideyRenderer11GetResidentTextureCount,
@@ -1875,6 +1886,39 @@ int SpideyRenderer11MirrorLegacyTexture(
 	}
 
 	return mirrored;
+}
+
+int SpideyRenderer11AssociateLegacyTexture(
+		unsigned long textureId,
+		void* legacySurface)
+{
+	if (!gSpideyRenderer11AssociateTextureHandle ||
+		!legacySurface)
+	{
+		return 0;
+	}
+
+	int associated =
+		gSpideyRenderer11AssociateTextureHandle(
+			textureId,
+			(unsigned long)legacySurface);
+
+	FILE* f = fopen(
+		"spidey-decomp-texture.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"dx11_associate id=%lu handle=0x%08lX result=%d resident=%lu\n",
+			textureId,
+			(unsigned long)legacySurface,
+			associated,
+			SpideyRenderer11GetMirroredTextureCount());
+		fclose(f);
+	}
+
+	return associated;
 }
 
 void SpideyRenderer11ReleaseMirroredTexture(
