@@ -4641,3 +4641,13 @@ Expected new log markers:
 - gameplay transition:
   `display_options selected=2560x1440x32 physical=1920x1440x32 ... legacy_backing_remap=1`;
   `logical_render_resolution ... logical=2560x1440 physical=1920x1440 selected=2560x1440`.
+
+
+Phase 3C install-order correction:
+- the Apply-specific `0x0050DCF8` hook must install before `SpideyInstallDisplayOptionsCompat`, because the generic installer scans and rewrites all remaining direct calls to `0x00500250`;
+- install order is now:
+  1. modern mode reinit compat;
+  2. transactional Display Options / Apply hooks;
+  3. generic display-options compat for all remaining retail call sites;
+- expected `display_options_compat patched_calls` changes from 4 to **3** by design;
+- correction commit: `016b7438fd7008d8e6075105c0b4f2e9201d5703`.
