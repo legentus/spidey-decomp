@@ -2809,6 +2809,216 @@ const SpideyInput11LegacyState* SpideyInput11GetState()
 	return &gSpideyInput11State;
 }
 
+static CCamera* gSpideyCameraTelemetryLastCamera = 0;
+static int gSpideyCameraTelemetryLastMode = -9999;
+
+static const char* SpideyCameraModeName(
+		int mode)
+{
+	switch (mode)
+	{
+		case CAMERAMODE_NOTHING: return "NOTHING";
+		case CAMERAMODE_NORMAL: return "NORMAL";
+		case CAMERAMODE_NO_BIG_AIR: return "NO_BIG_AIR";
+		case CAMERAMODE_DEMO: return "DEMO";
+		case CAMERAMODE_START: return "START";
+		case CAMERAMODE_FAR: return "FAR";
+		case CAMERAMODE_OVERHEAD: return "OVERHEAD";
+		case CAMERAMODE_FRONT: return "FRONT";
+		case CAMERAMODE_IDLE: return "IDLE";
+		case CAMERAMODE_FLYING: return "FLYING";
+		case CAMERAMODE_FUNKYFLYING: return "FUNKYFLYING";
+		case CAMERAMODE_ROLLERCOASTER: return "ROLLERCOASTER";
+		case CAMERAMODE_PAN: return "PAN";
+		case CAMERAMODE_ITSYLOOKDOWN: return "ITSYLOOKDOWN";
+		case CAMERAMODE_ITSYLOOKUP: return "ITSYLOOKUP";
+		case CAMERAMODE_LOOSE: return "LOOSE";
+		case CAMERAMODE_USER: return "USER";
+		case CAMERAMODE_LOOKAROUND: return "LOOKAROUND";
+		case CAMERAMODE_UPSIDETEST: return "UPSIDETEST";
+		case CAMERAMODE_BOSSBEAST: return "BOSSBEAST";
+		case CAMERAMODE_BOSSWAR: return "BOSSWAR";
+		case CAMERAMODE_BOSSTANK: return "BOSSTANK";
+		case CAMERAMODE_DEBUG: return "DEBUG";
+		case CAMERAMODE_COMPETITIONINTRO: return "COMPETITIONINTRO";
+		default: return "UNKNOWN";
+	}
+}
+
+static void SpideyCameraPassivePoll(
+		unsigned long frame)
+{
+	// 0x0056F3B8 is the retail active-camera pointer used by
+	// CPlayer::PutCameraBehind. Read only; Phase 0 camera work must not
+	// mutate retail camera state.
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+
+	if (!camera)
+	{
+		if (gSpideyCameraTelemetryLastCamera)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-camera.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"camera_state frame=%lu camera=0x00000000 event=detached passive=1\n",
+					frame);
+				fclose(f);
+			}
+		}
+
+		gSpideyCameraTelemetryLastCamera =
+			0;
+		gSpideyCameraTelemetryLastMode =
+			-9999;
+		return;
+	}
+
+	int mode = -1;
+	int pushedMode = -1;
+	int x = 0;
+	int y = 0;
+	int z = 0;
+	int focusX = 0;
+	int focusY = 0;
+	int focusZ = 0;
+	int heading = 0;
+	int transformHeading = 0;
+	int zoom = 0;
+	int collisionRayLR = 0;
+	int collisionRayBack = 0;
+	int xzDistance = 0;
+	int yDistance = 0;
+	int valid = 0;
+
+	__try
+	{
+		unsigned char* bytes =
+			(unsigned char*)camera;
+
+		x = *(int*)(bytes + 0x008);
+		y = *(int*)(bytes + 0x00C);
+		z = *(int*)(bytes + 0x010);
+		focusX = *(int*)(bytes + 0x144);
+		focusY = *(int*)(bytes + 0x148);
+		focusZ = *(int*)(bytes + 0x14C);
+		zoom = *(int*)(bytes + 0x170);
+		heading =
+			(int)(*(short*)(bytes + 0x236)) &
+			0x0FFF;
+		transformHeading =
+			(int)(*(short*)(bytes + 0x23A)) &
+			0x0FFF;
+		collisionRayLR =
+			*(int*)(bytes + 0x264);
+		collisionRayBack =
+			*(int*)(bytes + 0x268);
+		pushedMode =
+			*(int*)(bytes + 0x280);
+		mode =
+			*(int*)(bytes + 0x2A0);
+
+		// Retail GetCamXZDistance/GetCamYDistance read these exact globals.
+		xzDistance =
+			(int)*(short*)0x00548860;
+		yDistance =
+			(int)*(short*)0x00548864;
+
+		valid =
+			1;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		valid =
+			0;
+	}
+
+	if (!valid)
+	{
+		if (camera != gSpideyCameraTelemetryLastCamera)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-camera.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"camera_state frame=%lu camera=0x%08lX event=read_fault passive=1\n",
+					frame,
+					(unsigned long)camera);
+				fclose(f);
+			}
+		}
+
+		gSpideyCameraTelemetryLastCamera =
+			camera;
+		return;
+	}
+
+	const int cameraChanged =
+		camera != gSpideyCameraTelemetryLastCamera;
+	const int modeChanged =
+		mode != gSpideyCameraTelemetryLastMode;
+	const SpideyInput11LegacyState* input =
+		SpideyInput11GetState();
+	const int modernController =
+		input &&
+		input->connected;
+	const int periodic =
+		frame <= 5 ||
+		(frame % (modernController ? 60 : 300)) == 0;
+
+	if (cameraChanged ||
+		modeChanged ||
+		periodic)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-camera.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"camera_state frame=%lu camera=0x%08lX event=%s mode=%d mode_name=%s pushed_mode=%d heading=%d transform_heading=%d pos=%d,%d,%d focus=%d,%d,%d xz_dist=%d y_dist=%d zoom=%d collision_rays=%d,%d input_connected=%d input_camera=%.4f,%.4f passive=1\n",
+				frame,
+				(unsigned long)camera,
+				cameraChanged ? "camera_change" :
+					modeChanged ? "mode_change" :
+					"periodic",
+				mode,
+				SpideyCameraModeName(mode),
+				pushedMode,
+				heading,
+				transformHeading,
+				x,
+				y,
+				z,
+				focusX,
+				focusY,
+				focusZ,
+				xzDistance,
+				yDistance,
+				zoom,
+				collisionRayLR,
+				collisionRayBack,
+				modernController,
+				input ? input->cameraX : 0.0f,
+				input ? input->cameraY : 0.0f);
+			fclose(f);
+		}
+	}
+
+	gSpideyCameraTelemetryLastCamera =
+		camera;
+	gSpideyCameraTelemetryLastMode =
+		mode;
+}
+
 static HMODULE gSpideyRenderer11Module = 0;
 
 typedef unsigned long (__cdecl *SpideyRenderer11GetAbiVersionFn)(void);
@@ -5909,6 +6119,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	// frame so connection/axis telemetry is available without changing retail
 	// action state or controller behavior.
 	SpideyInput11PassivePoll(
+		frame);
+	SpideyCameraPassivePoll(
 		frame);
 
 	int shadowPreviewToggled =
