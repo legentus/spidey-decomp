@@ -28,6 +28,7 @@ endif()
 
 target_link_libraries(spidey_renderer11 PRIVATE
     d3d11
+    d3dcompiler
     dxgi
     gdi32
 )
