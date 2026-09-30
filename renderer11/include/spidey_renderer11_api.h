@@ -54,6 +54,9 @@ __declspec(dllexport) int __cdecl SpideyRenderer11_UpdateTexture(
     unsigned long greenMask,
     unsigned long blueMask,
     unsigned long alphaMask);
+__declspec(dllexport) int __cdecl SpideyRenderer11_AssociateTextureHandle(
+    unsigned long textureId,
+    unsigned long legacyHandle);
 __declspec(dllexport) void __cdecl SpideyRenderer11_ReleaseTexture(
     unsigned long textureId);
 __declspec(dllexport) void __cdecl SpideyRenderer11_ReleaseAllTextures(void);
