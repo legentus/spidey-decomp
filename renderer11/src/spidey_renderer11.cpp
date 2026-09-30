@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <vector>
+#include <unordered_map>
 
 namespace
 {
@@ -44,6 +45,7 @@ namespace
     static const unsigned long kGameTextureCapacity = 1024;
     GameTexture gGameTextures[kGameTextureCapacity] = {};
     unsigned long gResidentTextureCount = 0;
+    std::unordered_map<unsigned long, unsigned long> gLegacyHandleToTextureId;
 
     void Log(const char* format, ...)
     {
@@ -110,6 +112,9 @@ namespace
         GameTexture& entry = gGameTextures[textureId];
         const bool wasResident = entry.texture != nullptr || entry.srv != nullptr;
 
+        if (entry.legacyHandle)
+            gLegacyHandleToTextureId.erase(entry.legacyHandle);
+
         SafeRelease(entry.srv);
         SafeRelease(entry.texture);
         entry.width = 0;
@@ -131,6 +136,7 @@ namespace
         }
 
         gResidentTextureCount = 0;
+        gLegacyHandleToTextureId.clear();
     }
 
     void ReleaseTargets()
@@ -1323,7 +1329,13 @@ int __cdecl SpideyRenderer11_AssociateTextureHandle(
         return 0;
     }
 
-    gGameTextures[textureId].legacyHandle = legacyHandle;
+    GameTexture& entry = gGameTextures[textureId];
+
+    if (entry.legacyHandle)
+        gLegacyHandleToTextureId.erase(entry.legacyHandle);
+
+    entry.legacyHandle = legacyHandle;
+    gLegacyHandleToTextureId[legacyHandle] = textureId;
 
     Log(
         "texture_handle id=%lu handle=0x%08lX",
@@ -1331,6 +1343,22 @@ int __cdecl SpideyRenderer11_AssociateTextureHandle(
         legacyHandle);
 
     return 1;
+}
+
+extern "C" __declspec(dllexport)
+long __cdecl SpideyRenderer11_ResolveTextureHandle(
+    unsigned long legacyHandle)
+{
+    if (!legacyHandle)
+        return -1;
+
+    const auto found =
+        gLegacyHandleToTextureId.find(legacyHandle);
+
+    if (found == gLegacyHandleToTextureId.end())
+        return -1;
+
+    return static_cast<long>(found->second);
 }
 
 extern "C" __declspec(dllexport)
