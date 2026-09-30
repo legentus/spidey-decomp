@@ -467,14 +467,16 @@ INLINE i32 Font::heightAboveBaseline(char* pStr)
 }
 
 // @SMALLTODO
+// Preserve retail Font::height behavior, but call the C++ instance method with
+// the correct x86 thiscall register convention. FASTCALL supplies this in ECX
+// and a dummy EDX argument, matching the proven Font::width trampoline pattern.
 i32 Font::height(char* txt)
 {
-	typedef i32 (*func_ptr)(char*);
+	typedef i32 (FASTCALL *func_ptr)(Font*, void*, char*);
 
 	func_ptr func = (func_ptr)0x0043EAF0;
 
-	return func(txt);
-	//return this->heightAboveBaseline(txt) + this->heightBelowBaseline(txt);
+	return func(this, 0, txt);
 }
 
 // @SMALLTODO
