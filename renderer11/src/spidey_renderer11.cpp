@@ -101,6 +101,7 @@ namespace
     unsigned long gShadowClearStencil = 0;
     unsigned long gShadowSubmittedDraws = 0;
     unsigned long gShadowSkippedDraws = 0;
+    int gShadowContinuous = 0;
 
     void Log(const char* format, ...)
     {
@@ -1047,10 +1048,13 @@ namespace
 
     bool SampleShadowTarget(
         unsigned long& sampleHash,
-        unsigned long& nonBlack)
+        unsigned long& nonBlack,
+        unsigned long samplePixels[9])
     {
         sampleHash = 2166136261UL;
         nonBlack = 0;
+        for (unsigned long i = 0; i < 9; ++i)
+            samplePixels[i] = 0;
 
         if (!gDevice ||
             !gContext ||
@@ -1160,6 +1164,7 @@ namespace
                     (static_cast<unsigned long>(pixel[1]) << 8) |
                     (static_cast<unsigned long>(pixel[0]) << 16);
 
+                samplePixels[y * 3 + x] = colorRef;
                 sampleHash ^= colorRef;
                 sampleHash *= 16777619UL;
 
@@ -2429,6 +2434,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
     }
 
     const bool replayThisFrame =
+        gShadowContinuous ||
         frame <= 5 ||
         (frame % 120) == 0;
 
@@ -2661,10 +2667,12 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
 
     unsigned long sampleHash = 0;
     unsigned long sampleNonBlack = 0;
+    unsigned long samplePixels[9] = {};
     const int sampled =
         SampleShadowTarget(
             sampleHash,
-            sampleNonBlack) ? 1 : 0;
+            sampleNonBlack,
+            samplePixels) ? 1 : 0;
 
     if (frame <= 5 ||
         (frame % 120) == 0 ||
@@ -2673,7 +2681,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         rendered != queuedCommands)
     {
         Log(
-            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu sampled=%d sample_hash=0x%08lX nonblack=%lu",
+            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu sampled=%d sample_hash=0x%08lX nonblack=%lu samples=%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX",
             frame,
             sceneWidth,
             sceneHeight,
@@ -2685,10 +2693,166 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
             static_cast<unsigned long long>(queuedVertices),
             sampled,
             sampleHash,
-            sampleNonBlack);
+            sampleNonBlack,
+            samplePixels[0],
+            samplePixels[1],
+            samplePixels[2],
+            samplePixels[3],
+            samplePixels[4],
+            samplePixels[5],
+            samplePixels[6],
+            samplePixels[7],
+            samplePixels[8]);
     }
 
     resetFrame();
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
+void __cdecl SpideyRenderer11_ShadowSetContinuous(
+    int enabled)
+{
+    gShadowContinuous = enabled ? 1 : 0;
+    Log("shadow_continuous enabled=%d", gShadowContinuous);
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_PresentShadow(
+    int preserveAspect,
+    int vsync)
+{
+    if (!gSwapChain ||
+        !gContext ||
+        !gWindow ||
+        !gShadowColorSrv ||
+        !gShadowWidth ||
+        !gShadowHeight)
+    {
+        Log(
+            "present_shadow rejected swap=0x%p context=0x%p hwnd=0x%p srv=0x%p shadow=%lux%lu",
+            gSwapChain,
+            gContext,
+            gWindow,
+            gShadowColorSrv,
+            gShadowWidth,
+            gShadowHeight);
+        return 0;
+    }
+
+    RECT client = {};
+    if (!GetClientRect(gWindow, &client))
+        return 0;
+
+    const unsigned long targetWidth =
+        static_cast<unsigned long>(client.right - client.left);
+    const unsigned long targetHeight =
+        static_cast<unsigned long>(client.bottom - client.top);
+
+    if (!targetWidth || !targetHeight)
+        return 0;
+
+    if (targetWidth != gWidth || targetHeight != gHeight)
+    {
+        if (!SpideyRenderer11_Resize(targetWidth, targetHeight))
+            return 0;
+    }
+
+    if (!CreateBlitPipeline())
+        return 0;
+
+    unsigned long presentWidth = targetWidth;
+    unsigned long presentHeight = targetHeight;
+    unsigned long presentX = 0;
+    unsigned long presentY = 0;
+
+    if (preserveAspect)
+    {
+        const unsigned long long srcWide =
+            static_cast<unsigned long long>(gShadowWidth) * targetHeight;
+        const unsigned long long dstWide =
+            static_cast<unsigned long long>(targetWidth) * gShadowHeight;
+
+        if (srcWide > dstWide)
+        {
+            presentHeight =
+                static_cast<unsigned long>(
+                    static_cast<unsigned long long>(targetWidth) *
+                    gShadowHeight / gShadowWidth);
+            presentY = (targetHeight - presentHeight) / 2;
+        }
+        else if (srcWide < dstWide)
+        {
+            presentWidth =
+                static_cast<unsigned long>(
+                    static_cast<unsigned long long>(targetHeight) *
+                    gShadowWidth / gShadowHeight);
+            presentX = (targetWidth - presentWidth) / 2;
+        }
+    }
+
+    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    gContext->OMSetRenderTargets(
+        1,
+        &gRenderTargetView,
+        nullptr);
+    gContext->ClearRenderTargetView(
+        gRenderTargetView,
+        clearColor);
+
+    D3D11_VIEWPORT viewport = {};
+    viewport.TopLeftX = static_cast<float>(presentX);
+    viewport.TopLeftY = static_cast<float>(presentY);
+    viewport.Width = static_cast<float>(presentWidth);
+    viewport.Height = static_cast<float>(presentHeight);
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+
+    gContext->RSSetViewports(1, &viewport);
+    gContext->RSSetState(gBlitRasterizer);
+    gContext->IASetInputLayout(nullptr);
+    gContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gContext->VSSetShader(gBlitVertexShader, nullptr, 0);
+    gContext->PSSetShader(gBlitPixelShader, nullptr, 0);
+    gContext->PSSetShaderResources(0, 1, &gShadowColorSrv);
+    gContext->PSSetSamplers(0, 1, &gBlitSampler);
+    gContext->Draw(3, 0);
+
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    gContext->PSSetShaderResources(0, 1, &nullSrv);
+
+    const HRESULT hr =
+        gSwapChain->Present(vsync ? 1 : 0, 0);
+
+    if (FAILED(hr))
+    {
+        Log(
+            "present_shadow present_failed hr=0x%08lX",
+            static_cast<unsigned long>(hr));
+        return 0;
+    }
+
+    static unsigned long shadowPresentFrame = 0;
+    ++shadowPresentFrame;
+
+    if (shadowPresentFrame <= 5 ||
+        (shadowPresentFrame % 120) == 0)
+    {
+        Log(
+            "present_shadow frame=%lu src=%lux%lu dst=%lux%lu rect=%lu,%lu,%lux%lu aspect=%d vsync=%d",
+            shadowPresentFrame,
+            gShadowWidth,
+            gShadowHeight,
+            targetWidth,
+            targetHeight,
+            presentX,
+            presentY,
+            presentWidth,
+            presentHeight,
+            preserveAspect ? 1 : 0,
+            vsync ? 1 : 0);
+    }
+
     return 1;
 }
 
