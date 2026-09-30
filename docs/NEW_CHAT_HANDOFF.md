@@ -4,10 +4,27 @@
 **Active repository:** https://github.com/legentus/spidey-decomp  
 **Active branch:** `dev`  
 **Live source of truth:** `dev` + `docs/CURRENT_STATUS.md`  
-**Repo HEAD immediately before this handoff refresh:** `2f14244f05ad2c1946a6668b89fe60064ca9b409`  
-**Current untested source frontier:** `016b7438fd7008d8e6075105c0b4f2e9201d5703` plus documentation commits after it.
+**Current implementation frontier:** `502bd2864c5e6fd8a1e268f18656591a8b709d0c`  
+**Current documentation frontier:** the live `dev` HEAD after the Phase 3E checkpoint commit.
 
-## READ THIS FIRST
+> **CURRENT OVERRIDE:** Later Phase 3C sections in this file are historical context. The actual pending user-facing test is now Phase 3D live Apply + frontend mouse return. Phase 3E F9 D3D7-draw suppression is implemented but defaults OFF and should only be exercised after the Phase 3D checks pass.
+
+### Current pending user-facing checks
+1. At 2560x1440, change 16:9 -> 4:3 -> Apply and verify the running frontend changes immediately without restart.
+2. Change back to 16:9 -> Apply and verify immediate full-width restoration.
+3. Enter gameplay, return to main menu, and verify mouse hover/click works after the gameplay -> frontend transition.
+4. Confirm logs contain `frontend_bounds_sync` and the new `logical_render_resolution ... selected=... content=... aspect=...` fields.
+
+### Next renderer-isolation experiment after those checks
+- F9 toggles guarded suppression of already-DX11-accepted main-scene D3D7 draws.
+- Default is OFF.
+- F10 remains the complete D3D7 reference path.
+- Inspect `d3d7_suppressed` / `d3d7_fallback` telemetry and visual behavior before making suppression permanent.
+
+### New major modernization goals
+- full modern controller support with remapping and dynamic glyph UI;
+- modern mouse/right-stick camera;
+- the final camera is **not required** to remain constrained by the original camera system. Existing camera functions are RE anchors and scripted-transition helpers, but a dedicated modern gameplay camera may replace ordinary legacy camera ownership if that produces the desired feel.\n\n## READ THIS FIRST
 
 This project has frequent ChatGPT "error in input stream" interruptions. **Do not trust stale chat text over the repo.**
 
