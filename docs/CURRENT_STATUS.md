@@ -2911,3 +2911,51 @@ Expected diagnostics:
 - compat: `display_options request=640x480x16 apply=640x480x16 ... frontend_legacy=1`;
 - present: frontend scene returns to 640x480 while outer destination remains 2560x1440;
 - input: deactivate/activate pairs plus explicit DirectInput Acquire results.
+
+
+## Runtime result: legacy frontend canvas restored; visual flicker + Alt+Tab input still remain — 2026-09-29
+
+Tested revision:
+`42fe9d5b3eda8cd376eb585f986a4bb5b9638f9f`
+
+User-visible:
+- start/main menu behavior is improved compared with the forced-1280 frontend build;
+- proper menu/background assets remain present;
+- rapid transient images (described as building/city imagery) still flash in and out over both start and main menus;
+- Alt+Tab out/back still kills controls completely.
+
+Confirmed from logs:
+- exact retail frontend request now passes through unchanged:
+  `640x480x16 option4=0 option5=4 preserve_saved=0 frontend_legacy=1`;
+- borderless HWND remains 2560x1440;
+- presenter sees a real 640x480x32 scene and aspect-fits it to 1920x1440 at x=320;
+- corrected D3D caps remain sane:
+  `max_w=16384 max_h=16384 max_aspect=16384 tex_caps=0x00000CCD`;
+- all CreateTexture256 calls continue to complete at sane sizes, including 512x512 and 512x240 frontend assets;
+- therefore the remaining flashes are not the prior bad-caps/failed-texture bug.
+
+New DirectDraw teardown clue:
+- dxerror log reports `D3D error=0x00000004` at retail call site `0x004FDDCF`;
+- retail disassembly proves this site is not a D3D draw failure:
+  - it loads movie DirectDraw object `0x006B7900`;
+  - calls COM vtable +8 = `Release()`;
+  - return value 4 is the remaining COM reference count;
+- retail movie NextFrame uses movie surface `0x00AC0A3C`;
+- retail PCMOVIE_Stop closes Bink/file state but does not release `0x00AC0A3C`;
+- multiple startup movies can therefore leave movie surfaces alive across the frontend DirectDraw rebuild.
+- this is now the strongest renderer-state lead for old/foreign imagery flashing through after startup movies.
+
+Input evidence:
+- no `spidey-decomp-input.log` was supplied with this test session, despite the workflow being configured to capture it if created;
+- regardless of whether it was omitted manually or never created, WM_ACTIVATEAPP-only recovery did not solve runtime behavior.
+
+Next implementation:
+1. release the retail movie surface at `0x00AC0A3C` on final movie frame and on direct PCMOVIE_Stop call paths;
+2. log movie-surface Release() refcounts before frontend DirectDraw teardown;
+3. make keyboard/mouse focus recovery poll-driven as well as message-driven:
+   - compare `GetForegroundWindow()` with the DirectInput HWND;
+   - unacquire/clear while background;
+   - explicitly Acquire again on foreground transition before GetDeviceData;
+   - log transition/result even if WM_ACTIVATEAPP is missed;
+4. ensure input log is created at DirectInput initialization so absence itself is diagnostic;
+5. retain legacy frontend canvas, D3D caps fix, texture hash fix, borderless presentation, and modern resolution support.
