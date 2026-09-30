@@ -3141,3 +3141,43 @@ Immediate recovery plan:
 3. add a guarded wrapper for retail cleanup function `0x00503AF0` so a future DirectX init failure cannot turn into a null-deref crash;
 4. retain the new retail input polling hooks and sole windowed direct-HWND presenter for the next test;
 5. continue 2560x1440 support as a separate renderer-compatibility task rather than claiming it is already supported.
+
+
+## Recovery patch ready: quarantine 2560x1440 and guard failed-D3D cleanup — 2026-09-30
+
+Implementation:
+- `17a75488bc16a865e8b1b8f787544ea06b1228ae`
+  - removes exact 2560x1440 from modern mode enumeration on the current DirectDraw7/D3D7 path;
+  - removes the old unconditional explicit 2560x1440 mode injection;
+  - logs `explicit_2560x1440=0 quarantined_2560x1440=1`;
+  - if persisted saved settings are 2560x1440, startup recovers to the last runtime-verified working `1440x1080x32`;
+  - writes that recovered mode back into the in-memory saved-setting fields so subsequent display-option paths do not immediately reapply the broken mode;
+  - direct `DXINIT_SetDisplayOptions(2560,1440,...)` requests are also recovered to 1440x1080 until native 1440p render-target support is fixed;
+  - installs a direct-call-site wrapper around retail cleanup function `0x00503AF0`;
+  - if retail global `0x006BBF1C` is NULL, the cleanup call is skipped and logged instead of dereferencing NULL at `0x00503AF7`;
+  - if the object exists, untouched retail cleanup runs normally.
+
+The 2560x1440 mode is quarantined, not abandoned:
+- current failure is specifically `IDirect3D7::CreateDevice` rejecting the 2560x1440 windowed scene surface with `DDERR_INVALIDOBJECT`;
+- windowed scene creation currently uses `DDSCAPS_3DDEVICE | DDSCAPS_OFFSCREENPLAIN`;
+- native 1440p support remains an open renderer-compatibility task, likely requiring a render-target allocation/path change rather than simple mode enumeration.
+
+Retained for the next runtime test:
+- retail keyboard/mouse poll call-site wrappers from `92f0d4add60dfdd6c7a9b50decc6b35a8bf01507`;
+- single windowed scene->HWND presentation path (retail Flip skipped only in compatibility/windowed mode);
+- fixed D3D caps base;
+- fixed retail texture hash table;
+- legacy 640x480 frontend canvas;
+- movie-surface cleanup.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. expected startup compat log:
+   - `restore_saved_resolution request=2560x1440x32 apply=1440x1080x32 quarantined_2560x1440=1`;
+   - modern mode log shows `explicit_2560x1440=0 quarantined_2560x1440=1`;
+3. verify splash movies return;
+4. verify whether start/main menu building/city flashes are gone under the single-presenter path;
+5. Alt+Tab out/back and test menu keyboard/mouse;
+6. upload the full session, especially input/present/compat logs.
+
+If this boots, the test finally isolates the intended two fixes because the unrelated persisted-2560 startup failure is removed.
