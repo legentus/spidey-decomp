@@ -5228,3 +5228,81 @@ Current safe architectural conclusion:
 - modern ordinary gameplay camera can initially claim mode 3;
 - other modes remain retail-owned until runtime telemetry or specific RE proves they are safe to absorb;
 - this keeps scripted/boss/special cameras intact while allowing a later full modern camera for normal play.
+
+
+### Passive action-map + raw mouse intent telemetry — 2026-09-30
+
+Implementation:
+- `69829c9ea9639ef9792b2c2a07b2f3f797d11d08` — one-time read-only dump of the retail controller/action descriptor table;
+- `e0f1993de6d7db714c5a2a091bae07788232b7bc` — mirror raw relative mouse deltas from the existing DirectInput compatibility wrapper;
+- `dfbb8bec595a54d25d496b7cb2190d17397f2393` — static-audit fix: move shared raw-mouse telemetry declarations before first use in the VC6-era translation unit;
+- `201fc404605746f2fe5811f692d1c39b7fa6bcc6` — throttle activity-driven camera telemetry so short mouse/right-stick input is captured without logging every frame.
+
+#### Retail action descriptor table
+
+Original controller-menu code/disassembly establishes:
+- table base: `0x00568690`;
+- count: 11;
+- stride: `0x1C`;
+- +0x00: action bit/mask;
+- +0x04: inline 16-byte retail action label;
+- +0x14: keyboard mapping;
+- +0x18: controller mapping.
+
+The first four controller-menu rows correspond to movement/direction and are disabled for joystick-button remapping; later rows are button-remappable.
+
+The passive bridge now dumps the table once:
+`retail_action_map index=<n> action=0x.... label=<retail text> keyboard=... controller=... passive=1`.
+
+This deliberately uses the game's own runtime labels rather than guessing semantic names for action bits.
+
+#### Raw relative mouse path
+
+Retail machine-code RE:
+- `DXINPUT_PollMouse @ 0x00501CC0` consumes buffered DirectInput mouse events and accumulates relative X/Y deltas before any absolute cursor integration;
+- `PCINPUT_UpdateMouse @ 0x0050A8A0` later scales/integrates those deltas into the shell cursor and clamps them to mouse bounds.
+
+The project already owns every direct call to `DXINPUT_PollMouse` through `SpideyCompatRetailPollMouse` for Alt+Tab recovery.
+
+New passive behavior:
+- call retail PollMouse unchanged;
+- on successful polls, mirror/accumulate the returned relative X/Y deltas;
+- once per completed frame, camera telemetry snapshots and clears those accumulators;
+- `spidey-decomp-camera.log` now includes:
+  - `input_mouse=<dx>,<dy>`;
+  - `mouse_polls=<count>`;
+  - existing `input_camera=<right-stick-x>,<right-stick-y>`.
+
+Activity sampling:
+- mode/camera changes still log immediately;
+- periodic samples remain;
+- non-zero mouse or right-stick intent adds a throttled `event=input_intent` sample at most every 15 frames.
+
+This gives Stage-A camera work one unified evidence stream for mouse and right-stick intent without adding another mouse-capture subsystem.
+
+#### SetCamAngle ownership clue
+
+Original `CCamera::SetCamAngle @ 0x004178E0` bytes explicitly compare `mCameraMode` and skip angle changes when mode is:
+- 15 = LOOSE;
+- 16 = USER;
+- 17 = LOOKAROUND.
+
+Because `CPlayer::PutCameraBehind` recenters through `SetCamAngle`, this suggests a potentially useful Stage-A compatibility mechanism: an appropriate user-controlled camera mode can naturally reject legacy recenter requests.
+
+Do **not** switch modes based on this fact alone. The behavior of the mode-specific AI/dispatch must still be validated at runtime. The final modern camera remains free to replace ordinary legacy camera ownership entirely.
+
+#### Static audit result
+
+Before runtime handoff:
+- raw mouse telemetry declarations now occur before their camera use;
+- exactly one action-map logger, one passive camera sampler and one raw-mouse state set are present;
+- new proxy code contains no C++11-only `auto`, `nullptr`, or lambda syntax;
+- telemetry varargs were mechanically checked:
+  - camera state: 25 specifiers / 25 data arguments;
+  - input11 state: 21 / 21;
+  - retail action map: 5 / 5;
+- input helper remains C++17 only inside the separate VS2022 Win32 DLL;
+- XInput is dynamically loaded; the old proxy does not link against XInput;
+- the 32-bit preflight, helper install, helper log capture and camera log capture are all wired into the standard test harness.
+
+No gameplay input or camera ownership is changed by any of these passive additions.
