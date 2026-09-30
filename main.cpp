@@ -3824,6 +3824,11 @@ static void SpideyLogSurfaceState(
 			2166136261UL;
 		int nonBlack =
 			0;
+		unsigned long samplePixels[9];
+		memset(
+			samplePixels,
+			0,
+			sizeof(samplePixels));
 
 		for (int y = 0; y < 3; ++y)
 		{
@@ -3834,6 +3839,9 @@ static void SpideyLogSurfaceState(
 						dc,
 						xs[x],
 						ys[y]);
+
+				samplePixels[y * 3 + x] =
+					(unsigned long)pixel;
 
 				sampleHash ^=
 					(unsigned long)pixel;
@@ -3850,9 +3858,18 @@ static void SpideyLogSurfaceState(
 
 		fprintf(
 			f,
-			" sample_hash=0x%08lX nonblack=%d",
+			" sample_hash=0x%08lX nonblack=%d samples=%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX",
 			sampleHash,
-			nonBlack);
+			nonBlack,
+			samplePixels[0],
+			samplePixels[1],
+			samplePixels[2],
+			samplePixels[3],
+			samplePixels[4],
+			samplePixels[5],
+			samplePixels[6],
+			samplePixels[7],
+			samplePixels[8]);
 
 		surface->ReleaseDC(dc);
 	}
