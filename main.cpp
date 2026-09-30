@@ -776,6 +776,79 @@ static int SpideyModeContextContains(
 	return 0;
 }
 
+static int gSpideyDpiAware = 0;
+
+typedef BOOL (WINAPI *SpideySetProcessDPIAwareFn)(void);
+typedef BOOL (WINAPI *SpideyIsProcessDPIAwareFn)(void);
+
+static void SpideyEnableDpiAwarenessEarly()
+{
+	HMODULE user32 =
+		GetModuleHandleA(
+			"user32.dll");
+
+	BOOL setResult =
+		FALSE;
+	BOOL awareResult =
+		FALSE;
+
+	if (user32)
+	{
+		SpideyIsProcessDPIAwareFn isAware =
+			(SpideyIsProcessDPIAwareFn)GetProcAddress(
+				user32,
+				"IsProcessDPIAware");
+
+		SpideySetProcessDPIAwareFn setAware =
+			(SpideySetProcessDPIAwareFn)GetProcAddress(
+				user32,
+				"SetProcessDPIAware");
+
+		if (isAware)
+		{
+			awareResult =
+				isAware();
+		}
+
+		if (!awareResult &&
+			setAware)
+		{
+			setResult =
+				setAware();
+
+			if (isAware)
+			{
+				awareResult =
+					isAware();
+			}
+			else
+			{
+				awareResult =
+					setResult;
+			}
+		}
+	}
+
+	gSpideyDpiAware =
+		awareResult ? 1 : 0;
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"dpi_awareness user32=0x%08lX set_result=%d process_aware=%d metrics=%dx%d\n",
+			(unsigned long)user32,
+			setResult ? 1 : 0,
+			gSpideyDpiAware,
+			GetSystemMetrics(0),
+			GetSystemMetrics(1));
+		fclose(f);
+	}
+}
+
 static int SpideyAppendModernMode(
 		DWORD width,
 		DWORD height,
@@ -870,14 +943,26 @@ static void SpideyInjectModernVideoModes()
 		if (dm.dmPelsWidth == 2560 &&
 			dm.dmPelsHeight == 1440)
 		{
-			// Runtime-proven unsafe on the current DirectDraw7/D3D7 path:
-			// IDirect3D7::CreateDevice rejects the 2560x1440 scene surface
-			// with DDERR_INVALIDOBJECT. Keep detecting the desktop mode for
-			// diagnostics, but do not expose it as a selectable render mode
-			// until the render-target compatibility path is fixed.
 			saw1440 =
 				1;
 
+			// The previous 2560x1440 failure happened while the process was
+			// DPI-virtualized: Win32 reported a 2560x1440 client while
+			// DirectDraw exposed a 1920x1080 primary. Only expose the native
+			// mode once process DPI awareness has been established before
+			// DirectDraw initialization.
+			if (!gSpideyDpiAware)
+			{
+				memset(&dm, 0, sizeof(dm));
+				dm.dmSize = sizeof(dm);
+				continue;
+			}
+		}
+
+		if (gSpideyDpiAware &&
+			((int)dm.dmPelsWidth > GetSystemMetrics(0) ||
+			 (int)dm.dmPelsHeight > GetSystemMetrics(1)))
+		{
 			memset(&dm, 0, sizeof(dm));
 			dm.dmSize = sizeof(dm);
 			continue;
@@ -896,6 +981,20 @@ static void SpideyInjectModernVideoModes()
 		dm.dmSize = sizeof(dm);
 	}
 
+	// Ensure the physical 2560x1440 mode is present when DPI awareness is
+	// active even if legacy DirectDraw enumeration omits it.
+	if (gSpideyDpiAware &&
+		GetSystemMetrics(0) >= 2560 &&
+		GetSystemMetrics(1) >= 1440 &&
+		*(int*)0x006B5998 < 64)
+	{
+		added +=
+			SpideyAppendModernMode(
+				2560,
+				1440,
+				32);
+	}
+
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
 		"a");
@@ -904,11 +1003,17 @@ static void SpideyInjectModernVideoModes()
 	{
 		fprintf(
 			f,
-			"modern_modes before=%d after=%d added=%d windows_1440=%d explicit_2560x1440=0 quarantined_2560x1440=1\n",
+			"modern_modes before=%d after=%d added=%d windows_1440=%d native_2560x1440=%d dpi_aware=%d metrics=%dx%d\n",
 			before,
 			*(int*)0x006B5998,
 			added,
-			saw1440);
+			saw1440,
+			(gSpideyDpiAware &&
+			 GetSystemMetrics(0) >= 2560 &&
+			 GetSystemMetrics(1) >= 1440) ? 1 : 0,
+			gSpideyDpiAware,
+			GetSystemMetrics(0),
+			GetSystemMetrics(1));
 		fclose(f);
 	}
 }
@@ -1095,7 +1200,8 @@ static void SpideyRestoreSavedRenderResolution()
 	// DDERR_INVALIDOBJECT. Recover persisted settings to the most recent
 	// runtime-verified working internal mode instead of bricking startup.
 	if (savedWidth == 2560 &&
-		savedHeight == 1440)
+		savedHeight == 1440 &&
+		!gSpideyDpiAware)
 	{
 		savedWidth =
 			1440;
@@ -1174,7 +1280,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		0;
 
 	if (width == 2560 &&
-		height == 1440)
+		height == 1440 &&
+		!gSpideyDpiAware)
 	{
 		width =
 			1440;
@@ -1796,15 +1903,48 @@ static int SpideyCompatPresentSceneToWindow(
 					(dstWidth - presentWidth) / 2;
 			}
 
-			RECT clearRect;
-			clearRect.left = 0;
-			clearRect.top = 0;
-			clearRect.right = dstWidth;
-			clearRect.bottom = dstHeight;
-			FillRect(
-				windowDC,
-				&clearRect,
-				(HBRUSH)GetStockObject(BLACK_BRUSH));
+			// Do not clear the entire client before the copy. Doing so creates
+			// a visible black frame whenever GDI presents the FillRect before
+			// the subsequent StretchBlt. Clear only the actual bars.
+			HBRUSH blackBrush =
+				(HBRUSH)GetStockObject(BLACK_BRUSH);
+			RECT barRect;
+
+			if (presentX > 0)
+			{
+				barRect.left = 0;
+				barRect.top = 0;
+				barRect.right = presentX;
+				barRect.bottom = dstHeight;
+				FillRect(windowDC, &barRect, blackBrush);
+			}
+
+			if (presentX + presentWidth < dstWidth)
+			{
+				barRect.left = presentX + presentWidth;
+				barRect.top = 0;
+				barRect.right = dstWidth;
+				barRect.bottom = dstHeight;
+				FillRect(windowDC, &barRect, blackBrush);
+			}
+
+			if (presentY > 0)
+			{
+				barRect.left = presentX;
+				barRect.top = 0;
+				barRect.right = presentX + presentWidth;
+				barRect.bottom = presentY;
+				FillRect(windowDC, &barRect, blackBrush);
+			}
+
+			if (presentY + presentHeight < dstHeight)
+			{
+				barRect.left = presentX;
+				barRect.top = presentY + presentHeight;
+				barRect.right = presentX + presentWidth;
+				barRect.bottom = dstHeight;
+				FillRect(windowDC, &barRect, blackBrush);
+			}
 		}
 
 		if (presentWidth == (int)desc.dwWidth &&
@@ -3148,6 +3288,10 @@ BOOL WINAPI DllMain(
 			SetConsoleTitle("spidey-decomp - " RUNTIME_VERSION);
 			freopen("CONOUT$", "w", stdout);
 			InstallSpideyCrashHandler();
+
+			// Must happen before the game creates its HWND/DirectDraw objects.
+			// Dynamic lookup keeps the matching VC6-era SDK build compatible.
+			SpideyEnableDpiAwarenessEarly();
 
 			bink_dll = GetModuleHandleA("binkw32.dll");
 
