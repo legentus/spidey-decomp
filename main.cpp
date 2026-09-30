@@ -2904,6 +2904,7 @@ static int gSpideyCameraTelemetryLastMode = -9999;
 static i32 gSpideyFrameMouseDeltaX = 0;
 static i32 gSpideyFrameMouseDeltaY = 0;
 static unsigned long gSpideyFrameMousePollCount = 0;
+static unsigned long gSpideyCameraTelemetryLastIntentFrame = 0;
 
 static const char* SpideyCameraModeName(
 		int mode)
@@ -3078,12 +3079,26 @@ static void SpideyCameraPassivePoll(
 	const int modernController =
 		input &&
 		input->connected;
+	const int mouseIntent =
+		gSpideyFrameMouseDeltaX != 0 ||
+		gSpideyFrameMouseDeltaY != 0;
+	const int stickIntent =
+		input &&
+		(input->cameraX > 0.05f ||
+		 input->cameraX < -0.05f ||
+		 input->cameraY > 0.05f ||
+		 input->cameraY < -0.05f);
+	const int intentSample =
+		(mouseIntent ||
+		 stickIntent) &&
+		(frame - gSpideyCameraTelemetryLastIntentFrame >= 15);
 	const int periodic =
 		frame <= 5 ||
 		(frame % (modernController ? 60 : 300)) == 0;
 
 	if (cameraChanged ||
 		modeChanged ||
+		intentSample ||
 		periodic)
 	{
 		FILE* f = fopen(
@@ -3098,6 +3113,7 @@ static void SpideyCameraPassivePoll(
 				(unsigned long)camera,
 				cameraChanged ? "camera_change" :
 					modeChanged ? "mode_change" :
+					intentSample ? "input_intent" :
 					"periodic",
 				mode,
 				SpideyCameraModeName(mode),
@@ -3123,6 +3139,12 @@ static void SpideyCameraPassivePoll(
 				gSpideyFrameMousePollCount);
 			fclose(f);
 		}
+	}
+
+	if (intentSample)
+	{
+		gSpideyCameraTelemetryLastIntentFrame =
+			frame;
 	}
 
 	gSpideyCameraTelemetryLastCamera =
