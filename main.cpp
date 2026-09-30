@@ -923,21 +923,21 @@ static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
 	if (!hwnd)
 		return;
 
-	HMONITOR monitor =
-		MonitorFromWindow(
-			hwnd,
-			MONITOR_DEFAULTTONEAREST);
+	// Keep this compatible with the project's original Windows 98-era SDK.
+	// The matching toolchain does not expose MonitorFromWindow/MONITORINFO.
+	// The retail game already uses GetSystemMetrics(0/1) for its fullscreen
+	// popup window, so use the same primary-display dimensions here.
+	const int left =
+		0;
+	const int top =
+		0;
+	const int width =
+		GetSystemMetrics(0);
+	const int height =
+		GetSystemMetrics(1);
 
-	MONITORINFO info;
-	memset(&info, 0, sizeof(info));
-	info.cbSize =
-		sizeof(info);
-
-	if (!monitor ||
-		!GetMonitorInfoA(monitor, &info))
-	{
+	if (width <= 0 || height <= 0)
 		return;
-	}
 
 	LONG style =
 		GetWindowLongA(
@@ -958,18 +958,11 @@ static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
 		GWL_STYLE,
 		style);
 
-	const int width =
-		info.rcMonitor.right -
-		info.rcMonitor.left;
-	const int height =
-		info.rcMonitor.bottom -
-		info.rcMonitor.top;
-
 	SetWindowPos(
 		hwnd,
 		HWND_TOP,
-		info.rcMonitor.left,
-		info.rcMonitor.top,
+		left,
+		top,
 		width,
 		height,
 		SWP_NOACTIVATE |
@@ -984,11 +977,11 @@ static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
 	{
 		fprintf(
 			f,
-			"borderless_monitor_window rect=%ld,%ld,%ld,%ld size=%dx%d\n",
-			(long)info.rcMonitor.left,
-			(long)info.rcMonitor.top,
-			(long)info.rcMonitor.right,
-			(long)info.rcMonitor.bottom,
+			"borderless_monitor_window rect=%d,%d,%d,%d size=%dx%d source=GetSystemMetrics\n",
+			left,
+			top,
+			left + width,
+			top + height,
 			width,
 			height);
 		fclose(f);
