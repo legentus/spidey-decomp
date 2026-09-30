@@ -3620,3 +3620,77 @@ NEXT FRONTIER:
 - only once DX11 owns the scene render target should 2560x1440 be re-enabled as a true internal render resolution and 16:9 projection/FOV/UI work proceed.
 
 Do not interpret the current 2560x1440 swap-chain size as native 2560x1440 game rendering yet: the current gameplay source remains 1920x1440 and the frontend remains 640x480.
+
+
+## DX11 Phase 2A implementation ready for runtime test — 2026-09-30
+
+Objective:
+Remove GDI/HDC from the normal DX11 presentation path and establish a real DX11 texture/shader frame path while legacy D3D7 still renders the source scene.
+
+Implementation:
+- renderer ABI bumped to 3;
+- new export: `SpideyRenderer11_PresentPixels`;
+- modern helper now links `d3dcompiler`;
+- D3D7 scene surface is locked after rendering completes;
+- 32-bit X8R8G8B8/BGRA-compatible scene pixels are uploaded row-by-row into a dynamic `DXGI_FORMAT_B8G8R8A8_UNORM` D3D11 texture;
+- a shader-model-4 fullscreen triangle samples that texture;
+- point filtering preserves legacy pixel/UI sharpness;
+- culling is explicitly disabled for deterministic fullscreen rendering;
+- the DX11 render target is cleared to black, an aspect-fit viewport is selected, the textured triangle is drawn, and DXGI Present displays it;
+- normal success returns presenter path code 3.
+
+Fallback chain:
+1. preferred: D3D7 surface Lock -> DX11 dynamic texture -> shader draw -> DXGI Present;
+2. fallback: proven DX11 GDI-compatible HDC presenter;
+3. final fallback: proven direct scene->HWND GDI presenter.
+
+Legacy surface lock behavior:
+- first attempt uses `DDLOCK_WAIT | DDLOCK_READONLY`;
+- if that fails, retry with `DDLOCK_WAIT` only;
+- unsupported/failing lock or unexpected pixel masks do not disable DX11; they fall back to the ABI-2 HDC bridge;
+- only an actual `PresentPixels` failure disables the pixel path for the remainder of that process, again falling back to DX11/HDC.
+
+Implementation commits:
+- `1cf7b67e63ea14b084791203dd8b08a460e17964` — ABI 3 / pixel presenter declaration;
+- `81d5262c786ed356385ebb60a26eecef87f11ee7` — pixel presenter export;
+- `37da7baf56d80827628e546bc368290fd3b6a23f` — link d3dcompiler;
+- `1cbc08494845077ce6a22e673db468247109f6ed` — shader/upload presentation pipeline;
+- `f79703467838744641f94a1984b2861112ebe5dd` — proxy prefers locked-surface pixel upload;
+- `57986686d1aa0fdc2bda6af6a0cebdbdf5d8e8fb` — DirectDraw lock retry;
+- `5d79869e929dbde1292cccf10b44915b3d50f1b6` — point-filtered parity;
+- `6574be387bafa9e13f77a11d0eb63df605e5c853` — deterministic no-cull fullscreen pass.
+
+NEXT TEST:
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected build/runtime markers:
+- clean modern renderer build;
+- `renderer11_bridge loaded ... abi=3 expected=3 ... phase2_exports=1`;
+- `renderer11_phase2 initialize ... result=1`;
+- renderer log:
+  - `blit_pipeline ready shader_model=4_0 filter=point cull=none`;
+  - `upload_texture ready width=...`;
+  - `present_pixels frame=...`;
+- present log:
+  - `compat_present_dx11_pixels ... result=1`;
+  - `present_path ... dx11=1 dx11_pixels=1 dx11_hdc=0 direct_hwnd=0 compat_result=3`.
+
+If the legacy surface cannot be locked or its pixel layout differs, expected safe fallback:
+- `compat_present_dx11_pixels ... skipped ... fallback=dx11_hdc`;
+- `present_path ... dx11=1 dx11_pixels=0 dx11_hdc=1 ... compat_result=2`.
+
+Visual expectation:
+- no intended visual change yet;
+- 4:3 pillarboxing remains expected;
+- 2560x1440 remains quarantined as a legacy D3D7 scene mode;
+- this test proves the final image passes through a D3D11 texture and shader rather than GDI.
+
+Texture/render migration map discovered while implementing Phase 2A:
+- `PCTex_CreateTexturePVRInId` is the central legacy DirectDraw texture creation/upload path;
+- `PCTex_ReleaseSysTexture` and `PCTex_ReleaseAllTextures` centralize legacy texture destruction;
+- `PCTex_GetDirect3DTexture` exposes each texture's DirectDraw surface;
+- `PCGfx_ProcessTexture` chooses the current texture and calls `DXPOLY_SetTexture`;
+- queued textured quads place the DirectDraw texture in `DXPOLY::field_4`;
+- `PCGfx_BeginScene` / `PCGfx_EndScene` bracket `DXPOLY_BeginScene` / `DXPOLY_EndScene`.
+
+That map is the basis for Phase 2B: mirror legacy texture handles into DX11 SRVs and migrate 2D/textured draw submission away from D3D7 incrementally.
