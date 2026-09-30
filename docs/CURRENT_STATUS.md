@@ -1882,3 +1882,46 @@ NEXT ACTION:
 - perform a PURE BASELINE test with no runtime code differences from the user-confirmed playable revision.
 
 If that pure baseline still black-screens, source regression is ruled out and investigation must move to local/environment state (game config, preserved retail Bink DLL, generated state/files, registry/settings, or other installation differences).
+
+
+## PURE confirmed-playable baseline prepared — 2026-09-29
+
+Control revision source:
+`35e73ed3c4ca8c06b581df83f0f0913f0c915982`
+
+This is the exact revision from both user sessions that:
+- reached splash/title;
+- entered first level;
+- allowed Spider-Man control;
+- returned to main menu;
+- crashed only when entering Options.
+
+Pure-baseline restoration:
+- `a3acab00d81c22d63732a190846bb8aa03b4fce3`
+  - restores `FontTools.cpp` exactly from `35e73ed...`;
+  - removes the isolated Font::height experiment entirely.
+- `00b2165e8fc792c900d29416fa165a078e01f8b6`
+  - restores `tools/TEST_LATEST_BUILD.ps1` exactly from `35e73ed...`.
+
+Mechanical GitHub comparison against `35e73ed...` now reports:
+- NO runtime-source differences;
+- NO test-runner differences;
+- ONLY `docs/CURRENT_STATUS.md` differs.
+
+Therefore the next test is a true source/runtime control test.
+
+Parallel external-state investigation:
+- retail `SPIDEYDX_LoadSettings = 0x00515680` is real and reads persistent settings before startup;
+- if pure baseline still black-screens, likely causes move outside current source tree:
+  - persistent game/settings state;
+  - preserved retail `binkw32_.dll` contents;
+  - local installation/generated data state;
+  - graphics/runtime/driver state;
+  - other external environment changes.
+- do NOT resume Options/audio/controller feature work until this control test result is known.
+
+NEXT TEST:
+- run updater;
+- run latest test;
+- no feature validation needed;
+- report only whether splash/title returns or remains black, plus all logs as usual.
