@@ -1532,6 +1532,9 @@ static void SpideyRestoreSavedRenderResolution()
 	gSpideySelectedOutputBpp =
 		32;
 
+	SpideyApplySelectedAspect(
+		"restore_saved_resolution");
+
 	DWORD physicalWidth =
 		requestedWidth;
 	DWORD physicalHeight =
@@ -1824,6 +1827,11 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		(DWORD)gSpideySelectedOutputHeight;
 	*(DWORD*)0x02E098E4 =
 		(DWORD)gSpideySelectedOutputBpp;
+
+	SpideyApplySelectedAspect(
+		gSpideyFrontendLegacyMode ?
+			"display_options_frontend" :
+			"display_options_gameplay");
 
 	SpideyInjectModernVideoModes();
 	SpideyKeepBorderlessMonitorWindow(
@@ -6109,6 +6117,7 @@ void game_patches(void)
 	SpideyInstallWindowedDirectDrawCompat();
 	SpideyInstallModernModeReinitCompat();
 	SpideyInstallDisplayOptionsCompat();
+	SpideyInstallDisplayAspectCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
