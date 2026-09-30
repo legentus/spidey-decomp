@@ -3439,3 +3439,31 @@ ACTIVE FIX:
 - rerun the same Phase 0 one-click test after this build-only correction.
 
 Do not advance to DX11 Phase 1 until the helper builds, installs, loads, ABI-checks, and probes successfully.
+
+
+### DX11 export linker fix committed
+
+Fix commit:
+`c89c6034a0bfb70cf99b38b1fec7745bd8ddc166` — `renderer11: fix x86 DEF export decoration`
+
+Change:
+- `renderer11/spidey_renderer11.def` now lists only the eight undecorated public export names;
+- removed explicit `=_Spidey...` aliases;
+- source declarations/definitions remain `extern "C" __cdecl` and ABI version remains 1;
+- proxy lookup strings in `main.cpp` already request the same undecorated names, so no bridge-side change is required.
+
+Static validation:
+- independent i686 MSVC-ABI COFF reproduction links successfully with plain .def names and its PE export table contains exactly the undecorated names;
+- the previous explicit underscore alias form reproduces the unresolved-name failure.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. confirm the updater pulls commit `c89c6034a0bfb70cf99b38b1fec7745bd8ddc166` or later;
+3. renderer11 should now pass the DLL link stage;
+4. if build/install succeeds, let the game launch normally and upload the complete session output;
+5. Phase 0 success still requires:
+   - `renderer11_bridge loaded ... abi=1 expected=1 backend=Direct3D 11 probe=1`;
+   - `spidey-renderer11.log` with successful D3D11 probe / feature level;
+   - known-good D3D7 visible rendering and Alt+Tab behavior unchanged.
+
+If a new failure appears, stop at that exact Phase 0 layer and fix it before Phase 1.
