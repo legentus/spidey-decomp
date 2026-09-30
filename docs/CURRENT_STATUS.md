@@ -3928,3 +3928,74 @@ NEXT FRONTIER:
    - point/linear filter;
    - viewport;
 5. compare/log DX11 shadow frame coverage before suppressing any D3D7 draw.
+
+
+## CHECKPOINT — live retail draw stream validated; ready for parallel DX11 geometry — 2026-09-30
+
+Reason for checkpoint:
+User explicitly requested a checkpoint before further renderer changes.
+
+Last tested runtime revision:
+`88c37819fb3935ed7d8a8dd649044a111e4b5752`
+
+Observed runtime status:
+- game booted cleanly;
+- user entered gameplay and played without a reported regression;
+- retail D3D7 DrawPrimitive probe installed successfully on the live device;
+- retail device slot `0x006B791C` validated with `GetCaps=S_OK`;
+- Phase 2A DX11 shader presentation remained active;
+- Phase 2B DX11 texture sidecar remained stable.
+
+Retail primitive stream — full-run aggregate:
+- total observed active DrawPrimitive calls: **2,423,890**;
+- **100%** primitive type = `D3DPT_TRIANGLEFAN`;
+- **100%** FVF = `0x144` / decimal 324;
+- other primitive types = **0**;
+- other FVFs = **0**;
+- textured draws = **2,384,258**;
+- textured draws resolving to mirrored DX11 textures = **2,383,026**;
+- unresolved textured draws = **1,232**;
+- DX11 texture-handle coverage = **99.9483%**;
+- unresolved draws are concentrated in only **9 distinct DirectDraw surface pointers**;
+- maximum observed DrawPrimitive calls in a logged frame = **9,316**;
+- resident DX11 texture set reached **568**.
+
+Verified live vertex/state shape:
+- transformed/lit vertex data is XYZRHW + diffuse + UV;
+- triangle-fan stream matches the reconstructed `SDXPolyField` layout;
+- common depth state: Z enabled, opaque Z-write enabled, translucent Z-write disabled, ZFUNC=LESSEQUAL;
+- opaque: alpha blend disabled, SRC=ONE, DEST=ZERO-equivalent D3D7 values observed as SRC=2 DST=1;
+- translucent path observed SRC=5 DST=6;
+- texture color/alpha op commonly MODULATE;
+- ADDRESSU/V observed WRAP and CLAMP;
+- MAG/MIN filtering observed LINEAR;
+- viewport follows the retail internal target, e.g. 640x480 in frontend.
+
+Critical architecture conclusion:
+The live renderer is not a broad arbitrary D3D7 workload. The complete observed primitive stream is one primitive family and one FVF, which makes a focused DX11 compatibility renderer practical.
+
+Important dead-end avoided:
+- reconstructed `DXsound.cpp::renderScene()` is NOT the live runtime scene loop;
+- do not base the migration on reconstructed `gSceneBuffer`;
+- the correct migration seam is the live retail `IDirect3DDevice7::DrawPrimitive` COM boundary.
+
+NEXT SAFE IMPLEMENTATION STEP:
+1. add on-demand mirroring at the live draw boundary for the 9 unresolved DirectDraw surfaces;
+2. extend renderer11 ABI with a retail-TL-vertex draw submission entry point;
+3. create a separate DX11 offscreen scene color/depth target;
+4. shadow every eligible retail triangle-fan draw into that DX11 target while ALWAYS still calling original D3D7 DrawPrimitive;
+5. emulate only the observed fixed-function subset first:
+   - viewport;
+   - depth enable/write/compare;
+   - blend;
+   - texture modulate/alpha;
+   - wrap/clamp;
+   - point/linear filtering;
+6. log shadowed/skipped draw coverage and never make the DX11 shadow scene visible until coverage/state parity is demonstrated;
+7. after parity, compare the offscreen DX11 scene against the D3D7 reference before suppressing any D3D7 draw.
+
+Do NOT yet:
+- expose 2560x1440 as a D3D7 scene mode;
+- remove D3D7 DrawPrimitive;
+- replace the visible framebuffer with the new geometry shadow target;
+- discard the Phase 2A framebuffer-upload fallback.
