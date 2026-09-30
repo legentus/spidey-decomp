@@ -76,6 +76,13 @@ int SpideyRenderer11ShadowEndFrame(
     unsigned long sceneWidth,
     unsigned long sceneHeight);
 
+void SpideyRenderer11ShadowSetContinuous(
+    int enabled);
+
+int SpideyRenderer11PresentShadow(
+    int preserveAspect,
+    int vsync);
+
 void SpideyRenderer11ReleaseMirroredTexture(
     unsigned long textureId);
 
