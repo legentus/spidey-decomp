@@ -388,6 +388,7 @@ $crashLog = Join-Path $gameDir "spidey-decomp-crash.log"
 $dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
 $compatLog = Join-Path $gameDir "spidey-decomp-compat.log"
 $presentLog = Join-Path $gameDir "spidey-decomp-present.log"
+$textureLog = Join-Path $gameDir "spidey-decomp-texture.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 
 if (Test-Path $crashLog) {
@@ -401,6 +402,9 @@ if (Test-Path $compatLog) {
 }
 if (Test-Path $presentLog) {
     Remove-Item -LiteralPath $presentLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $textureLog) {
+    Remove-Item -LiteralPath $textureLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $runtimeLog) {
     Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
@@ -442,6 +446,12 @@ if (Test-Path $presentLog) {
     Copy-Item -LiteralPath $presentLog -Destination (Join-Path $sessionDir "spidey-decomp-present.log") -Force
     Write-Host "[PRESENT] DirectDraw presentation log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-present.log"))
+}
+
+if (Test-Path $textureLog) {
+    Copy-Item -LiteralPath $textureLog -Destination (Join-Path $sessionDir "spidey-decomp-texture.log") -Force
+    Write-Host "[TEXTURE] Texture conversion log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-texture.log"))
 }
 
 if (Test-Path $runtimeLog) {
