@@ -1710,11 +1710,61 @@ int SpideyRenderer11MirrorLegacyTexture(
 		void* legacySurface)
 {
 	if (!gSpideyRenderer11BridgeReady ||
-		!gSpideyRenderer11Initialized ||
 		!gSpideyRenderer11UpdateTexture ||
 		!legacySurface)
 	{
 		return 0;
+	}
+
+	// Do not depend on PCTex being initialized after our explicit Phase 2B
+	// early-init point. If a retail path creates a texture sooner, bring the
+	// DX11 device up lazily from the live game HWND and continue mirroring.
+	if (!gSpideyRenderer11Initialized)
+	{
+		HWND mirrorWindow =
+			*(HWND*)0x006B58D0;
+		RECT mirrorClient;
+
+		if (!mirrorWindow ||
+			!GetClientRect(
+				mirrorWindow,
+				&mirrorClient))
+		{
+			return 0;
+		}
+
+		unsigned long mirrorWidth =
+			(unsigned long)(
+				mirrorClient.right -
+				mirrorClient.left);
+		unsigned long mirrorHeight =
+			(unsigned long)(
+				mirrorClient.bottom -
+				mirrorClient.top);
+
+		if (!mirrorWidth ||
+			!mirrorHeight ||
+			!SpideyEnsureRenderer11Presentation(
+				mirrorWindow,
+				mirrorWidth,
+				mirrorHeight))
+		{
+			return 0;
+		}
+
+		FILE* lazyLog = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (lazyLog)
+		{
+			fprintf(
+				lazyLog,
+				"renderer11_phase2b lazy_texture_initialize hwnd=0x%08lX size=%lux%lu result=1\n",
+				(unsigned long)mirrorWindow,
+				mirrorWidth,
+				mirrorHeight);
+			fclose(lazyLog);
+		}
 	}
 
 	LPDIRECTDRAWSURFACE7 surface =
