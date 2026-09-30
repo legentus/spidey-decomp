@@ -724,19 +724,25 @@ namespace
             "Texture2D gameTexture : register(t0);\n"
             "SamplerState gameSampler : register(s0);\n"
             "struct VSIn { float4 position : POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
-            "struct VSOut { float4 position : SV_POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
+            "struct VSOut { float4 position : SV_POSITION; float4 color : COLOR0; float2 uvOverW : TEXCOORD0; float rhw : TEXCOORD1; };\n"
             "VSOut VSMain(VSIn input) {\n"
             "    VSOut output;\n"
-            "    output.position = input.position;\n"
+            "    float rhw = abs(input.position.w) > 0.0000001 ? input.position.w : 1.0;\n"
+            "    output.position = float4(input.position.xyz, 1.0);\n"
             "    output.color = input.color.bgra;\n"
-            "    output.uv = input.uv;\n"
+            "    output.uvOverW = input.uv * rhw;\n"
+            "    output.rhw = rhw;\n"
             "    return output;\n"
             "}\n"
+            "float2 ResolveUv(VSOut input) {\n"
+            "    float rhw = abs(input.rhw) > 0.0000001 ? input.rhw : 1.0;\n"
+            "    return input.uvOverW / rhw;\n"
+            "}\n"
             "float4 PSModulateAlpha(VSOut input) : SV_TARGET {\n"
-            "    return gameTexture.Sample(gameSampler, input.uv) * input.color;\n"
+            "    return gameTexture.Sample(gameSampler, ResolveUv(input)) * input.color;\n"
             "}\n"
             "float4 PSDiffuseAlpha(VSOut input) : SV_TARGET {\n"
-            "    float4 texel = gameTexture.Sample(gameSampler, input.uv);\n"
+            "    float4 texel = gameTexture.Sample(gameSampler, ResolveUv(input));\n"
             "    return float4(texel.rgb * input.color.rgb, input.color.a);\n"
             "}\n";
 
@@ -933,7 +939,7 @@ namespace
         gShadowVertices.reserve(65536);
         gShadowCommands.reserve(16384);
 
-        Log("shadow pipeline ready shader_model=4_0 tl_vertex=1");
+        Log("shadow pipeline ready shader_model=4_0 tl_vertex=screen_space manual_uv_perspective=1");
         return true;
     }
 
@@ -2362,16 +2368,18 @@ int __cdecl SpideyRenderer11_ShadowSubmitTriangleFan(
             const float ndcY =
                 1.0f - ((source.y - viewportY) / viewportHeight) * 2.0f;
 
-            const float clipW =
-                std::fabs(source.rhw) > 0.0000001f ?
-                (1.0f / source.rhw) :
-                1.0f;
-
+            // D3D7 XYZRHW vertices are already transformed into screen
+            // space. Keep clip W fixed so DX11 clips them linearly in the
+            // same screen-space domain instead of reconstructing a varying
+            // homogeneous W (which warps very large off-screen triangles).
+            // Carry RHW in the otherwise-unused input position.w; the shader
+            // uses it only to reconstruct fixed-function perspective texture
+            // interpolation after clipping.
             ShadowGpuVertex output = {};
-            output.x = ndcX * clipW;
-            output.y = ndcY * clipW;
-            output.z = source.z * clipW;
-            output.w = clipW;
+            output.x = ndcX;
+            output.y = ndcY;
+            output.z = source.z;
+            output.w = source.rhw;
             output.diffuse = source.diffuse;
             output.u = source.u;
             output.v = source.v;
