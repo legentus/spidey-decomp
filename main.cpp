@@ -105,6 +105,7 @@
 #include "PCMovie.h"
 #include "flash.h"
 #include "renderer11_legacy_bridge.h"
+#include "input11_legacy_bridge.h"
 
 
 #include "my_patch.h"
@@ -2594,6 +2595,212 @@ static void SpideyInstallDisplayOptionsCompat()
 	}
 }
 
+static HMODULE gSpideyInput11Module = 0;
+
+typedef unsigned long (__cdecl *SpideyInput11GetAbiVersionFn)(void);
+typedef const char* (__cdecl *SpideyInput11GetBackendNameFn)(void);
+typedef int (__cdecl *SpideyInput11ProbeFn)(void);
+typedef int (__cdecl *SpideyInput11PollFn)(
+		SpideyInput11LegacyState*,
+		unsigned long);
+typedef int (__cdecl *SpideyInput11SetVibrationFn)(
+		float,
+		float);
+typedef void (__cdecl *SpideyInput11ShutdownFn)(void);
+
+static SpideyInput11PollFn gSpideyInput11Poll = 0;
+static SpideyInput11SetVibrationFn gSpideyInput11SetVibration = 0;
+static SpideyInput11ShutdownFn gSpideyInput11Shutdown = 0;
+static int gSpideyInput11BridgeReady = 0;
+static SpideyInput11LegacyState gSpideyInput11State;
+static int gSpideyInput11LastConnected = -1;
+static unsigned long gSpideyInput11LastUser = 0xFFFFFFFFUL;
+
+static int SpideyProbeInput11Bridge()
+{
+	if (!gSpideyInput11Module)
+	{
+		gSpideyInput11Module =
+			LoadLibraryA(
+				"spidey_input11.dll");
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+
+	if (!gSpideyInput11Module)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"input11_bridge load_failed error=%lu\n",
+				(unsigned long)GetLastError());
+			fclose(f);
+		}
+		return 0;
+	}
+
+	SpideyInput11GetAbiVersionFn getAbi =
+		(SpideyInput11GetAbiVersionFn)GetProcAddress(
+			gSpideyInput11Module,
+			"SpideyInput11_GetAbiVersion");
+	SpideyInput11GetBackendNameFn getName =
+		(SpideyInput11GetBackendNameFn)GetProcAddress(
+			gSpideyInput11Module,
+			"SpideyInput11_GetBackendName");
+	SpideyInput11ProbeFn probe =
+		(SpideyInput11ProbeFn)GetProcAddress(
+			gSpideyInput11Module,
+			"SpideyInput11_Probe");
+
+	gSpideyInput11Poll =
+		(SpideyInput11PollFn)GetProcAddress(
+			gSpideyInput11Module,
+			"SpideyInput11_Poll");
+	gSpideyInput11SetVibration =
+		(SpideyInput11SetVibrationFn)GetProcAddress(
+			gSpideyInput11Module,
+			"SpideyInput11_SetVibration");
+	gSpideyInput11Shutdown =
+		(SpideyInput11ShutdownFn)GetProcAddress(
+			gSpideyInput11Module,
+			"SpideyInput11_Shutdown");
+
+	if (!getAbi ||
+		!getName ||
+		!probe ||
+		!gSpideyInput11Poll ||
+		!gSpideyInput11SetVibration ||
+		!gSpideyInput11Shutdown)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"input11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX poll=0x%08lX vibration=0x%08lX shutdown=0x%08lX\n",
+				(unsigned long)getAbi,
+				(unsigned long)getName,
+				(unsigned long)probe,
+				(unsigned long)gSpideyInput11Poll,
+				(unsigned long)gSpideyInput11SetVibration,
+				(unsigned long)gSpideyInput11Shutdown);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	const unsigned long abi =
+		getAbi();
+	const char* name =
+		getName();
+	const int probeResult =
+		probe();
+
+	gSpideyInput11BridgeReady =
+		abi == 1 &&
+		probeResult != 0;
+
+	if (f)
+	{
+		fprintf(
+			f,
+				"input11_bridge loaded module=0x%08lX abi=%lu expected=1 backend=%s probe=%d passive=1\n",
+				(unsigned long)gSpideyInput11Module,
+				abi,
+				name ? name : "unknown",
+				probeResult);
+		fclose(f);
+	}
+
+	return gSpideyInput11BridgeReady;
+}
+
+int SpideyInput11PassivePoll(
+		unsigned long frame)
+{
+	if (!gSpideyInput11BridgeReady ||
+		!gSpideyInput11Poll)
+	{
+		return 0;
+	}
+
+	SpideyInput11LegacyState state;
+	memset(
+		&state,
+		0,
+		sizeof(state));
+
+	const int pollResult =
+		gSpideyInput11Poll(
+			&state,
+			sizeof(state));
+
+	if (!pollResult)
+		return 0;
+
+	gSpideyInput11State =
+		state;
+
+	const int connected =
+		state.connected ? 1 : 0;
+	const int transition =
+		gSpideyInput11LastConnected != connected ||
+		(connected &&
+		 gSpideyInput11LastUser != state.userIndex);
+	const int periodic =
+		connected &&
+		(frame <= 5 ||
+		 (frame % 300) == 0);
+
+	if (transition ||
+		periodic)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-input.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"input11_state frame=%lu connected=%d family=%lu user=%lu packet=%lu buttons=0x%08lX move=%.4f,%.4f camera=%.4f,%.4f triggers=%.4f,%.4f sequence=%lu passive=1\n",
+				frame,
+				connected,
+				state.deviceFamily,
+				state.userIndex,
+				state.packetNumber,
+				state.buttons,
+				state.moveX,
+				state.moveY,
+				state.cameraX,
+				state.cameraY,
+				state.leftTrigger,
+				state.rightTrigger,
+				state.sequence);
+			fclose(f);
+		}
+	}
+
+	gSpideyInput11LastConnected =
+		connected;
+	gSpideyInput11LastUser =
+		state.userIndex;
+
+	return 1;
+}
+
+int SpideyInput11IsConnected()
+{
+	return gSpideyInput11BridgeReady &&
+		gSpideyInput11State.connected != 0;
+}
+
+const SpideyInput11LegacyState* SpideyInput11GetState()
+{
+	return &gSpideyInput11State;
+}
+
 static HMODULE gSpideyRenderer11Module = 0;
 
 typedef unsigned long (__cdecl *SpideyRenderer11GetAbiVersionFn)(void);
@@ -4819,6 +5026,11 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 		HINSTANCE hInstance,
 		u32 options)
 {
+	// Modern helpers are separate VS2022 Win32 DLLs behind legacy-safe C
+	// ABIs. Input stays passive here: probe/poll telemetry only, with no
+	// gameplay action injection until the helper has runtime proof.
+	SpideyProbeInput11Bridge();
+
 	// Phase 0 of the renderer migration: prove the modern x86 DX11 helper
 	// DLL can be loaded and can create a hardware D3D11 device. Rendering
 	// remains on D3D7 until individual DXPOLY responsibilities are migrated.
@@ -5684,6 +5896,12 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 {
 	const unsigned long frame =
 		++gSpideyPresentFrame;
+
+	// Modern input Phase 0 is observation-only. Poll once per completed game
+	// frame so connection/axis telemetry is available without changing retail
+	// action state or controller behavior.
+	SpideyInput11PassivePoll(
+		frame);
 
 	int shadowPreviewToggled =
 		0;
