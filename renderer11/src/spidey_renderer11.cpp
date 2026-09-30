@@ -282,14 +282,14 @@ int __cdecl SpideyRenderer11_Initialize(
     DXGI_SWAP_CHAIN_DESC swapDesc = {};
     swapDesc.BufferDesc.Width = width;
     swapDesc.BufferDesc.Height = height;
-    swapDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    swapDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     swapDesc.SampleDesc.Count = 1;
     swapDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapDesc.BufferCount = 2;
     swapDesc.OutputWindow = hwnd;
     swapDesc.Windowed = TRUE;
     swapDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    swapDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
 
     const D3D_FEATURE_LEVEL requested[] =
     {
@@ -433,6 +433,180 @@ int __cdecl SpideyRenderer11_Present(int vsync)
     {
         Log("present failed hr=0x%08lX", static_cast<unsigned long>(hr));
         return 0;
+    }
+
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_PresentHdc(
+    HDC source,
+    unsigned long sourceWidth,
+    unsigned long sourceHeight,
+    int preserveAspect,
+    int vsync)
+{
+    if (!source || !gSwapChain || !gContext || !gWindow ||
+        sourceWidth == 0 || sourceHeight == 0)
+    {
+        Log(
+            "present_hdc rejected source=0x%p swap=0x%p hwnd=0x%p src=%lux%lu",
+            source,
+            gSwapChain,
+            gWindow,
+            sourceWidth,
+            sourceHeight);
+        return 0;
+    }
+
+    RECT client = {};
+    if (!GetClientRect(gWindow, &client))
+    {
+        Log("present_hdc get_client_rect failed error=%lu", GetLastError());
+        return 0;
+    }
+
+    const unsigned long targetWidth =
+        static_cast<unsigned long>(client.right - client.left);
+    const unsigned long targetHeight =
+        static_cast<unsigned long>(client.bottom - client.top);
+
+    if (targetWidth == 0 || targetHeight == 0)
+        return 0;
+
+    if (targetWidth != gWidth || targetHeight != gHeight)
+    {
+        if (!SpideyRenderer11_Resize(targetWidth, targetHeight))
+        {
+            Log(
+                "present_hdc resize_failed target=%lux%lu",
+                targetWidth,
+                targetHeight);
+            return 0;
+        }
+    }
+
+    if (gContext)
+    {
+        gContext->OMSetRenderTargets(0, nullptr, nullptr);
+        gContext->Flush();
+    }
+
+    IDXGISurface1* surface = nullptr;
+    HRESULT hr = gSwapChain->GetBuffer(
+        0,
+        __uuidof(IDXGISurface1),
+        reinterpret_cast<void**>(&surface));
+
+    if (FAILED(hr) || !surface)
+    {
+        Log("present_hdc get_surface failed hr=0x%08lX", static_cast<unsigned long>(hr));
+        SafeRelease(surface);
+        return 0;
+    }
+
+    HDC target = nullptr;
+    hr = surface->GetDC(TRUE, &target);
+    if (FAILED(hr) || !target)
+    {
+        Log("present_hdc get_dc failed hr=0x%08lX", static_cast<unsigned long>(hr));
+        SafeRelease(surface);
+        return 0;
+    }
+
+    int x = 0;
+    int y = 0;
+    int width = static_cast<int>(targetWidth);
+    int height = static_cast<int>(targetHeight);
+
+    if (preserveAspect)
+    {
+        const unsigned long long srcWide =
+            static_cast<unsigned long long>(sourceWidth) * targetHeight;
+        const unsigned long long dstWide =
+            static_cast<unsigned long long>(targetWidth) * sourceHeight;
+
+        if (srcWide > dstWide)
+        {
+            height = static_cast<int>(
+                static_cast<unsigned long long>(targetWidth) *
+                sourceHeight / sourceWidth);
+            y = (static_cast<int>(targetHeight) - height) / 2;
+        }
+        else if (srcWide < dstWide)
+        {
+            width = static_cast<int>(
+                static_cast<unsigned long long>(targetHeight) *
+                sourceWidth / sourceHeight);
+            x = (static_cast<int>(targetWidth) - width) / 2;
+        }
+    }
+
+    RECT full = { 0, 0, static_cast<LONG>(targetWidth), static_cast<LONG>(targetHeight) };
+    FillRect(target, &full, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    SetStretchBltMode(target, COLORONCOLOR);
+
+    BOOL copied = StretchBlt(
+        target,
+        x,
+        y,
+        width,
+        height,
+        source,
+        0,
+        0,
+        static_cast<int>(sourceWidth),
+        static_cast<int>(sourceHeight),
+        SRCCOPY);
+
+    DWORD copyError = copied ? 0 : GetLastError();
+    GdiFlush();
+
+    HRESULT releaseHr = surface->ReleaseDC(nullptr);
+    SafeRelease(surface);
+
+    if (!copied || FAILED(releaseHr))
+    {
+        Log(
+            "present_hdc copy_failed copied=%d error=%lu release_hr=0x%08lX src=%lux%lu dst=%lux%lu rect=%d,%d,%dx%d",
+            copied ? 1 : 0,
+            copyError,
+            static_cast<unsigned long>(releaseHr),
+            sourceWidth,
+            sourceHeight,
+            targetWidth,
+            targetHeight,
+            x,
+            y,
+            width,
+            height);
+        return 0;
+    }
+
+    hr = gSwapChain->Present(vsync ? 1 : 0, 0);
+    if (FAILED(hr))
+    {
+        Log("present_hdc present_failed hr=0x%08lX", static_cast<unsigned long>(hr));
+        return 0;
+    }
+
+    static unsigned long frame = 0;
+    ++frame;
+    if (frame <= 5 || (frame % 120) == 0)
+    {
+        Log(
+            "present_hdc frame=%lu src=%lux%lu dst=%lux%lu rect=%d,%d,%dx%d aspect=%d vsync=%d",
+            frame,
+            sourceWidth,
+            sourceHeight,
+            targetWidth,
+            targetHeight,
+            x,
+            y,
+            width,
+            height,
+            preserveAspect ? 1 : 0,
+            vsync ? 1 : 0);
     }
 
     return 1;
