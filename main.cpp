@@ -2192,12 +2192,36 @@ unsigned long SpideyRenderer11GetMirroredTextureCount(void)
 	return gSpideyRenderer11GetResidentTextureCount();
 }
 
+typedef HRESULT (WINAPI *SpideyRetailD3D7ClearFn)(
+		LPDIRECT3DDEVICE7,
+		DWORD,
+		LPD3DRECT,
+		DWORD,
+		D3DCOLOR,
+		D3DVALUE,
+		DWORD);
+typedef HRESULT (WINAPI *SpideyRetailD3D7SetViewportFn)(
+		LPDIRECT3DDEVICE7,
+		LPD3DVIEWPORT7);
+typedef HRESULT (WINAPI *SpideyRetailD3D7SetRenderStateFn)(
+		LPDIRECT3DDEVICE7,
+		D3DRENDERSTATETYPE,
+		DWORD);
 typedef HRESULT (WINAPI *SpideyRetailD3D7DrawPrimitiveFn)(
 		LPDIRECT3DDEVICE7,
 		D3DPRIMITIVETYPE,
 		DWORD,
 		LPVOID,
 		DWORD,
+		DWORD);
+typedef HRESULT (WINAPI *SpideyRetailD3D7SetTextureFn)(
+		LPDIRECT3DDEVICE7,
+		DWORD,
+		LPDIRECTDRAWSURFACE7);
+typedef HRESULT (WINAPI *SpideyRetailD3D7SetTextureStageStateFn)(
+		LPDIRECT3DDEVICE7,
+		DWORD,
+		D3DTEXTURESTAGESTATETYPE,
 		DWORD);
 
 struct SpideyRetailTLVertexProbe
@@ -2211,9 +2235,24 @@ struct SpideyRetailTLVertexProbe
 	f32 v;
 };
 
+static SpideyRetailD3D7ClearFn gSpideyRetailD3D7ClearOriginal = 0;
+static SpideyRetailD3D7SetViewportFn gSpideyRetailD3D7SetViewportOriginal = 0;
+static SpideyRetailD3D7SetRenderStateFn gSpideyRetailD3D7SetRenderStateOriginal = 0;
 static SpideyRetailD3D7DrawPrimitiveFn gSpideyRetailD3D7DrawPrimitiveOriginal = 0;
+static SpideyRetailD3D7SetTextureFn gSpideyRetailD3D7SetTextureOriginal = 0;
+static SpideyRetailD3D7SetTextureStageStateFn gSpideyRetailD3D7SetTextureStageStateOriginal = 0;
 static LPDIRECT3DDEVICE7 gSpideyRetailD3D7DrawProbeDevice = 0;
 static void** gSpideyRetailD3D7DrawProbeVtable = 0;
+
+static SpideyRenderer11LegacyShadowState gSpideyRetailShadowState;
+static int gSpideyRetailShadowStateValid = 0;
+
+static LPDIRECTDRAWSURFACE7 gSpideyPendingTransientSurfaces[32];
+static unsigned long gSpideyPendingTransientCount = 0;
+static unsigned long gSpideyShadowSubmitted = 0;
+static unsigned long gSpideyShadowSkipped = 0;
+static unsigned long gSpideyTransientQueued = 0;
+static unsigned long gSpideyTransientMirrored = 0;
 
 static unsigned long gSpideyRetailDrawCalls = 0;
 static unsigned long gSpideyRetailDrawTextured = 0;
