@@ -2615,6 +2615,84 @@ static int gSpideyInput11BridgeReady = 0;
 static SpideyInput11LegacyState gSpideyInput11State;
 static int gSpideyInput11LastConnected = -1;
 static unsigned long gSpideyInput11LastUser = 0xFFFFFFFFUL;
+static int gSpideyRetailActionMapLogged = 0;
+
+static void SpideyLogRetailActionMap()
+{
+	if (gSpideyRetailActionMapLogged)
+		return;
+
+	// Original processControllerScreen/initActionMaps use 11 SActionMap
+	// records at 0x00568690, stride 0x1C:
+	// +0x00 action bit, +0x04 inline 16-byte label,
+	// +0x14 keyboard mapping, +0x18 controller mapping.
+	const unsigned char* base =
+		(const unsigned char*)0x00568690;
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+
+	if (!f)
+		return;
+
+	int valid =
+		1;
+
+	__try
+	{
+		for (int i = 0;
+			 i < 11;
+			 ++i)
+		{
+			const unsigned char* entry =
+				base +
+				i * 0x1C;
+			const unsigned long action =
+				*(const unsigned long*)(entry + 0x00);
+			char label[17];
+			memset(
+				label,
+				0,
+				sizeof(label));
+			memcpy(
+				label,
+				entry + 0x04,
+				16);
+			label[16] =
+				0;
+
+			const unsigned long keyboard =
+				*(const unsigned long*)(entry + 0x14);
+			const unsigned long controller =
+				*(const unsigned long*)(entry + 0x18);
+
+			fprintf(
+				f,
+				"retail_action_map index=%d action=0x%04lX label=%s keyboard=0x%08lX controller=0x%08lX passive=1\n",
+				i,
+				action,
+				label,
+				keyboard,
+				controller);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		valid =
+			0;
+		fprintf(
+			f,
+				"retail_action_map event=read_fault base=0x00568690 passive=1\n");
+	}
+
+	fclose(f);
+
+	if (valid)
+	{
+		gSpideyRetailActionMapLogged =
+			1;
+	}
+}
 
 static int SpideyProbeInput11Bridge()
 {
@@ -2720,6 +2798,10 @@ static int SpideyProbeInput11Bridge()
 int SpideyInput11PassivePoll(
 		unsigned long frame)
 {
+	// Dump the original PC action descriptors once from retail memory.
+	// This is independent of controller-helper readiness and is read-only.
+	SpideyLogRetailActionMap();
+
 	if (!gSpideyInput11BridgeReady ||
 		!gSpideyInput11Poll)
 	{
