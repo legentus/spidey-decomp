@@ -2526,3 +2526,52 @@ This is now the preferred normal test workflow after the file has been pulled on
 `UPDATE_AND_TEST_LATEST_BUILD.bat`
 
 For the first use on a checkout that predates this file, run `UPDATE_SPIDEY_PROJECT.bat` once to obtain it.
+
+
+## Runtime result: movies visible, borderless correct, crash moved into PCTex_CreateTexture256 — 2026-09-29
+
+Tested revision:
+`fde5f00bd2306d5a877c8ba5b3c15d1196942923`
+
+User-visible:
+- startup/splash movies are now visible;
+- movies could not be skipped with input;
+- game crashes during transition into the start menu.
+
+Confirmed presentation:
+- primary desktop/window target = 2560x1440;
+- saved/live internal render = 1280x1024x32;
+- presenter aspect-fits that 5:4 scene to 1800x1440 at x=380;
+- borderless HWND remains 2560x1440;
+- movie-specific presenter is installed and visibly working.
+
+New crash:
+- EIP = `0x10037CB1`;
+- access = write to NULL (`0x00000000`);
+- current linker map places `PCTex_CreateTexture256` at `0x10037AF0`;
+- fault offset inside that function = `+0x1C1`;
+- registers at failure include EDI=0 and 64x64-looking dimension values (EBX/EBP=0x40);
+- this is no longer the previous `DCMem_New + 0x51 -> write 0x1F` crash;
+- compat log contains no `mem_fallback` entry before failure.
+
+Retail/reference disassembly note:
+- repository retail blob `tools/functions/5300640.bin` is the original `PCTex_CreateTexture256` body;
+- current reconstructed function remains tagged `@AlmostMatching`;
+- the early body allocates a temporary 16-bit conversion buffer, optionally clears it, resolves a palette, then converts indexed source bytes into that buffer before D3D texture creation.
+- next patch should guard and independently backstop this transient conversion buffer, then log exact call arguments/stage.
+
+Movie skip:
+- `GameFMV_PlayMovie` calls `Pad_Update()` every movie frame and only checks skip triggers after 60 frames;
+- borderless helper currently uses `SWP_NOACTIVATE`, which can leave the launch console as the active window and DirectInput foreground devices unable to report movie-skip input;
+- `PCINPUT_GetMappedStates` also does not initialize its output masks before polling, so failed/unfocused polls can leave undefined values.
+
+NEXT PATCH:
+1. remove `SWP_NOACTIVATE` from borderless resize so the game is activated when brought to the top;
+2. initialize mapped-state masks to zero in `Pad_Update`;
+3. harden `PCTex_CreateTexture256` transient conversion-buffer allocation:
+   - retain original DCMem path first;
+   - if it still returns NULL, use a process-heap temporary buffer;
+   - never continue conversion with a null destination;
+   - free with the matching allocator;
+   - log entry dimensions/source/palette/buffer ownership and failure stage;
+4. add guards for null source/palette and failed PVR creation before indexing the global texture table.
