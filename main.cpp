@@ -2903,9 +2903,39 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 				device->GetViewport(&viewport);
 			}
 
+			const int cacheMismatch =
+				!gSpideyRetailShadowStateValid ||
+				gSpideyRetailShadowState.zEnable != zEnable ||
+				gSpideyRetailShadowState.zWrite != zWrite ||
+				gSpideyRetailShadowState.zFunc != zFunc ||
+				gSpideyRetailShadowState.alphaBlendEnable != alphaBlend ||
+				gSpideyRetailShadowState.srcBlend != srcBlend ||
+				gSpideyRetailShadowState.dstBlend != dstBlend ||
+				gSpideyRetailShadowState.alphaTestEnable != alphaTest ||
+				gSpideyRetailShadowState.alphaRef != alphaRef ||
+				gSpideyRetailShadowState.alphaFunc != alphaFunc ||
+				gSpideyRetailShadowState.fogEnable != fogEnable ||
+				gSpideyRetailShadowState.fogColor != fogColor ||
+				gSpideyRetailShadowState.colorOp != colorOp ||
+				gSpideyRetailShadowState.colorArg1 != colorArg1 ||
+				gSpideyRetailShadowState.colorArg2 != colorArg2 ||
+				gSpideyRetailShadowState.alphaOp != alphaOp ||
+				gSpideyRetailShadowState.alphaArg1 != alphaArg1 ||
+				gSpideyRetailShadowState.alphaArg2 != alphaArg2 ||
+				gSpideyRetailShadowState.addressU != addressU ||
+				gSpideyRetailShadowState.addressV != addressV ||
+				gSpideyRetailShadowState.magFilter != magFilter ||
+				gSpideyRetailShadowState.minFilter != minFilter ||
+				gSpideyRetailShadowState.viewportX != viewport.dwX ||
+				gSpideyRetailShadowState.viewportY != viewport.dwY ||
+				gSpideyRetailShadowState.viewportWidth != viewport.dwWidth ||
+				gSpideyRetailShadowState.viewportHeight != viewport.dwHeight ||
+				gSpideyRetailShadowState.viewportMinZ != viewport.dvMinZ ||
+				gSpideyRetailShadowState.viewportMaxZ != viewport.dvMaxZ;
+
 			fprintf(
 				f,
-				" state=z:%lu zw:%lu zf:%lu ab:%lu sb:%lu db:%lu at:%lu ar:%lu af:%lu fog:%lu fogc:0x%08lX tex=co:%lu ca1:%lu ca2:%lu ao:%lu aa1:%lu aa2:%lu au:%lu av:%lu mag:%lu min:%lu viewport=%lu,%lu,%lux%lu zrange=%.4f,%.4f",
+				" state=z:%lu zw:%lu zf:%lu ab:%lu sb:%lu db:%lu at:%lu ar:%lu af:%lu fog:%lu fogc:0x%08lX tex=co:%lu ca1:%lu ca2:%lu ao:%lu aa1:%lu aa2:%lu au:%lu av:%lu mag:%lu min:%lu viewport=%lu,%lu,%lux%lu zrange=%.4f,%.4f cache_mismatch=%d",
 				(unsigned long)zEnable,
 				(unsigned long)zWrite,
 				(unsigned long)zFunc,
@@ -2932,7 +2962,8 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 				(unsigned long)viewport.dwWidth,
 				(unsigned long)viewport.dwHeight,
 				viewport.dvMinZ,
-				viewport.dvMaxZ);
+				viewport.dvMaxZ,
+				cacheMismatch);
 
 			fputc(
 				'\n',
