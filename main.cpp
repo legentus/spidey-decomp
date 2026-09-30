@@ -6580,8 +6580,10 @@ void game_patches(void)
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
 	SpideyInstallModernModeReinitCompat();
-	SpideyInstallDisplayOptionsCompat();
+	// Claim the Display Options menu's Enter/Apply call before the generic
+	// SetDisplayOptions scan rewrites the remaining retail call sites.
 	SpideyInstallDisplayAspectCompat();
+	SpideyInstallDisplayOptionsCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
