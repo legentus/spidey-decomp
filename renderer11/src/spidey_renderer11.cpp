@@ -506,6 +506,27 @@ namespace
         }
     }
 
+    bool ConvertShadowBlendAlpha(
+        unsigned long legacyBlend,
+        D3D11_BLEND& blend)
+    {
+        switch (legacyBlend)
+        {
+            case 1: blend = D3D11_BLEND_ZERO; return true;
+            case 2: blend = D3D11_BLEND_ONE; return true;
+            case 3: blend = D3D11_BLEND_SRC_ALPHA; return true;
+            case 4: blend = D3D11_BLEND_INV_SRC_ALPHA; return true;
+            case 5: blend = D3D11_BLEND_SRC_ALPHA; return true;
+            case 6: blend = D3D11_BLEND_INV_SRC_ALPHA; return true;
+            case 7: blend = D3D11_BLEND_DEST_ALPHA; return true;
+            case 8: blend = D3D11_BLEND_INV_DEST_ALPHA; return true;
+            case 9: blend = D3D11_BLEND_DEST_ALPHA; return true;
+            case 10: blend = D3D11_BLEND_INV_DEST_ALPHA; return true;
+            case 11: blend = D3D11_BLEND_ONE; return true;
+            default: return false;
+        }
+    }
+
     ID3D11DepthStencilState* GetShadowDepthState(
         const SpideyRenderer11ShadowState& state)
     {
@@ -584,11 +605,23 @@ namespace
         desc.IndependentBlendEnable = FALSE;
         desc.RenderTarget[0].BlendEnable =
             state.alphaBlendEnable ? TRUE : FALSE;
+        D3D11_BLEND srcAlpha = D3D11_BLEND_ONE;
+        D3D11_BLEND dstAlpha = D3D11_BLEND_ZERO;
+
+        if (state.alphaBlendEnable)
+        {
+            if (!ConvertShadowBlendAlpha(state.srcBlend, srcAlpha) ||
+                !ConvertShadowBlendAlpha(state.dstBlend, dstAlpha))
+            {
+                return nullptr;
+            }
+        }
+
         desc.RenderTarget[0].SrcBlend = src;
         desc.RenderTarget[0].DestBlend = dst;
         desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-        desc.RenderTarget[0].SrcBlendAlpha = src;
-        desc.RenderTarget[0].DestBlendAlpha = dst;
+        desc.RenderTarget[0].SrcBlendAlpha = srcAlpha;
+        desc.RenderTarget[0].DestBlendAlpha = dstAlpha;
         desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
         desc.RenderTarget[0].RenderTargetWriteMask =
             D3D11_COLOR_WRITE_ENABLE_ALL;
