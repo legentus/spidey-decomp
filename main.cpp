@@ -2830,9 +2830,13 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 	if (captureShadowFrame)
 	{
 		if (shadowSubmitted)
+		{
 			++gSpideyShadowSubmitted;
-		else
+		}
+		else if (onMainScene)
+		{
 			++gSpideyShadowSkipped;
+		}
 	}
 
 	const int unusual =
