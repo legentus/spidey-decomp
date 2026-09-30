@@ -4246,3 +4246,53 @@ Expected ABI/runtime markers:
 
 GOAL OF THIS TEST:
 Visually characterize the first independently-rendered DX11 Spider-Man scene. Do not suppress D3D7 yet. Use the new exact sample colors + screenshots to correct parity before making DX11 authoritative.
+
+
+## DX11 Phase 2C2 PASSED — live shadow renderer visually validated — 2026-09-30
+
+Tested revision:
+`27022600ea3d7328abe3f5cebd718ea73581134a`
+
+User visual result:
+- F10 DX11 shadow preview looked correct;
+- user reported it may have looked slightly better than the D3D7-reference image;
+- repeated toggling remained stable.
+
+Runtime validation:
+- ABI 6 loaded with `phase2c2_exports=1`;
+- all seven retail state/draw hooks installed;
+- repeated F10 on/off transitions were observed throughout the run;
+- while DX11 shadow was visible, `present_path` reported:
+  - `dx11_shadow=1`;
+  - `dx11_pixels=0`;
+  - `shadow_preview=1`;
+  - `shadow_ready=1`;
+  - `compat_result=4`;
+- renderer11 continuously presented the shadow target at 1920x1440 aspect-fitted into the 2560x1440 swap chain;
+- no renderer11 `failed`, `rejected`, `setup_failed`, `map_failed`, `present_shadow present_failed`, or no-free-slot diagnostics occurred;
+- no `cache_mismatch=1` occurred;
+- all logged sampled DX11 frames had `skipped_submit=0` and `skipped_render=0`;
+- representative gameplay frame 4080:
+  - retail calls = 5,007;
+  - shadow_submit = 5,007;
+  - missing = 0;
+  - renderer queued/submitted/rendered = 5,007/5,007/5,007;
+  - skipped_render = 0;
+- transient texture recovery continued to work, including RGB565 surfaces;
+- later frontend transition at frame 4200 still replayed all 3,587 draws successfully after transient recovery.
+
+Exact pixel parity:
+- matched D3D7/DX11 sample sets remain close but not bit-identical;
+- across 35 matched nine-pixel sample frames, median absolute per-channel difference was 1 level;
+- mean absolute per-channel difference was about 2.78 levels;
+- this is consistent with small legacy-vs-DX11 raster/filter/color-math differences rather than missing scene content;
+- visual inspection found no objectionable discrepancy.
+
+Phase 2C2 conclusion:
+The independent DX11 geometry renderer is visually viable and stable enough to become the default visible renderer.
+
+NEXT FRONTIER — Phase 2C3:
+- make DX11 geometry/shadow presentation enabled by default;
+- retain F10 as an immediate A/B fallback to the D3D7-reference image;
+- keep D3D7 DrawPrimitive executing in the background for one more validation stage;
+- after default-DX11 runtime validation, begin a controlled mode that suppresses original main-scene D3D7 DrawPrimitive while leaving all state/texture/device plumbing intact.
