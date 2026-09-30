@@ -2009,6 +2009,168 @@ long SpideyRenderer11ResolveLegacyTexture(
 			(unsigned long)legacySurface);
 }
 
+long SpideyRenderer11MirrorTransientLegacyTexture(
+		void* legacySurface)
+{
+	if (!gSpideyRenderer11UpdateTransientTexture ||
+		!legacySurface)
+	{
+		return -1;
+	}
+
+	LPDIRECTDRAWSURFACE7 surface =
+		(LPDIRECTDRAWSURFACE7)legacySurface;
+
+	DDSURFACEDESC2 desc;
+	memset(
+		&desc,
+		0,
+		sizeof(desc));
+	desc.dwSize =
+		sizeof(desc);
+
+	HRESULT lockHr =
+		surface->Lock(
+			0,
+			&desc,
+			DDLOCK_WAIT | DDLOCK_READONLY,
+			0);
+	int lockRetry =
+		0;
+
+	if (FAILED(lockHr))
+	{
+		memset(
+			&desc,
+			0,
+			sizeof(desc));
+		desc.dwSize =
+			sizeof(desc);
+
+		lockHr =
+			surface->Lock(
+				0,
+				&desc,
+				DDLOCK_WAIT,
+				0);
+		lockRetry =
+			SUCCEEDED(lockHr) ? 1 : 0;
+	}
+
+	if (FAILED(lockHr) ||
+		!desc.lpSurface ||
+		!desc.dwWidth ||
+		!desc.dwHeight ||
+		!desc.ddpfPixelFormat.dwRGBBitCount)
+	{
+		if (SUCCEEDED(lockHr))
+			surface->Unlock(0);
+
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"transient_mirror handle=0x%08lX result=-1 lock_hr=0x%08lX size=%lux%lu bpp=%lu retry=%d\n",
+				(unsigned long)surface,
+				(unsigned long)lockHr,
+				(unsigned long)desc.dwWidth,
+				(unsigned long)desc.dwHeight,
+				(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+				lockRetry);
+			fclose(f);
+		}
+
+		return -1;
+	}
+
+	long textureId =
+		gSpideyRenderer11UpdateTransientTexture(
+			(unsigned long)surface,
+			desc.lpSurface,
+			(unsigned long)desc.dwWidth,
+			(unsigned long)desc.dwHeight,
+			(long)desc.lPitch,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+			(unsigned long)desc.ddpfPixelFormat.dwRBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwGBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwBBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBAlphaBitMask);
+
+	surface->Unlock(0);
+
+	FILE* f = fopen(
+		"spidey-decomp-draw.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"transient_mirror handle=0x%08lX result=%ld size=%lux%lu pitch=%ld bpp=%lu masks=%08lX,%08lX,%08lX,%08lX retry=%d resident=%lu\n",
+			(unsigned long)surface,
+			textureId,
+			(unsigned long)desc.dwWidth,
+			(unsigned long)desc.dwHeight,
+			(long)desc.lPitch,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+			(unsigned long)desc.ddpfPixelFormat.dwRBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwGBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwBBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBAlphaBitMask,
+			lockRetry,
+			SpideyRenderer11GetMirroredTextureCount());
+		fclose(f);
+	}
+
+	return textureId;
+}
+
+void SpideyRenderer11ShadowSetClear(
+		unsigned long clearFlags,
+		unsigned long clearColor,
+		float clearDepth,
+		unsigned long clearStencil)
+{
+	if (gSpideyRenderer11ShadowSetClear)
+	{
+		gSpideyRenderer11ShadowSetClear(
+			clearFlags,
+			clearColor,
+			clearDepth,
+			clearStencil);
+	}
+}
+
+int SpideyRenderer11ShadowSubmitTriangleFan(
+		const SpideyRenderer11LegacyShadowVertex* vertices,
+		unsigned long vertexCount,
+		const SpideyRenderer11LegacyShadowState* state)
+{
+	if (!gSpideyRenderer11ShadowSubmitTriangleFan)
+		return 0;
+
+	return gSpideyRenderer11ShadowSubmitTriangleFan(
+			vertices,
+			vertexCount,
+			state);
+}
+
+int SpideyRenderer11ShadowEndFrame(
+		unsigned long frame,
+		unsigned long sceneWidth,
+		unsigned long sceneHeight)
+{
+	if (!gSpideyRenderer11ShadowEndFrame)
+		return 0;
+
+	return gSpideyRenderer11ShadowEndFrame(
+			frame,
+			sceneWidth,
+			sceneHeight);
+}
+
 void SpideyRenderer11ReleaseMirroredTexture(
 		unsigned long textureId)
 {
