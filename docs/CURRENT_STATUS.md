@@ -5127,3 +5127,30 @@ Safety:
 Provider roadmap note:
 - current XInput provider is intentionally dependency-free and limited to the Phase 0 proof;
 - broad PlayStation/generic gamepad support remains provider-pluggable behind the same ABI.
+
+
+### Retail PC analogue-input RE result — digitalized joystick confirmed
+
+Original retail `Pad_Update @ 0x00505720` and `PCINPUT_GetMappedStates @ 0x0050A190` were disassembled from retained retail function bytes.
+
+Confirmed retail PC behavior:
+- `Pad_Update` calls `PCINPUT_GetMappedStates`, updates digital `SButton` fields, and expires vibration;
+- it does **not** populate the `SControl` raw/processed analogue movement or aim fields;
+- `PCINPUT_GetMappedStates` calls `DXINPUT_PollController(&gControllerX, &gControllerY, &gControllerAxesRelatedTwo)`;
+- controller X/Y magnitude is reduced to four digital direction bits:
+  - X < -250 -> left bit 0x4;
+  - X > +250 -> right bit 0x8;
+  - Y < -250 -> up bit 0x1;
+  - Y > +250 -> down bit 0x2;
+- POV/hat data is likewise reduced to those same directional bits;
+- controller button mappings are then OR'd into the action masks.
+
+Conclusion:
+- the retail PC controller path is fundamentally **digitalized**, despite the inherited console-era `SControl` analogue fields;
+- modern left-stick magnitude and right-stick camera should not be forced through the old PC joystick-direction path;
+- the new normalized helper should feed true analogue channels directly into a modern movement/camera layer while optionally producing the legacy action mask for compatibility.
+
+Passive telemetry commit:
+- `8de9028d3ba6cba8db164956c813948396a365bb` logs the legacy raw/processed analogue fields beside modern helper state so the next runtime can verify whether they remain zero/unused in actual PC play.
+
+This materially reduces risk for the modern camera plan: right-stick camera is not replacing a hidden working PC right-stick system; it is adding one that the retail PC path does not provide.
