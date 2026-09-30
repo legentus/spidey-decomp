@@ -1235,6 +1235,110 @@ static void SpideyRestoreSavedRenderResolution()
 	}
 }
 
+static int gSpideyModernAspectEnabled = 1;
+static int gSpideyFrontendLegacyMode = 1;
+static unsigned long gSpideyModernLogicalWidth = 0;
+static unsigned long gSpideyModernLogicalHeight = 0;
+static unsigned long gSpideyLegacyPhysicalWidth = 640;
+static unsigned long gSpideyLegacyPhysicalHeight = 480;
+
+static void SpideyRefreshModernLogicalResolution()
+{
+	HWND hwnd =
+		*(HWND*)0x006B58D0;
+
+	unsigned long width =
+		0;
+	unsigned long height =
+		0;
+
+	if (hwnd)
+	{
+		RECT client;
+		if (GetClientRect(hwnd, &client))
+		{
+			width =
+				(unsigned long)(client.right - client.left);
+			height =
+				(unsigned long)(client.bottom - client.top);
+		}
+	}
+
+	if (!width || !height)
+	{
+		width =
+			(unsigned long)GetSystemMetrics(0);
+		height =
+			(unsigned long)GetSystemMetrics(1);
+	}
+
+	if (width < 640 || height < 480)
+	{
+		width = 640;
+		height = 480;
+	}
+
+	gSpideyModernLogicalWidth =
+		width;
+	gSpideyModernLogicalHeight =
+		height;
+}
+
+static int SpideyUseModernGameplayAspect()
+{
+	return gSpideyModernAspectEnabled &&
+		!gSpideyFrontendLegacyMode &&
+		gSpideyModernLogicalWidth >= 640 &&
+		gSpideyModernLogicalHeight >= 480;
+}
+
+static void SpideyApplyLogicalRenderResolution(
+		int useModern,
+		const char* reason)
+{
+	unsigned long width =
+		gSpideyLegacyPhysicalWidth;
+	unsigned long height =
+		gSpideyLegacyPhysicalHeight;
+
+	if (useModern &&
+		SpideyUseModernGameplayAspect())
+	{
+		width =
+			gSpideyModernLogicalWidth;
+		height =
+			gSpideyModernLogicalHeight;
+	}
+
+	if (!width || !height)
+		return;
+
+	*(DWORD*)0x00568154 =
+		width;
+	*(DWORD*)0x00568158 =
+		height;
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"logical_render_resolution reason=%s modern=%d frontend=%d logical=%lux%lu physical=%lux%lu client=%lux%lu\n",
+			reason ? reason : "unknown",
+			useModern ? 1 : 0,
+			gSpideyFrontendLegacyMode,
+			width,
+			height,
+			gSpideyLegacyPhysicalWidth,
+			gSpideyLegacyPhysicalHeight,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight);
+		fclose(f);
+	}
+}
+
 typedef void (__cdecl *SpideyRetailSetDisplayOptionsFn)(
 		u32,
 		u32,
