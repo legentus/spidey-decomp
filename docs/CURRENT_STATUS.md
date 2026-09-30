@@ -4540,3 +4540,104 @@ Pass criteria:
 - 2560x1440 survives menu exit/re-entry and restart;
 - 16:9 visibly affects gameplay projection without stretching;
 - frontend remains stable.
+
+
+## Phase 3C — transactional Display Options + Apply row — 2026-09-30
+
+Tested revision that exposed the bug:
+- `91ffd2884f2591eab48374386c342fbcdb1c30e6`.
+
+User result:
+- Screen Size and Aspect Ratio rows were visible;
+- changing them did not reliably affect rendering;
+- 2560x1440 would appear while cycling but reverted to 1920x1440 when Enter was pressed or the menu was reopened;
+- user requested a dedicated **Apply** row so display changes can be committed without restarting the game.
+
+Runtime evidence:
+- all three original Phase 3B aspect call patches installed successfully;
+- aspect cycling itself worked: log reached `16:9 scalar=0.750000`;
+- committed output remained `1920x1440` throughout all `display_options` wrapper calls;
+- presentation telemetry briefly observed saved globals at `2560x1440x32` while the user was cycling Screen Size, then later back at `1920x1440x32`;
+- therefore retail Screen Size navigation was directly mutating the saved globals as a temporary menu variable, while the frontend display-options call restored our still-committed 1920x1440 selection.
+
+Additional retail bug exposed by the Color Depth -> Aspect Ratio repurpose:
+- after changing original Color Depth, retail calls `DXINIT_GetNextResolution` / `DXINIT_GetPrevResolution` to find a resolution compatible with the new bpp;
+- those calls remained active after row 1 became Aspect Ratio, so aspect changes could silently mutate Screen Size;
+- exact obsolete compatibility call sites:
+  - `0x0050DDFB -> 0x00500E20`;
+  - `0x0050DE1F -> 0x00500F40`.
+
+Transactional menu design:
+- add a fourth original CMenu entry: **Apply**;
+- Screen Size and Aspect Ratio now edit separate pending values;
+- pending Screen Size formatting no longer reads the committed/saved globals;
+- pending resolution stepping still uses the original retail mode-table algorithms, but on local temporary width/height values;
+- Aspect Ratio stepping modifies only pending aspect state;
+- the old color-depth compatibility-resolution searches are disabled;
+- pressing Enter on Screen Size / Aspect Ratio / Brightness no longer calls `DXINIT_SetDisplayOptions`;
+- pressing Enter on **Apply** atomically:
+  1. copies pending resolution/aspect to committed modern state;
+  2. writes selected output to the retail saved width/height/bpp globals;
+  3. writes the aspect projection scalar;
+  4. applies the current frontend/device state safely;
+  5. calls retail `SPIDEYDX_SaveSettings @ 0x00515850` immediately;
+  6. resets pending state to the newly committed selection.
+- Back/Escape without Apply leaves committed resolution/aspect unchanged.
+
+Retail save verification:
+- retained retail `SPIDEYDX_SaveSettings` bytes were disassembled;
+- it serializes:
+  - width from `0x02E096F8`;
+  - height from `0x02E0970C`;
+  - bpp from `0x02E098E4`;
+  - brightness from `0x00562D60`;
+- Apply therefore persists exactly the fields the original game saves to `Spidey.cfg`.
+
+Exact new byte-verified call patches:
+- `0x0050DA72 -> 0x0043FFF0`: intercept third AddEntry and append Apply;
+- `0x0050DB56 -> 0x00529F90`: format pending Screen Size;
+- `0x0050DCF8 -> 0x00500250`: Enter/confirm becomes Apply-only commit;
+- `0x0050DDFB -> 0x00500E20`: disable aspect->resolution compatibility step;
+- `0x0050DE1F -> 0x00500F40`: disable fallback aspect->resolution compatibility step;
+- `0x0050DE71 -> 0x00500F40`: previous Screen Size operates on pending state;
+- `0x0050DE88 -> 0x00500E20`: next Screen Size operates on pending state;
+- existing row-1 formatter/prev/next patches remain byte-verified.
+
+Additional fix:
+- frontend-mode recognition no longer incorrectly requires brightness option value 4; changing brightness can no longer cause the 640x480 frontend request to be mistaken for gameplay resolution.
+
+Implementation commits:
+- `cdc6b5206e9aaed1c67a502b24f7cc0a657b82e2` — stage resolution/aspect and add Apply row;
+- `080152a3d206063038fbe18f26d54f8b8d1edfe7` — Apply-only atomic commit, immediate retail save, and frontend-brightness classification fix.
+
+NEXT TEST:
+1. update/build with `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. open Display Options and verify four rows:
+   - Screen Size
+   - Aspect Ratio
+   - Brightness
+   - Apply
+3. set Screen Size to **2560x1440**;
+4. set Aspect Ratio to **16:9**;
+5. move to Apply and press Enter;
+6. verify the menu remains usable and Screen Size still reads 2560x1440;
+7. back out and reopen Display Options; it must still read 2560x1440 + 16:9;
+8. start gameplay without restarting the process;
+9. verify gameplay uses the selected modern resolution/aspect;
+10. exit and provide logs.
+
+Expected new log markers:
+- `display_menu_mod ... rows=4 ... applyentry=1 applyconfirm=1`;
+- `display_pending_reset reason=menu_open ...`;
+- Screen Size cycling:
+  `display_pending_resolution direction=... value=2560x1440 committed=1920x1440`;
+- Aspect cycling:
+  `display_pending_aspect ... value=16:9 committed=...`;
+- Apply:
+  `display_aspect reason=display_menu_apply_commit ...`;
+  `display_apply committed=1 selected=2560x1440x32 aspect=16:9 ... saved_now=1`;
+- reopening:
+  `display_pending_reset reason=menu_open selected=2560x1440 aspect=16:9`;
+- gameplay transition:
+  `display_options selected=2560x1440x32 physical=1920x1440x32 ... legacy_backing_remap=1`;
+  `logical_render_resolution ... logical=2560x1440 physical=1920x1440 selected=2560x1440`.
