@@ -3288,6 +3288,7 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	if (!vtable)
 		return;
 
+	const int setRenderTargetIndex = 8;
 	const int clearIndex = 10;
 	const int setViewportIndex = 13;
 	const int setRenderStateIndex = 20;
@@ -3298,6 +3299,7 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	const int alreadyInstalled =
 		device == gSpideyRetailD3D7DrawProbeDevice &&
 		vtable == gSpideyRetailD3D7DrawProbeVtable &&
+		vtable[setRenderTargetIndex] == (void*)&SpideyShadowD3D7SetRenderTarget &&
 		vtable[clearIndex] == (void*)&SpideyShadowD3D7Clear &&
 		vtable[setViewportIndex] == (void*)&SpideyShadowD3D7SetViewport &&
 		vtable[setRenderStateIndex] == (void*)&SpideyShadowD3D7SetRenderState &&
@@ -3307,6 +3309,14 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 
 	if (alreadyInstalled)
 		return;
+
+	const int renderTargetOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			setRenderTargetIndex,
+			(void*)&SpideyShadowD3D7SetRenderTarget,
+			(void**)&gSpideyRetailD3D7SetRenderTargetOriginal,
+			"SetRenderTarget");
 
 	const int clearOk =
 		SpideyPatchRetailD3D7VtableMethod(
@@ -3356,7 +3366,8 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 			(void**)&gSpideyRetailD3D7SetTextureStageStateOriginal,
 			"SetTextureStageState");
 
-	if (!clearOk ||
+	if (!renderTargetOk ||
+		!clearOk ||
 		!viewportOk ||
 		!renderStateOk ||
 		!drawOk ||
@@ -3370,9 +3381,10 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 		{
 			fprintf(
 				f,
-				"draw_probe partial device=0x%08lX vtable=0x%08lX clear=%d viewport=%d renderstate=%d draw=%d texture=%d texstate=%d\n",
+				"draw_probe partial device=0x%08lX vtable=0x%08lX target=%d clear=%d viewport=%d renderstate=%d draw=%d texture=%d texstate=%d\n",
 				(unsigned long)device,
 				(unsigned long)vtable,
+				renderTargetOk,
 				clearOk,
 				viewportOk,
 				renderStateOk,
@@ -3399,7 +3411,7 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	{
 		fprintf(
 			f,
-			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX draw_index=%d getcaps_hr=0x%08lX max_tex=%lux%lu state_hooks=6 shadow_state_valid=%d\n",
+			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX draw_index=%d getcaps_hr=0x%08lX max_tex=%lux%lu state_hooks=7 shadow_state_valid=%d\n",
 			(unsigned long)device,
 			(unsigned long)vtable,
 			drawPrimitiveIndex,
