@@ -17,6 +17,8 @@ EXPORTS
     SpideyRenderer11_ShadowSetClear
     SpideyRenderer11_ShadowSubmitTriangleFan
     SpideyRenderer11_ShadowEndFrame
+    SpideyRenderer11_ShadowSetContinuous
+    SpideyRenderer11_PresentShadow
     SpideyRenderer11_ReleaseTexture
     SpideyRenderer11_ReleaseAllTextures
     SpideyRenderer11_GetResidentTextureCount
