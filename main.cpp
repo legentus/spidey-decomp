@@ -944,16 +944,12 @@ static void SpideyInjectModernVideoModes()
 		if (dm.dmPelsWidth == 2560 &&
 			dm.dmPelsHeight == 1440)
 		{
+			// DX11 now owns the visible output, so 2560x1440 must remain
+			// selectable in the retail Screen Size row. The old D3D7
+			// CreateDevice limitation is handled later by remapping only the
+			// hidden legacy backing surface to a known-good physical size.
 			saw1440 =
 				1;
-
-			// D3D7 has now failed this exact internal render target twice.
-			// Keep it out of the legacy mode table while DX11 is being
-			// brought online. DX11 will expose physical display modes through
-			// DXGI once it owns presentation.
-			memset(&dm, 0, sizeof(dm));
-			dm.dmSize = sizeof(dm);
-			continue;
 		}
 
 		if (gSpideyDpiAware &&
@@ -987,7 +983,7 @@ static void SpideyInjectModernVideoModes()
 	{
 		fprintf(
 			f,
-			"modern_modes before=%d after=%d added=%d windows_1440=%d d3d7_2560x1440_quarantined=1 dpi_aware=%d metrics=%dx%d\n",
+			"modern_modes before=%d after=%d added=%d windows_1440=%d ui_2560x1440_exposed=1 legacy_backing_remap=1 dpi_aware=%d metrics=%dx%d\n",
 			before,
 			*(int*)0x006B5998,
 			added,
