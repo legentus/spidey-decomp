@@ -2257,3 +2257,39 @@ Verified direct folder inventory includes:
 - `Docs` and `Uninstall` folders.
 
 This Drive folder is reference/input material only. Do not commit retail binaries or PKR assets to Git.
+
+
+## Runtime result: direct presenter works for menu; mouse crash + resolution/splash follow-up — 2026-09-29
+
+Tested revision:
+`a74074b77fe18adb254cd1a5b67c448a81b4d3cd`
+
+User-visible result:
+- splash screens remain black;
+- once the game reaches the start menu, the image becomes visible;
+- moving the mouse causes an immediate crash;
+- resolution cannot currently be changed as desired;
+- user explicitly requires native 2560x1440 (1440p) support.
+
+Presentation evidence:
+- direct HWND presenter is executing successfully:
+  `compat_present ... result=1 error=0 src=640x480 dst=640x480 stretch=0`;
+- scene surface remains 640x480 / 32 bpp;
+- window client remains 640x480;
+- retail resolution globals report 1280x1024 / 32 bpp during this run;
+- therefore the direct GDI compatibility presenter is sufficient to expose normal shell/menu scene rendering, but splash/movie presentation uses a different path and is not yet handled by this presenter.
+
+Crash evidence:
+- exception: `0xC0000005`;
+- retail EIP: `0x0043EB29`;
+- this is the exact previously identified `Font::height(char*) + 0x39` failure site;
+- current build's DLL stack return `0x100236FC` maps to reconstructed `Font::height(char*)` at `0x100236F0 + 0xC`;
+- another return `0x1002CC0F` maps to `Mess_TextHeight + 0xF`;
+- conclusion: mouse movement is driving a shell/UI text-height path and reproducing the same broken retail C++ instance-method trampoline that previously crashed Options.
+
+Immediate implementation order:
+1. restore the isolated, previously prepared FASTCALL `Font::height` trampoline fix that passes `this` in ECX;
+2. inspect resolution enumeration/storage/surface creation and add native 2560x1440 support without hardcoding only the presenter;
+3. trace the Bink/splash presentation path separately from the normal scene presenter so movies become visible too.
+
+Do not regress the now-working direct HWND menu presentation path.
