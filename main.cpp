@@ -2764,7 +2764,7 @@ int SpideyInput11PassivePoll(
 		{
 			fprintf(
 				f,
-				"input11_state frame=%lu connected=%d family=%lu user=%lu packet=%lu buttons=0x%08lX move=%.4f,%.4f camera=%.4f,%.4f triggers=%.4f,%.4f sequence=%lu passive=1\n",
+				"input11_state frame=%lu connected=%d family=%lu user=%lu packet=%lu buttons=0x%08lX move=%.4f,%.4f camera=%.4f,%.4f triggers=%.4f,%.4f sequence=%lu passive=1 legacy_analog_raw=%u,%u,%u,%u legacy_analog=%d,%d,%d,%d\n",
 				frame,
 				connected,
 				state.deviceFamily,
@@ -2777,7 +2777,15 @@ int SpideyInput11PassivePoll(
 				state.cameraY,
 				state.leftTrigger,
 				state.rightTrigger,
-				state.sequence);
+				state.sequence,
+				(unsigned int)gSControl[0].RawAnalogueMoveForwardsBackwards,
+				(unsigned int)gSControl[0].RawAnalogueMoveLeftRight,
+				(unsigned int)gSControl[0].RawAnalogueAimForwardsBackwards,
+				(unsigned int)gSControl[0].RawAnalogueAimLeftRight,
+				(int)gSControl[0].AnalogueMoveForwardsBackwards,
+				(int)gSControl[0].AnalogueMoveLeftRight,
+				(int)gSControl[0].AnalogueAimForwardsBackwards,
+				(int)gSControl[0].AnalogueAimLeftRight);
 			fclose(f);
 		}
 	}
