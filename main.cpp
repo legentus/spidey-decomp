@@ -2954,6 +2954,10 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyRetailDrawFvf144 = 0;
 	gSpideyRetailDrawOtherPrimitive = 0;
 	gSpideyRetailDrawOtherFvf = 0;
+	gSpideyShadowSubmitted = 0;
+	gSpideyShadowSkipped = 0;
+	gSpideyTransientQueued = 0;
+	gSpideyTransientMirrored = 0;
 }
 
 static void SpideyFlushRetailD3D7DrawProbeFrame(
@@ -2976,7 +2980,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu resident=%lu device=0x%08lX\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu transient_queued=%lu transient_mirrored=%lu resident=%lu device=0x%08lX\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -2986,6 +2990,10 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyRetailDrawFvf144,
 				gSpideyRetailDrawOtherPrimitive,
 				gSpideyRetailDrawOtherFvf,
+				gSpideyShadowSubmitted,
+				gSpideyShadowSkipped,
+				gSpideyTransientQueued,
+				gSpideyTransientMirrored,
 				SpideyRenderer11GetMirroredTextureCount(),
 				(unsigned long)gSpideyRetailD3D7DrawProbeDevice);
 			fclose(f);
