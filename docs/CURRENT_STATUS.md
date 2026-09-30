@@ -2240,3 +2240,20 @@ NEXT TEST:
    `compat_present frame=<n> result=<0/1> error=<win32> src=<w>x<h> dst=<w>x<h> stretch=<0/1>`.
 
 Do not redo SetDisplayMode/bpp, texture-table, stale-rectangle, scene-black, or surface-loss investigation before this test.
+
+
+### Authoritative retail Google Drive source
+
+Retail PC game source folder:
+https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+
+Verified direct folder inventory includes:
+- `SpideyPC.exe` — 1,507,328 bytes;
+- `binkw32.dll` — original retail Bink DLL;
+- `data.pkr`;
+- `media.pkr`;
+- `texture.dat`;
+- setup/support binaries;
+- `Docs` and `Uninstall` folders.
+
+This Drive folder is reference/input material only. Do not commit retail binaries or PKR assets to Git.
