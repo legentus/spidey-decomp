@@ -2264,6 +2264,29 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         return 1;
     }
 
+    const bool replayThisFrame =
+        frame <= 5 ||
+        (frame % 120) == 0;
+
+    if (!replayThisFrame)
+    {
+        if (skippedSubmit)
+        {
+            Log(
+                "shadow_frame frame=%lu target=%lux%lu replay=0 queued=%llu submitted=%lu skipped_submit=%lu rendered=0 skipped_render=0 vertices=%llu",
+                frame,
+                sceneWidth,
+                sceneHeight,
+                static_cast<unsigned long long>(queuedCommands),
+                submitted,
+                skippedSubmit,
+                static_cast<unsigned long long>(queuedVertices));
+        }
+
+        resetFrame();
+        return 1;
+    }
+
     const size_t requiredBytes =
         queuedVertices * sizeof(ShadowGpuVertex);
 
@@ -2479,7 +2502,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         rendered != queuedCommands)
     {
         Log(
-            "shadow_frame frame=%lu target=%lux%lu queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu",
+            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu",
             frame,
             sceneWidth,
             sceneHeight,
