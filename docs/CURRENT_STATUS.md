@@ -2751,3 +2751,71 @@ Expected diagnostic evidence:
 - `spidey-decomp-texture.log`: sane `caps_reload` values and no absurd negative/GB-scale conversion sizes for ordinary 64x64/128x128 assets;
 - `spidey-decomp-compat.log`: `display_options request=640x480x16 apply=1280x1024x32 ... preserve_saved=1`;
 - `spidey-decomp-present.log`: live scene remains at saved resolution through frontend takeover instead of switching to 640x480x16.
+
+
+## Fix batch ready: frontend textures + saved mode + Alt-Tab input — 2026-09-29
+
+Implementation commits:
+- `99bcb6fc62be5398ea177c986975d408d2e390c0`
+  - corrected retail D3D caps base in `PCTex.cpp` from incorrect `0x006B5788` to verified `0x006B5780`;
+  - verification source is untouched retail `initDirect3D7` blob `tools/functions/5235120.bin`: device GetCaps is called with `0x006B5780`;
+  - added `caps_reload` diagnostics with max texture width/height/aspect/caps.
+- `8675a76b7109c18e77f0d56295f060fefc2ddb26`
+  - keyboard polling now reacquires on both `DIERR_INPUTLOST` and `DIERR_NOTACQUIRED`;
+  - clears stale key state before reacquiring;
+  - replaced `DXINPUT_PollMouse` MEDIUMTODO magic-value stub with real buffered DirectInput mouse polling;
+  - mouse polling now reacquires after focus loss and emits the existing 0xFF/new, 0x7F/held, 0x80/released state semantics.
+- `d88c160afe1474645a5d69ce0f89e76d578b1738`
+  - added same-signature wrapper for retail `DXINIT_SetDisplayOptions` at `0x00500250`;
+  - logs requested/applied display modes;
+  - only intercepts the legacy windowed frontend reset `640x480x16`;
+  - when saved render settings are valid and non-640x480, applies saved width/height/bpp instead;
+  - leaves genuine non-640x480 option changes untouched.
+- `88b5d1775c04d3386ef99336e7f54402579207bb`
+  - installs the display-options wrapper during game patch startup.
+- `a4abe97e848a223f5dd85a4dd724a10a92f5506e`
+  - corrected retail texture checksum hash table resolution;
+  - untouched retail `Spool_FindTextureEntry` blob `tools/functions/5018720.bin` disassembles to:
+    - `and eax, 0x1FF`
+    - `mov eax, [eax*4 + 0x006AB934]`
+  - therefore verified hash table base is `0x006AB934`;
+  - removed the old inferred `0x006B70F8` runtime check, which could never pass because `PATCH_PUSH_RET` had already overwritten retail entry `0x004C9460`.
+- `472898d0d110d59aaecd621b9677983c249ca6cc`
+  - `WM_ACTIVATE` now checks `LOWORD(wParam)` rather than the entire WPARAM, so the minimized flag cannot make an inactive window appear active.
+
+Why the white frontend occurred:
+- after frontend renderer reset, the misbased D3D caps struct made `dwMaxTextureAspectRatio` read unrelated high-bit data;
+- CreateTexture256 then multiplied normal dimensions by that bogus cap:
+  - 64x64 paths attempted -679215104-byte conversions;
+  - 128x128 paths attempted 1578106880-byte conversions;
+  - 512x512 paths attempted -520093696-byte conversions;
+- the new allocation guard prevented the old crash but correctly skipped those impossible textures, exposing missing/white menu art;
+- separately, the texture checksum resolver was returning the default texture for repeated misses because it used the wrong hash table base.
+
+Static verification:
+- no remaining `0x006B5788` D3D-cap macro in current PCTex.cpp;
+- CreateTexture256 diagnostics remain scoped only to CreateTexture256;
+- DXINPUT_PollMouse no longer contains the stub printf/magic return;
+- keyboard and mouse both handle `DIERR_NOTACQUIRED`;
+- display-options wrapper is installed in `game_patches`;
+- retail texture table resolver now uses `0x006AB934` with SEH-protected traversal;
+- GitHub Actions currently reports no workflow runs for this branch, so matching-MSVC compile validation still occurs through the user's one-click BAT.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. let or skip splash movies;
+3. verify main-menu background/art is restored;
+4. verify the frontend does not switch the internal live render mode back to 640x480x16;
+5. move/click the mouse and navigate menus;
+6. Alt+Tab out and back, then verify keyboard and mouse controls recover;
+7. if stable, open Display Options and check/select 2560x1440;
+8. upload the full session including `spidey-decomp-texture.log`.
+
+Expected useful log changes:
+- `caps_reload base=0x006B5780 ...` with sane max texture values;
+- formerly failing 64/128/512 CreateTexture256 calls should reach `stage=done` rather than `conversion_alloc_failed`;
+- `texture_hash_table retail_blob_verified base=0x006AB934`;
+- repeated checksum misses should drop sharply or disappear;
+- `display_options_compat patched_calls=...`;
+- legacy reset should log `request=640x480x16 apply=<saved mode> preserve_saved=1`;
+- present log should remain at the saved live render resolution through frontend takeover.
