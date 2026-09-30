@@ -946,17 +946,13 @@ static void SpideyInjectModernVideoModes()
 			saw1440 =
 				1;
 
-			// The previous 2560x1440 failure happened while the process was
-			// DPI-virtualized: Win32 reported a 2560x1440 client while
-			// DirectDraw exposed a 1920x1080 primary. Only expose the native
-			// mode once process DPI awareness has been established before
-			// DirectDraw initialization.
-			if (!gSpideyDpiAware)
-			{
-				memset(&dm, 0, sizeof(dm));
-				dm.dmSize = sizeof(dm);
-				continue;
-			}
+			// D3D7 has now failed this exact internal render target twice.
+			// Keep it out of the legacy mode table while DX11 is being
+			// brought online. DX11 will expose physical display modes through
+			// DXGI once it owns presentation.
+			memset(&dm, 0, sizeof(dm));
+			dm.dmSize = sizeof(dm);
+			continue;
 		}
 
 		if (gSpideyDpiAware &&
@@ -981,19 +977,6 @@ static void SpideyInjectModernVideoModes()
 		dm.dmSize = sizeof(dm);
 	}
 
-	// Ensure the physical 2560x1440 mode is present when DPI awareness is
-	// active even if legacy DirectDraw enumeration omits it.
-	if (gSpideyDpiAware &&
-		GetSystemMetrics(0) >= 2560 &&
-		GetSystemMetrics(1) >= 1440 &&
-		*(int*)0x006B5998 < 64)
-	{
-		added +=
-			SpideyAppendModernMode(
-				2560,
-				1440,
-				32);
-	}
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
@@ -1003,14 +986,11 @@ static void SpideyInjectModernVideoModes()
 	{
 		fprintf(
 			f,
-			"modern_modes before=%d after=%d added=%d windows_1440=%d native_2560x1440=%d dpi_aware=%d metrics=%dx%d\n",
+			"modern_modes before=%d after=%d added=%d windows_1440=%d d3d7_2560x1440_quarantined=1 dpi_aware=%d metrics=%dx%d\n",
 			before,
 			*(int*)0x006B5998,
 			added,
 			saw1440,
-			(gSpideyDpiAware &&
-			 GetSystemMetrics(0) >= 2560 &&
-			 GetSystemMetrics(1) >= 1440) ? 1 : 0,
 			gSpideyDpiAware,
 			GetSystemMetrics(0),
 			GetSystemMetrics(1));
@@ -1200,8 +1180,7 @@ static void SpideyRestoreSavedRenderResolution()
 	// DDERR_INVALIDOBJECT. Recover persisted settings to the most recent
 	// runtime-verified working internal mode instead of bricking startup.
 	if (savedWidth == 2560 &&
-		savedHeight == 1440 &&
-		!gSpideyDpiAware)
+		savedHeight == 1440)
 	{
 		savedWidth =
 			1440;
@@ -1280,8 +1259,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		0;
 
 	if (width == 2560 &&
-		height == 1440 &&
-		!gSpideyDpiAware)
+		height == 1440)
 	{
 		width =
 			1440;
@@ -1417,6 +1395,93 @@ static void SpideyInstallDisplayOptionsCompat()
 	}
 }
 
+static HMODULE gSpideyRenderer11Module = 0;
+
+typedef unsigned long (__cdecl *SpideyRenderer11GetAbiVersionFn)(void);
+typedef const char* (__cdecl *SpideyRenderer11GetBackendNameFn)(void);
+typedef int (__cdecl *SpideyRenderer11ProbeFn)(void);
+
+static int SpideyProbeRenderer11Bridge()
+{
+	if (!gSpideyRenderer11Module)
+	{
+		gSpideyRenderer11Module =
+			LoadLibraryA(
+				"spidey_renderer11.dll");
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (!gSpideyRenderer11Module)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"renderer11_bridge load_failed error=%lu\n",
+				(unsigned long)GetLastError());
+			fclose(f);
+		}
+		return 0;
+	}
+
+	SpideyRenderer11GetAbiVersionFn getAbi =
+		(SpideyRenderer11GetAbiVersionFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_GetAbiVersion");
+
+	SpideyRenderer11GetBackendNameFn getName =
+		(SpideyRenderer11GetBackendNameFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_GetBackendName");
+
+	SpideyRenderer11ProbeFn probe =
+		(SpideyRenderer11ProbeFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_Probe");
+
+	if (!getAbi ||
+		!getName ||
+		!probe)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX\n",
+				(unsigned long)getAbi,
+				(unsigned long)getName,
+				(unsigned long)probe);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	unsigned long abi =
+		getAbi();
+	const char* name =
+		getName();
+	int probeResult =
+		probe();
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=1 backend=%s probe=%d\n",
+			(unsigned long)gSpideyRenderer11Module,
+			abi,
+			name ? name : "unknown",
+			probeResult);
+		fclose(f);
+	}
+
+	return abi == 1 &&
+		probeResult != 0;
+}
+
 typedef void (__cdecl *SpideyRetailDXINITFn)(
 		HWND,
 		HINSTANCE,
@@ -1427,6 +1492,11 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 		HINSTANCE hInstance,
 		u32 options)
 {
+	// Phase 0 of the renderer migration: prove the modern x86 DX11 helper
+	// DLL can be loaded and can create a hardware D3D11 device. Rendering
+	// remains on D3D7 until individual DXPOLY responsibilities are migrated.
+	SpideyProbeRenderer11Bridge();
+
 	SpideyRestoreSavedRenderResolution();
 
 	SpideyRetailDXINITFn retail =
