@@ -1,9 +1,11 @@
 #include "spidey_renderer11_api.h"
 
 #include <d3d11.h>
+#include <d3dcompiler.h>
 #include <dxgi.h>
 
 #include <cstdio>
+#include <cstring>
 #include <cstdarg>
 
 namespace
@@ -18,6 +20,14 @@ namespace
     HWND gWindow = nullptr;
     unsigned long gWidth = 0;
     unsigned long gHeight = 0;
+
+    ID3D11Texture2D* gUploadTexture = nullptr;
+    ID3D11ShaderResourceView* gUploadSrv = nullptr;
+    ID3D11VertexShader* gBlitVertexShader = nullptr;
+    ID3D11PixelShader* gBlitPixelShader = nullptr;
+    ID3D11SamplerState* gBlitSampler = nullptr;
+    unsigned long gUploadWidth = 0;
+    unsigned long gUploadHeight = 0;
 
     void Log(const char* format, ...)
     {
@@ -54,15 +64,224 @@ namespace
         SafeRelease(gRenderTargetView);
     }
 
+    void ReleaseUploadTexture()
+    {
+        SafeRelease(gUploadSrv);
+        SafeRelease(gUploadTexture);
+        gUploadWidth = 0;
+        gUploadHeight = 0;
+    }
+
+    void ReleaseBlitPipeline()
+    {
+        ReleaseUploadTexture();
+        SafeRelease(gBlitSampler);
+        SafeRelease(gBlitPixelShader);
+        SafeRelease(gBlitVertexShader);
+    }
+
     void ReleaseDevice()
     {
         ReleaseTargets();
+        ReleaseBlitPipeline();
         SafeRelease(gSwapChain);
         SafeRelease(gContext);
         SafeRelease(gDevice);
         gWindow = nullptr;
         gWidth = 0;
         gHeight = 0;
+    }
+
+    bool CreateBlitPipeline()
+    {
+        if (!gDevice)
+            return false;
+
+        if (gBlitVertexShader && gBlitPixelShader && gBlitSampler)
+            return true;
+
+        static const char* kShaderSource =
+            "Texture2D frameTexture : register(t0);\n"
+            "SamplerState frameSampler : register(s0);\n"
+            "struct VSOut { float4 position : SV_POSITION; float2 uv : TEXCOORD0; };\n"
+            "VSOut VSMain(uint vertexId : SV_VertexID) {\n"
+            "    float2 positions[3] = { float2(-1.0, -1.0), float2(-1.0, 3.0), float2(3.0, -1.0) };\n"
+            "    float2 uvs[3] = { float2(0.0, 1.0), float2(0.0, -1.0), float2(2.0, 1.0) };\n"
+            "    VSOut output;\n"
+            "    output.position = float4(positions[vertexId], 0.0, 1.0);\n"
+            "    output.uv = uvs[vertexId];\n"
+            "    return output;\n"
+            "}\n"
+            "float4 PSMain(VSOut input) : SV_TARGET {\n"
+            "    return frameTexture.Sample(frameSampler, input.uv);\n"
+            "}\n";
+
+        ID3DBlob* vertexBlob = nullptr;
+        ID3DBlob* pixelBlob = nullptr;
+        ID3DBlob* errors = nullptr;
+
+        HRESULT hr = D3DCompile(
+            kShaderSource,
+            std::strlen(kShaderSource),
+            "spidey_renderer11_blit",
+            nullptr,
+            nullptr,
+            "VSMain",
+            "vs_4_0",
+            D3DCOMPILE_ENABLE_STRICTNESS,
+            0,
+            &vertexBlob,
+            &errors);
+
+        if (FAILED(hr))
+        {
+            Log(
+                "blit_pipeline compile_vs failed hr=0x%08lX error=%s",
+                static_cast<unsigned long>(hr),
+                errors ? static_cast<const char*>(errors->GetBufferPointer()) : "none");
+            SafeRelease(errors);
+            SafeRelease(vertexBlob);
+            return false;
+        }
+
+        SafeRelease(errors);
+
+        hr = D3DCompile(
+            kShaderSource,
+            std::strlen(kShaderSource),
+            "spidey_renderer11_blit",
+            nullptr,
+            nullptr,
+            "PSMain",
+            "ps_4_0",
+            D3DCOMPILE_ENABLE_STRICTNESS,
+            0,
+            &pixelBlob,
+            &errors);
+
+        if (FAILED(hr))
+        {
+            Log(
+                "blit_pipeline compile_ps failed hr=0x%08lX error=%s",
+                static_cast<unsigned long>(hr),
+                errors ? static_cast<const char*>(errors->GetBufferPointer()) : "none");
+            SafeRelease(errors);
+            SafeRelease(pixelBlob);
+            SafeRelease(vertexBlob);
+            return false;
+        }
+
+        SafeRelease(errors);
+
+        hr = gDevice->CreateVertexShader(
+            vertexBlob->GetBufferPointer(),
+            vertexBlob->GetBufferSize(),
+            nullptr,
+            &gBlitVertexShader);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreatePixelShader(
+                pixelBlob->GetBufferPointer(),
+                pixelBlob->GetBufferSize(),
+                nullptr,
+                &gBlitPixelShader);
+        }
+
+        SafeRelease(pixelBlob);
+        SafeRelease(vertexBlob);
+
+        if (FAILED(hr) || !gBlitVertexShader || !gBlitPixelShader)
+        {
+            Log("blit_pipeline create_shader failed hr=0x%08lX", static_cast<unsigned long>(hr));
+            ReleaseBlitPipeline();
+            return false;
+        }
+
+        D3D11_SAMPLER_DESC samplerDesc = {};
+        samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        samplerDesc.MinLOD = 0.0f;
+        samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+
+        hr = gDevice->CreateSamplerState(
+            &samplerDesc,
+            &gBlitSampler);
+
+        if (FAILED(hr) || !gBlitSampler)
+        {
+            Log("blit_pipeline create_sampler failed hr=0x%08lX", static_cast<unsigned long>(hr));
+            ReleaseBlitPipeline();
+            return false;
+        }
+
+        Log("blit_pipeline ready shader_model=4_0");
+        return true;
+    }
+
+    bool EnsureUploadTexture(unsigned long width, unsigned long height)
+    {
+        if (!gDevice || width == 0 || height == 0)
+            return false;
+
+        if (gUploadTexture && gUploadSrv &&
+            gUploadWidth == width && gUploadHeight == height)
+        {
+            return true;
+        }
+
+        ReleaseUploadTexture();
+
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+        HRESULT hr = gDevice->CreateTexture2D(
+            &desc,
+            nullptr,
+            &gUploadTexture);
+
+        if (FAILED(hr) || !gUploadTexture)
+        {
+            Log(
+                "upload_texture create failed hr=0x%08lX size=%lux%lu",
+                static_cast<unsigned long>(hr),
+                width,
+                height);
+            ReleaseUploadTexture();
+            return false;
+        }
+
+        hr = gDevice->CreateShaderResourceView(
+            gUploadTexture,
+            nullptr,
+            &gUploadSrv);
+
+        if (FAILED(hr) || !gUploadSrv)
+        {
+            Log(
+                "upload_texture create_srv failed hr=0x%08lX size=%lux%lu",
+                static_cast<unsigned long>(hr),
+                width,
+                height);
+            ReleaseUploadTexture();
+            return false;
+        }
+
+        gUploadWidth = width;
+        gUploadHeight = height;
+
+        Log("upload_texture ready width=%lu height=%lu format=BGRA8", width, height);
+        return true;
     }
 
     bool CreateTargets(unsigned long width, unsigned long height)
@@ -433,6 +652,184 @@ int __cdecl SpideyRenderer11_Present(int vsync)
     {
         Log("present failed hr=0x%08lX", static_cast<unsigned long>(hr));
         return 0;
+    }
+
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_PresentPixels(
+    const void* pixels,
+    unsigned long sourceWidth,
+    unsigned long sourceHeight,
+    long sourcePitch,
+    int preserveAspect,
+    int vsync)
+{
+    if (!pixels || !gSwapChain || !gContext || !gWindow ||
+        sourceWidth == 0 || sourceHeight == 0 ||
+        sourcePitch <= 0 ||
+        static_cast<unsigned long>(sourcePitch) < sourceWidth * 4UL)
+    {
+        Log(
+            "present_pixels rejected pixels=0x%p swap=0x%p hwnd=0x%p src=%lux%lu pitch=%ld",
+            pixels,
+            gSwapChain,
+            gWindow,
+            sourceWidth,
+            sourceHeight,
+            sourcePitch);
+        return 0;
+    }
+
+    RECT client = {};
+    if (!GetClientRect(gWindow, &client))
+    {
+        Log("present_pixels get_client_rect failed error=%lu", GetLastError());
+        return 0;
+    }
+
+    const unsigned long targetWidth =
+        static_cast<unsigned long>(client.right - client.left);
+    const unsigned long targetHeight =
+        static_cast<unsigned long>(client.bottom - client.top);
+
+    if (targetWidth == 0 || targetHeight == 0)
+        return 0;
+
+    if (targetWidth != gWidth || targetHeight != gHeight)
+    {
+        if (!SpideyRenderer11_Resize(targetWidth, targetHeight))
+        {
+            Log(
+                "present_pixels resize_failed target=%lux%lu",
+                targetWidth,
+                targetHeight);
+            return 0;
+        }
+    }
+
+    if (!CreateBlitPipeline() ||
+        !EnsureUploadTexture(sourceWidth, sourceHeight))
+    {
+        return 0;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    HRESULT hr = gContext->Map(
+        gUploadTexture,
+        0,
+        D3D11_MAP_WRITE_DISCARD,
+        0,
+        &mapped);
+
+    if (FAILED(hr) || !mapped.pData)
+    {
+        Log("present_pixels map failed hr=0x%08lX", static_cast<unsigned long>(hr));
+        return 0;
+    }
+
+    const unsigned char* source =
+        static_cast<const unsigned char*>(pixels);
+    unsigned char* destination =
+        static_cast<unsigned char*>(mapped.pData);
+    const size_t rowBytes =
+        static_cast<size_t>(sourceWidth) * 4U;
+
+    for (unsigned long y = 0; y < sourceHeight; ++y)
+    {
+        std::memcpy(
+            destination + static_cast<size_t>(y) * mapped.RowPitch,
+            source + static_cast<size_t>(y) * static_cast<size_t>(sourcePitch),
+            rowBytes);
+    }
+
+    gContext->Unmap(gUploadTexture, 0);
+
+    const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    gContext->OMSetRenderTargets(
+        1,
+        &gRenderTargetView,
+        nullptr);
+    gContext->ClearRenderTargetView(
+        gRenderTargetView,
+        clearColor);
+
+    unsigned long presentWidth = targetWidth;
+    unsigned long presentHeight = targetHeight;
+    unsigned long presentX = 0;
+    unsigned long presentY = 0;
+
+    if (preserveAspect)
+    {
+        const unsigned long long srcWide =
+            static_cast<unsigned long long>(sourceWidth) * targetHeight;
+        const unsigned long long dstWide =
+            static_cast<unsigned long long>(targetWidth) * sourceHeight;
+
+        if (srcWide > dstWide)
+        {
+            presentHeight =
+                static_cast<unsigned long>(
+                    static_cast<unsigned long long>(targetWidth) *
+                    sourceHeight / sourceWidth);
+            presentY = (targetHeight - presentHeight) / 2;
+        }
+        else if (srcWide < dstWide)
+        {
+            presentWidth =
+                static_cast<unsigned long>(
+                    static_cast<unsigned long long>(targetHeight) *
+                    sourceWidth / sourceHeight);
+            presentX = (targetWidth - presentWidth) / 2;
+        }
+    }
+
+    D3D11_VIEWPORT viewport = {};
+    viewport.TopLeftX = static_cast<float>(presentX);
+    viewport.TopLeftY = static_cast<float>(presentY);
+    viewport.Width = static_cast<float>(presentWidth);
+    viewport.Height = static_cast<float>(presentHeight);
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    gContext->RSSetViewports(1, &viewport);
+
+    gContext->IASetInputLayout(nullptr);
+    gContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gContext->VSSetShader(gBlitVertexShader, nullptr, 0);
+    gContext->PSSetShader(gBlitPixelShader, nullptr, 0);
+    gContext->PSSetShaderResources(0, 1, &gUploadSrv);
+    gContext->PSSetSamplers(0, 1, &gBlitSampler);
+    gContext->Draw(3, 0);
+
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    gContext->PSSetShaderResources(0, 1, &nullSrv);
+
+    hr = gSwapChain->Present(vsync ? 1 : 0, 0);
+    if (FAILED(hr))
+    {
+        Log("present_pixels present_failed hr=0x%08lX", static_cast<unsigned long>(hr));
+        return 0;
+    }
+
+    static unsigned long frame = 0;
+    ++frame;
+    if (frame <= 5 || (frame % 120) == 0)
+    {
+        Log(
+            "present_pixels frame=%lu src=%lux%lu pitch=%ld dst=%lux%lu rect=%lu,%lu,%lux%lu aspect=%d vsync=%d",
+            frame,
+            sourceWidth,
+            sourceHeight,
+            sourcePitch,
+            targetWidth,
+            targetHeight,
+            presentX,
+            presentY,
+            presentWidth,
+            presentHeight,
+            preserveAspect ? 1 : 0,
+            vsync ? 1 : 0);
     }
 
     return 1;
