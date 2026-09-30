@@ -2301,6 +2301,8 @@ static unsigned long gSpideyShadowOffscreenSkipped = 0;
 static unsigned long gSpideyTransientQueued = 0;
 static unsigned long gSpideyTransientMirrored = 0;
 static unsigned long gSpideyPresentFrame = 0;
+static int gSpideyShadowPreviewEnabled = 0;
+static int gSpideyShadowPreviewReady = 0;
 
 static unsigned long gSpideyRetailDrawCalls = 0;
 static unsigned long gSpideyRetailDrawTextured = 0;
@@ -2839,6 +2841,7 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 	const unsigned long shadowFrame =
 		gSpideyPresentFrame + 1;
 	const int captureShadowFrame =
+		gSpideyShadowPreviewEnabled ||
 		shadowFrame <= 5 ||
 		(shadowFrame % 120) == 0;
 
