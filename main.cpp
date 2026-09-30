@@ -1575,12 +1575,14 @@ static int SpideyCompatPresentSceneToWindow(
 
 	if (windowDC)
 	{
-		const unsigned long long srcWide =
-			(unsigned long long)desc.dwWidth *
-			(unsigned long long)dstHeight;
-		const unsigned long long dstWide =
-			(unsigned long long)dstWidth *
-			(unsigned long long)desc.dwHeight;
+		// Resolutions are capped far below the 32-bit product range, so keep
+		// this old-MSVC-friendly instead of requiring long long syntax.
+		const unsigned long srcWide =
+			(unsigned long)desc.dwWidth *
+			(unsigned long)dstHeight;
+		const unsigned long dstWide =
+			(unsigned long)dstWidth *
+			(unsigned long)desc.dwHeight;
 
 		if (srcWide != dstWide)
 		{
@@ -1593,9 +1595,9 @@ static int SpideyCompatPresentSceneToWindow(
 					dstWidth;
 				presentHeight =
 					(int)(
-						(unsigned long long)dstWidth *
-						(unsigned long long)desc.dwHeight /
-						(unsigned long long)desc.dwWidth);
+						(unsigned long)dstWidth *
+						(unsigned long)desc.dwHeight /
+						(unsigned long)desc.dwWidth);
 				presentY =
 					(dstHeight - presentHeight) / 2;
 			}
@@ -1605,9 +1607,9 @@ static int SpideyCompatPresentSceneToWindow(
 					dstHeight;
 				presentWidth =
 					(int)(
-						(unsigned long long)dstHeight *
-						(unsigned long long)desc.dwWidth /
-						(unsigned long long)desc.dwHeight);
+						(unsigned long)dstHeight *
+						(unsigned long)desc.dwWidth /
+						(unsigned long)desc.dwHeight);
 				presentX =
 					(dstWidth - presentWidth) / 2;
 			}
