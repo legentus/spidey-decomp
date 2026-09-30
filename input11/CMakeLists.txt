@@ -7,9 +7,22 @@ add_library(spidey_input11 SHARED
     spidey_input11.def
 )
 
+add_executable(spidey_input11_probe
+    src/spidey_input11_probe.cpp
+)
+
 target_include_directories(spidey_input11
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_include_directories(spidey_input11_probe
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(spidey_input11_probe PRIVATE
+    spidey_input11
 )
 
 target_compile_features(spidey_input11 PRIVATE cxx_std_17)
