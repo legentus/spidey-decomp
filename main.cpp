@@ -1137,79 +1137,94 @@ static void SpideyInstallModernModeReinitCompat()
 	}
 }
 
+static unsigned long gSpideySelectedOutputWidth = 640;
+static unsigned long gSpideySelectedOutputHeight = 480;
+static unsigned long gSpideySelectedOutputBpp = 32;
+
 static void SpideyRestoreSavedRenderResolution()
 {
-	DWORD savedWidth =
+	DWORD requestedWidth =
 		*(DWORD*)0x02E096F8;
-	DWORD savedHeight =
+	DWORD requestedHeight =
 		*(DWORD*)0x02E0970C;
-	DWORD savedBpp =
+	DWORD requestedBpp =
 		*(DWORD*)0x02E098E4;
 
-	const DWORD requestedWidth =
-		savedWidth;
-	const DWORD requestedHeight =
-		savedHeight;
-	const DWORD requestedBpp =
-		savedBpp;
-
-	if (savedWidth < 512 ||
-		savedWidth > 8192 ||
-		savedHeight < 384 ||
-		savedHeight > 8192)
+	if (requestedWidth < 512 ||
+		requestedWidth > 8192 ||
+		requestedHeight < 384 ||
+		requestedHeight > 8192)
 	{
 		return;
 	}
 
-	if (savedBpp != 16 &&
-		savedBpp != 24 &&
-		savedBpp != 32)
+	if (requestedBpp != 16 &&
+		requestedBpp != 24 &&
+		requestedBpp != 32)
 	{
-		savedBpp =
+		requestedBpp =
 			32;
 	}
 
-	int quarantined2560 =
+	gSpideySelectedOutputWidth =
+		requestedWidth;
+	gSpideySelectedOutputHeight =
+		requestedHeight;
+	gSpideySelectedOutputBpp =
+		32;
+
+	DWORD physicalWidth =
+		requestedWidth;
+	DWORD physicalHeight =
+		requestedHeight;
+	DWORD physicalBpp =
+		requestedBpp;
+
+	int remappedLegacyBacking =
 		0;
 
-	// 2560x1440 currently reaches scene-surface creation but the retail
-	// D3D7 CreateDevice call rejects that render target with
-	// DDERR_INVALIDOBJECT. Recover persisted settings to the most recent
-	// runtime-verified working internal mode instead of bricking startup.
-	if (savedWidth == 2560 &&
-		savedHeight == 1440)
+	// 2560x1440 is now a valid *DX11 output* selection. The retail D3D7
+	// device still rejects a 2560x1440 scene surface with
+	// DDERR_INVALIDOBJECT, so quarantine only the hidden legacy backing
+	// surface. 1920x1440 is runtime-verified on the same machine and keeps
+	// the maximum known-good vertical resolution while DX11 renders the
+	// requested output independently.
+	if (requestedWidth == 2560 &&
+		requestedHeight == 1440)
 	{
-		savedWidth =
+		physicalWidth =
+			1920;
+		physicalHeight =
 			1440;
-		savedHeight =
-			1080;
-		savedBpp =
+		physicalBpp =
 			32;
-		quarantined2560 =
+		remappedLegacyBacking =
 			1;
-
-		*(DWORD*)0x02E096F8 =
-			savedWidth;
-		*(DWORD*)0x02E0970C =
-			savedHeight;
-		*(DWORD*)0x02E098E4 =
-			savedBpp;
 	}
 
-	// RealWinMain resets the live render globals to 640x480 after loading
-	// the user's settings. Restore the validated/recovered values
-	// immediately before retail DXINIT_DirectX8.
-	*(DWORD*)0x006B78E4 =
-		savedWidth;
-	*(DWORD*)0x006B78E8 =
-		savedHeight;
-	*(DWORD*)0x006B78EC =
-		savedBpp;
+	// Keep the persisted/user-facing setting exactly as selected. Only the
+	// live D3D7 globals receive the compatibility backing dimensions.
+	*(DWORD*)0x02E096F8 =
+		requestedWidth;
+	*(DWORD*)0x02E0970C =
+		requestedHeight;
+	*(DWORD*)0x02E098E4 =
+		32;
 
+	*(DWORD*)0x006B78E4 =
+		physicalWidth;
+	*(DWORD*)0x006B78E8 =
+		physicalHeight;
+	*(DWORD*)0x006B78EC =
+		physicalBpp;
+
+	// The logical game viewport follows the selected output. Retail frontend
+	// code may temporarily switch this back to 640x480 later; gameplay mode
+	// restores the selected dimensions through the display-options wrapper.
 	*(DWORD*)0x00568154 =
-		savedWidth;
+		requestedWidth;
 	*(DWORD*)0x00568158 =
-		savedHeight;
+		requestedHeight;
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
@@ -1219,14 +1234,14 @@ static void SpideyRestoreSavedRenderResolution()
 	{
 		fprintf(
 			f,
-			"restore_saved_resolution request=%lux%lux%lu apply=%lux%lux%lu quarantined_2560x1440=%d\n",
+			"restore_saved_resolution selected=%lux%lux%lu physical=%lux%lux%lu legacy_backing_remap=%d preserve_selected=1\n",
 			(unsigned long)requestedWidth,
 			(unsigned long)requestedHeight,
-			(unsigned long)requestedBpp,
-			(unsigned long)savedWidth,
-			(unsigned long)savedHeight,
-			(unsigned long)savedBpp,
-			quarantined2560);
+			(unsigned long)gSpideySelectedOutputBpp,
+			(unsigned long)physicalWidth,
+			(unsigned long)physicalHeight,
+			(unsigned long)physicalBpp,
+			remappedLegacyBacking);
 		fclose(f);
 	}
 }
