@@ -3544,3 +3544,38 @@ Visual expectation for this test:
 - image should look broadly the same as the current successful build;
 - black side bars are still expected when the source is 4:3;
 - 2560x1440 is still intentionally absent from the D3D7 mode list.
+
+
+## Phase 1 first test stopped before launch: stale renderer11 object cache — 2026-09-30
+
+Tested revision:
+`25f2c51a52c6788950aa86fc6b025e9e234a29ee`
+
+Observed:
+- matching proxy force-cleaned, compiled, and linked successfully;
+- renderer11 CMake configure/generate succeeded;
+- renderer11 link then failed with exactly one unresolved export:
+  `SpideyRenderer11_PresentHdc`;
+- the build output did NOT show `spidey_renderer11.cpp` recompiling before the link;
+- therefore the game never launched and this was not a runtime crash.
+
+Root cause:
+- the ZIP updater intentionally preserves `out/`;
+- the Phase 1 source/API changed, but the preserved CMake/MSBuild tree contained an older renderer11 object file from Phase 0;
+- archive extraction/source-refresh timestamps can be older than preserved object timestamps, so MSBuild considered the stale object current;
+- the new .def file requested `SpideyRenderer11_PresentHdc`, while the reused old object did not contain it.
+
+Fix:
+- commit `422f8dd97e56a2d1a2016642637f3ce57e8a148e` — `renderer11: force clean modern builds after source refresh`;
+- `scripts/build_renderer11.ps1` now deletes `out/renderer11/build` before every modern renderer configure/build;
+- stale renderer11 DLL/PDB artifacts are also removed before rebuilding;
+- this makes every test compile the modern DLL from the exact current source regardless of archive timestamps.
+
+NEXT TEST:
+1. rerun `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. expected output now includes:
+   - `[..] Removing cached Direct3D 11 build tree...`;
+   - a fresh CMake configure;
+   - `spidey_renderer11.cpp` compiling;
+   - successful renderer11 link;
+3. only after that does the actual Phase 1 runtime presentation test begin.
