@@ -195,7 +195,10 @@ LRESULT CALLBACK SpideyWndProc(
 		case WM_SIZE:
 			break;
 		case WM_ACTIVATE:
-			gActive = wParam != WA_INACTIVE;
+			// WM_ACTIVATE stores the activation state in LOWORD(wParam);
+			// HIWORD carries the minimized flag. Comparing the entire WPARAM
+			// can incorrectly leave the game marked active across Alt+Tab.
+			gActive = LOWORD(wParam) != WA_INACTIVE;
 			break;
 		case WM_CLOSE:
 			DestroyWindow(hWnd);
