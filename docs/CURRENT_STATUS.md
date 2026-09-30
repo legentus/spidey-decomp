@@ -3496,3 +3496,51 @@ NEXT FRONTIER — PHASE 1:
 - retain a fail-safe fallback to the current direct-HWND GDI presenter;
 - do not re-enable legacy D3D7 2560x1440 yet;
 - only after DX11 presentation is verified should native 16:9 scene ownership / 2560x1440 rendering advance.
+
+
+## DX11 Phase 1 implementation ready for runtime test — 2026-09-30
+
+Goal:
+DX11 owns the final HWND presentation while the legacy D3D7 renderer continues producing the scene surface.
+
+Implementation commits:
+- `3d333706da0788b012892cca6f68f32c242d9d23` — bridge ABI bumped to 2 and HDC presenter entry added;
+- `a392d3665f1617e1add6e83491840ea8ac109232` — exported `SpideyRenderer11_PresentHdc`;
+- `72bdb8f5051b3bfa6e4f36073e0cc28cf925e9db` — link GDI32;
+- `a799860a24cf739c92effc2211897c083fe34bee` — GDI-compatible B8G8R8A8 DX11 swap chain + HDC-to-backbuffer presenter;
+- `7eecc345ebd26f964fe2e0413dcd32834831c46e` — legacy proxy routes the windowed presentation path through DX11;
+- `4de672aa0b26e73f42d403adea40733d951688a1` — preserve GDI-compatible swap-chain flag across resize;
+- `cec2b0723bda00f2b8b41b17bd2b351e525ba7f2` — portable HDC bridge typedef.
+
+Design:
+- Phase 1 ABI is now version 2.
+- The modern helper creates a GDI-compatible DX11/DXGI swap-chain backbuffer.
+- The legacy D3D7 scene remains the render source.
+- The proxy obtains the scene surface HDC and passes it to `SpideyRenderer11_PresentHdc`.
+- Renderer11 aspect-fits/copies that source into the hidden DX11 backbuffer, then calls DXGI `Present`.
+- Because the backbuffer is not visible until DXGI Present, bar clearing/copying cannot expose the old GDI intermediate-frame flicker.
+- On DX11 initialize/resize/present failure, Phase 1 is disabled for that session and the known-good direct scene->HWND GDI presenter is used automatically.
+- No D3D7 native-2560x1440 change is included here. The 2560x1440 option remains intentionally quarantined until a later scene-rendering phase.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. build must succeed with renderer ABI 2;
+3. game should reach the main menu;
+4. expected compat log:
+   - `renderer11_bridge loaded ... abi=2 expected=2 ... phase1_exports=1`;
+   - `renderer11_phase1 initialize ... size=2560x1440 result=1`;
+5. expected renderer log:
+   - `initialize device_ready ... width=2560 height=1440 ...`;
+   - `targets ready width=2560 height=1440`;
+   - repeating `present_hdc frame=... src=... dst=2560x1440 ...`;
+6. expected present log:
+   - `compat_present_dx11 ... result=1`;
+   - `present_path ... dx11=1 direct_hwnd=0 compat_result=2`.
+7. If DX11 presentation fails, upload logs; expected fallback marker:
+   - `renderer11_phase1 present_failed disabling_dx11_present_fallback=gdi_hwnd`;
+   - game should still boot using `dx11=0 direct_hwnd=1 compat_result=1`.
+
+Visual expectation for this test:
+- image should look broadly the same as the current successful build;
+- black side bars are still expected when the source is 4:3;
+- 2560x1440 is still intentionally absent from the D3D7 mode list.
