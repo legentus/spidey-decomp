@@ -4407,3 +4407,43 @@ Visual checks:
 - inspect HUD placement and cutscene/gameplay transitions;
 - frontend is intentionally still 4:3;
 - F10 should fall back to a clean 4:3 D3D7 reference, then restore native DX11 on the next toggle.
+
+
+## Phase 3A runtime result — native settings were not exposed — 2026-09-30
+
+Tested revision:
+- `c8f41c98065585bac837fa3218896981dd98f44c`.
+
+User result:
+- no visible widescreen difference;
+- 2560x1440 was not selectable in Display Options;
+- there was no user-facing 16:9/aspect-ratio setting.
+
+Runtime evidence:
+- every observed Display Options apply remained the retail frontend request `640x480x16`;
+- modern mode injection grew the mode table from 4 to 23 entries and detected the Windows 2560x1440 desktop, but the injector was still explicitly omitting 2560x1440 because of the earlier D3D7 CreateDevice failure;
+- DX11 itself was already initialized with a 2560x1440 swap target, so the missing setting is a menu/configuration-layer problem, not a DX11 capability problem.
+
+Root cause / revised design:
+- the old 2560x1440 quarantine belongs only at the **legacy D3D7 physical backing** layer now;
+- 2560x1440 must be exposed to the retail Screen Size selector and preserved as the user's selected/output resolution;
+- selecting 2560x1440 will use a known-good 1920x1440 D3D7 compatibility backing while DX11 owns the requested 2560x1440 output;
+- the original `PCSHELL_DoDisplayOptions` is at `0x0050D9B0` and is 1476 bytes;
+- its three rows are Screen Size, Color Depth, Brightness;
+- row 0 uses `DXINIT_GetPrevResolution`/`DXINIT_GetNextResolution`;
+- row 1 uses `DXINIT_GetPrevColorDepth`/`DXINIT_GetNextColorDepth`;
+- row 2 is brightness.
+
+Aspect-ratio implementation plan:
+- because DX11 output is always 32-bit, repurpose the obsolete Color Depth row as **Aspect Ratio** without changing CMenu row count/layout;
+- patch the exact row-1 formatter and left/right helper calls in retail `PCSHELL_DoDisplayOptions`;
+- modes: AUTO, 4:3, 5:4, 16:9, 16:10, 21:9, 32:9;
+- apply the known retail projection/aspect scalar at runtime VA `0x00550064`;
+- AUTO scalar = `(4 * height) / (3 * width)`; known explicit values include 4:3=1.0 and 16:9=0.75;
+- persist the aspect selection in a small modern-video INI next to the game.
+
+Current action:
+- expose 2560x1440 in the retail resolution list;
+- preserve requested modern resolution separately from the safe D3D7 backing;
+- install the in-game Aspect Ratio row patch;
+- then provide one new runtime frontier for the user to test.
