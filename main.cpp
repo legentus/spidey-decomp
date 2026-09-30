@@ -1407,6 +1407,13 @@ typedef int (__cdecl *SpideyRenderer11InitializeFn)(
 typedef int (__cdecl *SpideyRenderer11ResizeFn)(
 		unsigned long,
 		unsigned long);
+typedef int (__cdecl *SpideyRenderer11PresentPixelsFn)(
+		const void*,
+		unsigned long,
+		unsigned long,
+		long,
+		int,
+		int);
 typedef int (__cdecl *SpideyRenderer11PresentHdcFn)(
 		HDC,
 		unsigned long,
@@ -1417,11 +1424,13 @@ typedef void (__cdecl *SpideyRenderer11ShutdownFn)(void);
 
 static SpideyRenderer11InitializeFn gSpideyRenderer11Initialize = 0;
 static SpideyRenderer11ResizeFn gSpideyRenderer11Resize = 0;
+static SpideyRenderer11PresentPixelsFn gSpideyRenderer11PresentPixels = 0;
 static SpideyRenderer11PresentHdcFn gSpideyRenderer11PresentHdc = 0;
 static SpideyRenderer11ShutdownFn gSpideyRenderer11Shutdown = 0;
 static int gSpideyRenderer11BridgeReady = 0;
 static int gSpideyRenderer11Initialized = 0;
 static int gSpideyRenderer11PresentationDisabled = 0;
+static int gSpideyRenderer11PixelsDisabled = 0;
 static HWND gSpideyRenderer11Window = 0;
 static unsigned long gSpideyRenderer11Width = 0;
 static unsigned long gSpideyRenderer11Height = 0;
@@ -1477,6 +1486,11 @@ static int SpideyProbeRenderer11Bridge()
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_Resize");
 
+	gSpideyRenderer11PresentPixels =
+		(SpideyRenderer11PresentPixelsFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_PresentPixels");
+
 	gSpideyRenderer11PresentHdc =
 		(SpideyRenderer11PresentHdcFn)GetProcAddress(
 			gSpideyRenderer11Module,
@@ -1492,6 +1506,7 @@ static int SpideyProbeRenderer11Bridge()
 		!probe ||
 		!gSpideyRenderer11Initialize ||
 		!gSpideyRenderer11Resize ||
+		!gSpideyRenderer11PresentPixels ||
 		!gSpideyRenderer11PresentHdc ||
 		!gSpideyRenderer11Shutdown)
 	{
@@ -1499,12 +1514,13 @@ static int SpideyProbeRenderer11Bridge()
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_hdc=0x%08lX shutdown=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
 				(unsigned long)probe,
 				(unsigned long)gSpideyRenderer11Initialize,
 				(unsigned long)gSpideyRenderer11Resize,
+				(unsigned long)gSpideyRenderer11PresentPixels,
 				(unsigned long)gSpideyRenderer11PresentHdc,
 				(unsigned long)gSpideyRenderer11Shutdown);
 			fclose(f);
@@ -1520,14 +1536,14 @@ static int SpideyProbeRenderer11Bridge()
 		probe();
 
 	gSpideyRenderer11BridgeReady =
-		abi == 2 &&
+		abi == 3 &&
 		probeResult != 0;
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=2 backend=%s probe=%d phase1_exports=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=3 backend=%s probe=%d phase2_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
@@ -1581,7 +1597,7 @@ static int SpideyEnsureRenderer11Presentation(
 		{
 			fprintf(
 				f,
-				"renderer11_phase1 initialize hwnd=0x%08lX size=%lux%lu result=%d\n",
+				"renderer11_phase2 initialize hwnd=0x%08lX size=%lux%lu result=%d\n",
 				(unsigned long)hwnd,
 				width,
 				height,
@@ -1617,7 +1633,7 @@ static int SpideyEnsureRenderer11Presentation(
 		{
 			fprintf(
 				f,
-				"renderer11_phase1 resize old=%lux%lu new=%lux%lu result=%d\n",
+				"renderer11_phase2 resize old=%lux%lu new=%lux%lu result=%d\n",
 				gSpideyRenderer11Width,
 				gSpideyRenderer11Height,
 				width,
@@ -2046,6 +2062,121 @@ static int SpideyCompatPresentSceneToWindow(
 		return 0;
 	}
 
+	const int renderer11Ready =
+		SpideyEnsureRenderer11Presentation(
+			hwnd,
+			(unsigned long)dstWidth,
+			(unsigned long)dstHeight);
+
+	if (renderer11Ready &&
+		gSpideyRenderer11PresentPixels &&
+		!gSpideyRenderer11PixelsDisabled)
+	{
+		DDSURFACEDESC2 lockedDesc;
+		memset(
+			&lockedDesc,
+			0,
+			sizeof(lockedDesc));
+		lockedDesc.dwSize =
+			sizeof(lockedDesc);
+
+		HRESULT lockHr =
+			scene->Lock(
+				0,
+				&lockedDesc,
+				DDLOCK_WAIT | DDLOCK_READONLY,
+				0);
+
+		int pixelFormatOk =
+			SUCCEEDED(lockHr) &&
+			lockedDesc.lpSurface &&
+			lockedDesc.lPitch > 0 &&
+			lockedDesc.ddpfPixelFormat.dwRGBBitCount == 32 &&
+			lockedDesc.ddpfPixelFormat.dwRBitMask == 0x00FF0000 &&
+			lockedDesc.ddpfPixelFormat.dwGBitMask == 0x0000FF00 &&
+			lockedDesc.ddpfPixelFormat.dwBBitMask == 0x000000FF;
+
+		if (pixelFormatOk)
+		{
+			int dx11PixelsPresented =
+				gSpideyRenderer11PresentPixels(
+					lockedDesc.lpSurface,
+					(unsigned long)lockedDesc.dwWidth,
+					(unsigned long)lockedDesc.dwHeight,
+					(long)lockedDesc.lPitch,
+					1,
+					0);
+
+			scene->Unlock(0);
+
+			if (dx11PixelsPresented)
+			{
+				if (shouldLog)
+				{
+					FILE* f = fopen(
+						"spidey-decomp-present.log",
+						"a");
+					if (f)
+					{
+						fprintf(
+							f,
+							"compat_present_dx11_pixels frame=%lu result=1 src=%lux%lu pitch=%ld dst=%dx%d aspect_fit=1\n",
+							frame,
+							(unsigned long)lockedDesc.dwWidth,
+							(unsigned long)lockedDesc.dwHeight,
+							(long)lockedDesc.lPitch,
+							dstWidth,
+							dstHeight);
+						fclose(f);
+					}
+				}
+
+				return 3;
+			}
+
+			gSpideyRenderer11PixelsDisabled =
+				1;
+
+			FILE* compat = fopen(
+				"spidey-decomp-compat.log",
+				"a");
+			if (compat)
+			{
+				fprintf(
+					compat,
+					"renderer11_phase2 pixel_present_failed disabling_pixels_fallback=dx11_hdc\n");
+				fclose(compat);
+			}
+		}
+		else
+		{
+			if (SUCCEEDED(lockHr))
+				scene->Unlock(0);
+
+			if (shouldLog)
+			{
+				FILE* f = fopen(
+					"spidey-decomp-present.log",
+					"a");
+				if (f)
+				{
+					fprintf(
+						f,
+						"compat_present_dx11_pixels frame=%lu skipped lock_hr=0x%08lX ptr=0x%08lX pitch=%ld bpp=%lu r=0x%08lX g=0x%08lX b=0x%08lX fallback=dx11_hdc\n",
+						frame,
+						(unsigned long)lockHr,
+						(unsigned long)lockedDesc.lpSurface,
+						(long)lockedDesc.lPitch,
+						(unsigned long)lockedDesc.ddpfPixelFormat.dwRGBBitCount,
+						(unsigned long)lockedDesc.ddpfPixelFormat.dwRBitMask,
+						(unsigned long)lockedDesc.ddpfPixelFormat.dwGBitMask,
+						(unsigned long)lockedDesc.ddpfPixelFormat.dwBBitMask);
+					fclose(f);
+				}
+			}
+		}
+	}
+
 	HDC sceneDC = 0;
 	HRESULT sceneDCHr =
 		scene->GetDC(&sceneDC);
@@ -2070,10 +2201,7 @@ static int SpideyCompatPresentSceneToWindow(
 		return 0;
 	}
 
-	if (SpideyEnsureRenderer11Presentation(
-			hwnd,
-			(unsigned long)dstWidth,
-			(unsigned long)dstHeight) &&
+	if (renderer11Ready &&
 		gSpideyRenderer11PresentHdc)
 	{
 		int dx11Presented =
@@ -2098,7 +2226,7 @@ static int SpideyCompatPresentSceneToWindow(
 				{
 					fprintf(
 						f,
-						"compat_present_dx11 frame=%lu result=1 src=%lux%lu dst=%dx%d aspect_fit=1\n",
+						"compat_present_dx11_hdc frame=%lu result=1 src=%lux%lu dst=%dx%d aspect_fit=1\n",
 						frame,
 						(unsigned long)desc.dwWidth,
 						(unsigned long)desc.dwHeight,
@@ -2118,7 +2246,7 @@ static int SpideyCompatPresentSceneToWindow(
 		{
 			fprintf(
 				compat,
-				"renderer11_phase1 present_failed disabling_dx11_present_fallback=gdi_hwnd\n");
+				"renderer11_phase2 hdc_present_failed disabling_dx11_present_fallback=gdi_hwnd\n");
 			fclose(compat);
 		}
 
@@ -2450,10 +2578,12 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		{
 			fprintf(
 				f,
-				"present_path frame=%lu windowed=%d retail_flip=%d dx11=%d direct_hwnd=%d compat_result=%d\n",
+				"present_path frame=%lu windowed=%d retail_flip=%d dx11=%d dx11_pixels=%d dx11_hdc=%d direct_hwnd=%d compat_result=%d\n",
 				frame,
 				windowedCompat,
 				windowedCompat ? 0 : 1,
+				compatPresentPath >= 2 ? 1 : 0,
+				compatPresentPath == 3 ? 1 : 0,
 				compatPresentPath == 2 ? 1 : 0,
 				compatPresentPath == 1 ? 1 : 0,
 				compatPresentPath);
