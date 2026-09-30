@@ -1278,10 +1278,6 @@ int __cdecl SpideyRenderer11_UpdateTexture(
         return 0;
     }
 
-    const bool wasResident =
-        gGameTextures[textureId].texture != nullptr ||
-        gGameTextures[textureId].srv != nullptr;
-
     ReleaseGameTexture(textureId);
 
     GameTexture& entry = gGameTextures[textureId];
@@ -1290,11 +1286,7 @@ int __cdecl SpideyRenderer11_UpdateTexture(
     entry.width = width;
     entry.height = height;
     entry.sourceBitsPerPixel = bitsPerPixel;
-
-    if (!wasResident)
-        ++gResidentTextureCount;
-    else if (gResidentTextureCount == 0)
-        gResidentTextureCount = 1;
+    ++gResidentTextureCount;
 
     Log(
         "texture_update id=%lu size=%lux%lu src_bpp=%lu masks=%08lX,%08lX,%08lX,%08lX resident=%lu",
