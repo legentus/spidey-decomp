@@ -2301,8 +2301,9 @@ static unsigned long gSpideyShadowOffscreenSkipped = 0;
 static unsigned long gSpideyTransientQueued = 0;
 static unsigned long gSpideyTransientMirrored = 0;
 static unsigned long gSpideyPresentFrame = 0;
-static int gSpideyShadowPreviewEnabled = 0;
+static int gSpideyShadowPreviewEnabled = 1;
 static int gSpideyShadowPreviewReady = 0;
+static int gSpideyShadowPreviewModeSynced = 0;
 
 static unsigned long gSpideyRetailDrawCalls = 0;
 static unsigned long gSpideyRetailDrawTextured = 0;
@@ -4352,6 +4353,27 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		0;
 	int shadowPreviewToggledOn =
 		0;
+
+	if (!gSpideyShadowPreviewModeSynced)
+	{
+		SpideyRenderer11ShadowSetContinuous(
+			gSpideyShadowPreviewEnabled);
+		gSpideyShadowPreviewModeSynced =
+			1;
+
+		FILE* previewLog = fopen(
+			"spidey-decomp-present.log",
+			"a");
+		if (previewLog)
+		{
+			fprintf(
+				previewLog,
+				"shadow_default frame=%lu enabled=%d mode=dx11_geometry key=F10_reference_toggle\n",
+				frame,
+				gSpideyShadowPreviewEnabled);
+			fclose(previewLog);
+		}
+	}
 
 	if (GetAsyncKeyState(VK_F10) & 1)
 	{
