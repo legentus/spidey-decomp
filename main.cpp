@@ -755,6 +755,252 @@ static HRESULT __stdcall SpideyCompatSetDisplayModeHelper(
 	return hr;
 }
 
+
+static int SpideyModeContextContains(
+		DDSURFACEDESC2* surfaces,
+		int count,
+		DWORD width,
+		DWORD height,
+		DWORD bpp)
+{
+	for (int i = 0; i < count; ++i)
+	{
+		if (surfaces[i].dwWidth == width &&
+			surfaces[i].dwHeight == height &&
+			surfaces[i].ddpfPixelFormat.dwRGBBitCount == bpp)
+		{
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+static int SpideyAppendModernMode(
+		DWORD width,
+		DWORD height,
+		DWORD bpp)
+{
+	int* count =
+		(int*)0x006B5998;
+	DDSURFACEDESC2* surfaces =
+		(DDSURFACEDESC2*)0x006B599C;
+	unsigned char* flags =
+		(unsigned char*)0x006B789C;
+
+	if (*count < 0 || *count >= 64)
+		return 0;
+
+	if (SpideyModeContextContains(
+			surfaces,
+			*count,
+			width,
+			height,
+			bpp))
+	{
+		return 0;
+	}
+
+	DDSURFACEDESC2* desc =
+		&surfaces[*count];
+
+	memset(desc, 0, sizeof(*desc));
+	desc->dwSize = sizeof(*desc);
+	desc->dwFlags =
+		DDSD_CAPS |
+		DDSD_WIDTH |
+		DDSD_HEIGHT |
+		DDSD_PIXELFORMAT;
+	desc->dwWidth = width;
+	desc->dwHeight = height;
+	desc->ddsCaps.dwCaps = DDSCAPS_3DDEVICE;
+	desc->ddpfPixelFormat.dwSize =
+		sizeof(desc->ddpfPixelFormat);
+	desc->ddpfPixelFormat.dwFlags =
+		DDPF_RGB;
+	desc->ddpfPixelFormat.dwRGBBitCount =
+		bpp;
+
+	// Retail mode flags:
+	//   bit 0 = valid mode
+	//   bit 2 = hardware/accelerated-resolution candidate.
+	// Modern modes should participate in the normal accelerated path.
+	flags[*count] =
+		1 | 4;
+
+	(*count)++;
+	return 1;
+}
+
+static void SpideyInjectModernVideoModes()
+{
+	int before =
+		*(int*)0x006B5998;
+	int added =
+		0;
+	int saw1440 =
+		0;
+
+	DEVMODEA dm;
+	memset(&dm, 0, sizeof(dm));
+	dm.dmSize = sizeof(dm);
+
+	for (DWORD index = 0;
+		 EnumDisplaySettingsA(0, index, &dm);
+		 ++index)
+	{
+		if (dm.dmPelsWidth < 640 ||
+			dm.dmPelsHeight < 480)
+		{
+			memset(&dm, 0, sizeof(dm));
+			dm.dmSize = sizeof(dm);
+			continue;
+		}
+
+		DWORD bpp =
+			dm.dmBitsPerPel;
+
+		if (bpp < 32)
+		{
+			memset(&dm, 0, sizeof(dm));
+			dm.dmSize = sizeof(dm);
+			continue;
+		}
+
+		if (dm.dmPelsWidth == 2560 &&
+			dm.dmPelsHeight == 1440)
+		{
+			saw1440 =
+				1;
+		}
+
+		added +=
+			SpideyAppendModernMode(
+				dm.dmPelsWidth,
+				dm.dmPelsHeight,
+				32);
+
+		if (*(int*)0x006B5998 >= 64)
+			break;
+
+		memset(&dm, 0, sizeof(dm));
+		dm.dmSize = sizeof(dm);
+	}
+
+	// 2560x1440 is a first-class supported render size for the modern
+	// compatibility path even when legacy DirectDraw mode enumeration does
+	// not advertise it. In windowed mode this controls the real offscreen
+	// render target and viewport, not a post-process upscale.
+	if (*(int*)0x006B5998 < 64)
+	{
+		added +=
+			SpideyAppendModernMode(
+				2560,
+				1440,
+				32);
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"modern_modes before=%d after=%d added=%d windows_1440=%d explicit_2560x1440=1\n",
+			before,
+			*(int*)0x006B5998,
+			added,
+			saw1440);
+		fclose(f);
+	}
+}
+
+static void SpideyRestoreSavedRenderResolution()
+{
+	DWORD savedWidth =
+		*(DWORD*)0x02E096F8;
+	DWORD savedHeight =
+		*(DWORD*)0x02E0970C;
+	DWORD savedBpp =
+		*(DWORD*)0x02E098E4;
+
+	if (savedWidth < 512 ||
+		savedWidth > 8192 ||
+		savedHeight < 384 ||
+		savedHeight > 8192)
+	{
+		return;
+	}
+
+	if (savedBpp != 16 &&
+		savedBpp != 24 &&
+		savedBpp != 32)
+	{
+		savedBpp =
+			32;
+	}
+
+	// RealWinMain resets the live render globals to 640x480 after loading
+	// the user's settings. Restore the saved values immediately before
+	// retail DXINIT_DirectX8 so surface creation and the D3D viewport are
+	// actually native to the selected resolution.
+	*(DWORD*)0x006B78E4 =
+		savedWidth;
+	*(DWORD*)0x006B78E8 =
+		savedHeight;
+	*(DWORD*)0x006B78EC =
+		savedBpp;
+
+	// Retail gGameResolutionX/Y mirrors used by gameplay/render scaling.
+	*(DWORD*)0x00568154 =
+		savedWidth;
+	*(DWORD*)0x00568158 =
+		savedHeight;
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"restore_saved_resolution %lux%lux%lu live_dx=%lux%lux%lu\n",
+			(unsigned long)savedWidth,
+			(unsigned long)savedHeight,
+			(unsigned long)savedBpp,
+			(unsigned long)*(DWORD*)0x006B78E4,
+			(unsigned long)*(DWORD*)0x006B78E8,
+			(unsigned long)*(DWORD*)0x006B78EC);
+		fclose(f);
+	}
+}
+
+typedef void (__cdecl *SpideyRetailDXINITFn)(
+		HWND,
+		HINSTANCE,
+		u32);
+
+static void __cdecl SpideyCompatDXINITDirectX8(
+		HWND hwnd,
+		HINSTANCE hInstance,
+		u32 options)
+{
+	SpideyRestoreSavedRenderResolution();
+
+	SpideyRetailDXINITFn retail =
+		(SpideyRetailDXINITFn)0x004FDE90;
+
+	retail(
+		hwnd,
+		hInstance,
+		options | 1);
+
+	SpideyInjectModernVideoModes();
+}
+
 static void SpideyInstallWindowedDirectDrawCompat()
 {
 	unsigned char* textStart =
@@ -873,33 +1119,45 @@ static void SpideyInstallWindowedDirectDrawCompat()
 		return;
 	}
 
-	// Change RealWinMain's third DXINIT_DirectX8 argument from 2 to 3.
-	// DXINIT_DirectX8 stores:
-	//     gDxOptionRelated = a3 & 1;
-	// so this preserves bit 1 while enabling the game's own windowed
-	// DirectDraw initialization path.
+	// Preserve the proven windowed-mode bit and redirect only this verified
+	// RealWinMain call through a same-signature wrapper. The wrapper restores
+	// the saved render resolution before retail initialization and augments
+	// the legacy mode table afterward.
 	matchedPush[1] =
 		0x03;
+
+	long wrapperRel =
+		(long)(
+			(unsigned char*)&SpideyCompatDXINITDirectX8 -
+			(matchedCall + 5));
+
+	*(long*)(matchedCall + 1) =
+		wrapperRel;
 
 	FlushInstructionCache(
 		GetCurrentProcess(),
 		matchedPush,
 		2);
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		matchedCall,
+		5);
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX target=0x%08lX old_arg=2 new_arg=3\n",
+			"Windowed DirectDraw patch installed push_site=0x%08lX call_site=0x%08lX retail_target=0x%08lX wrapper=0x%08lX old_arg=2 new_arg=3\n",
 			(unsigned long)matchedPush,
 			(unsigned long)matchedCall,
-			callTarget);
+			callTarget,
+			(unsigned long)&SpideyCompatDXINITDirectX8);
 		fclose(f);
 	}
 
 	printf(
-		"[*] Windowed DirectDraw compatibility patch: DXINIT_DirectX8 arg 2->3 at 0x%08lX\n",
-		(unsigned long)matchedPush);
+		"[*] Windowed DirectDraw compatibility patch: DXINIT wrapper at 0x%08lX\n",
+		(unsigned long)matchedCall);
 }
 #endif
 
@@ -1367,6 +1625,84 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	}
 }
 
+
+static void SpideyInstallMoviePresentCompat()
+{
+	unsigned char* start =
+		(unsigned char*)0x0050B5A0;
+	unsigned char* end =
+		(unsigned char*)0x0050B790;
+	const unsigned long retailFlip =
+		0x00502990;
+
+	unsigned char* match =
+		0;
+	int count =
+		0;
+
+	for (unsigned char* p = start;
+		 p + 5 <= end;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long rel =
+			*(long*)(p + 1);
+
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target == retailFlip)
+		{
+			match =
+				p;
+			count++;
+		}
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-present.log",
+		"a");
+
+	if (count != 1 || !match)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"movie_present NOT installed expected=1 found=%d range=0x0050B5A0-0x0050B790\n",
+				count);
+			fclose(f);
+		}
+		return;
+	}
+
+	long newRel =
+		(long)(
+			(unsigned char*)&SpideyDiagDXPOLYFlip -
+			(match + 5));
+
+	*(long*)(match + 1) =
+		newRel;
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		match,
+		5);
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"movie_present installed call_site=0x%08lX retail_target=0x%08lX wrapper=0x%08lX\n",
+			(unsigned long)match,
+			retailFlip,
+			(unsigned long)&SpideyDiagDXPOLYFlip);
+		fclose(f);
+	}
+}
+
 static void SpideyInstallPresentProbe()
 {
 	unsigned char* site =
@@ -1600,6 +1936,7 @@ void game_patches(void)
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
 	SpideyInstallPresentProbe();
+	SpideyInstallMoviePresentCompat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
