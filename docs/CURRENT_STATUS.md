@@ -2362,3 +2362,49 @@ Most important next-log evidence:
   - `scene_pre ... width=2560 height=1440 ...` after 1440p is applied.
 
 If 2560x1440 appears in the menu but applying it fails, the next target is the retail `DXINIT_SetDisplayOptions` transition itself; do not regress mode enumeration or fall back to scaled 640x480.
+
+
+## Runtime result: native 1280x1024 works; borderless collapse + game-heap exhaustion before menu — 2026-09-29
+
+Tested revision:
+`07c84285d214aad27470b6460dda1a6fabb0b908`
+
+User-visible result:
+- startup begins at the larger monitor/window aspect;
+- DirectDraw initialization then collapses the game into the classic smaller legacy-sized box;
+- game crashes before reaching the start menu.
+
+Confirmed resolution behavior from logs:
+- saved mode = `1280x1024x32`;
+- live DX mode = `1280x1024x32`;
+- actual scene surface = `1280x1024x32`;
+- therefore the native-render-resolution restoration is working;
+- current desktop/primary surface = `1920x1080x32`;
+- the size/aspect switch is the retail windowed `initDirectDraw7` path resizing the HWND client to the selected render resolution, not the renderer falling back to 640x480.
+
+Modern-mode injection also worked:
+- initial retail mode context: 4 entries;
+- augmented context: 24 entries;
+- Windows enumeration reports 2560x1440;
+- explicit 2560x1440 entry installed;
+- all three verified retail `initDirectDraw7` call sites are wrapped.
+
+Crash diagnosis:
+- exception target: write to `0x0000001F`;
+- apparent module name is `binkw32.dll`, but this is the project's proxy DLL loaded at preferred base `0x10000000`, not proof of a RAD Bink decoder fault;
+- crash EIP `0x1002C6D1` maps via the uploaded linker map to reconstructed `DCMem_New` at `0x1002C680 + 0x51`;
+- stack return `0x10037993` maps into reconstructed `PCTex_CreateTexture256` (`0x10037800..`);
+- `DCMem_New` currently does not handle `Mem_CoreNew` returning NULL:
+  - NULL base produces alignment offset 32;
+  - calculated result becomes `0x20`;
+  - writing the alignment byte at `result - 1` writes to exactly `0x1F`, matching the crash.
+- conclusion: the fixed game heap is exhausted during texture creation/reload and the reconstructed allocator turns the OOM into an access violation.
+
+Next implementation:
+1. add a compatibility fallback allocation path for `DCMem_New` when the original game heap is exhausted, while retaining the exact 32-byte alignment contract;
+2. mark fallback blocks with a sentinel heap id and teach delete/shrink/handle paths to recognize them safely;
+3. keep the borderless HWND at monitor dimensions after every DirectDraw reinit instead of allowing retail `MoveWindow` to shrink it to the internal render resolution;
+4. present the internal scene aspect-fit/centered in that monitor-sized window so legacy 4:3/5:4 modes do not become either a tiny window or a horizontally distorted fullscreen image;
+5. retain native 2560x1440 scene support and the movie-specific presenter.
+
+Do not revert native scene-resolution restoration: this test proves it is now functioning.
