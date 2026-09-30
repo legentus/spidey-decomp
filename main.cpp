@@ -2443,6 +2443,15 @@ static unsigned long gSpideyRetailDrawOtherPrimitive = 0;
 static unsigned long gSpideyRetailDrawOtherFvf = 0;
 static unsigned long gSpideyRetailDrawSampleCount = 0;
 
+static int gSpideyModernRangeValid = 0;
+static float gSpideyModernMinX = 0.0f;
+static float gSpideyModernMaxX = 0.0f;
+static float gSpideyModernMinY = 0.0f;
+static float gSpideyModernMaxY = 0.0f;
+static unsigned long gSpideyModernVertexCount = 0;
+static unsigned long gSpideyModernOutsidePhysicalX = 0;
+static unsigned long gSpideyModernOutsidePhysicalY = 0;
+
 static int SpideyIsExecutablePointer(
 		void* pointer)
 {
@@ -2984,6 +2993,65 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		++gSpideyShadowOffscreenSkipped;
 	}
 
+	if (onMainScene &&
+		vertexTypeDesc == 324 &&
+		vertices &&
+		vertexCount)
+	{
+		const SpideyRetailTLVertexProbe* rangeVertices =
+			(const SpideyRetailTLVertexProbe*)vertices;
+
+		__try
+		{
+			for (DWORD rangeIndex = 0;
+				 rangeIndex < vertexCount;
+				 ++rangeIndex)
+			{
+				const float x =
+					rangeVertices[rangeIndex].x;
+				const float y =
+					rangeVertices[rangeIndex].y;
+
+				if (!gSpideyModernRangeValid)
+				{
+					gSpideyModernMinX = x;
+					gSpideyModernMaxX = x;
+					gSpideyModernMinY = y;
+					gSpideyModernMaxY = y;
+					gSpideyModernRangeValid = 1;
+				}
+				else
+				{
+					if (x < gSpideyModernMinX)
+						gSpideyModernMinX = x;
+					if (x > gSpideyModernMaxX)
+						gSpideyModernMaxX = x;
+					if (y < gSpideyModernMinY)
+						gSpideyModernMinY = y;
+					if (y > gSpideyModernMaxY)
+						gSpideyModernMaxY = y;
+				}
+
+				++gSpideyModernVertexCount;
+
+				if (x < 0.0f ||
+					x > (float)gSpideyLegacyPhysicalWidth)
+				{
+					++gSpideyModernOutsidePhysicalX;
+				}
+
+				if (y < 0.0f ||
+					y > (float)gSpideyLegacyPhysicalHeight)
+				{
+					++gSpideyModernOutsidePhysicalY;
+				}
+			}
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
 	if (captureShadowFrame &&
 		onMainScene &&
 		gSpideyRetailShadowStateValid &&
@@ -2992,11 +3060,27 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		vertices &&
 		vertexCount >= 3)
 	{
+		SpideyRenderer11LegacyShadowState shadowState =
+			gSpideyRetailShadowState;
+
+		if (SpideyUseModernGameplayAspect() &&
+			gSpideyShadowPreviewEnabled)
+		{
+			shadowState.viewportX = 0;
+			shadowState.viewportY = 0;
+			shadowState.viewportWidth =
+				gSpideyModernLogicalWidth;
+			shadowState.viewportHeight =
+				gSpideyModernLogicalHeight;
+			shadowState.viewportMinZ = 0.0f;
+			shadowState.viewportMaxZ = 1.0f;
+		}
+
 		shadowSubmitted =
 			SpideyRenderer11ShadowSubmitTriangleFan(
 				(const SpideyRenderer11LegacyShadowVertex*)vertices,
 				(unsigned long)vertexCount,
-				&gSpideyRetailShadowState);
+				&shadowState);
 	}
 
 	if (captureShadowFrame)
@@ -3233,6 +3317,14 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyShadowOffscreenSkipped = 0;
 	gSpideyTransientQueued = 0;
 	gSpideyTransientMirrored = 0;
+	gSpideyModernRangeValid = 0;
+	gSpideyModernMinX = 0.0f;
+	gSpideyModernMaxX = 0.0f;
+	gSpideyModernMinY = 0.0f;
+	gSpideyModernMaxY = 0.0f;
+	gSpideyModernVertexCount = 0;
+	gSpideyModernOutsidePhysicalX = 0;
+	gSpideyModernOutsidePhysicalY = 0;
 }
 
 static void SpideyFlushRetailD3D7DrawProbeFrame(
@@ -3255,7 +3347,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu resident=%lu device=0x%08lX\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -3271,7 +3363,20 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyTransientQueued,
 				gSpideyTransientMirrored,
 				SpideyRenderer11GetMirroredTextureCount(),
-				(unsigned long)gSpideyRetailD3D7DrawProbeDevice);
+				(unsigned long)gSpideyRetailD3D7DrawProbeDevice,
+				SpideyUseModernGameplayAspect() ? 1 : 0,
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight,
+				gSpideyLegacyPhysicalWidth,
+				gSpideyLegacyPhysicalHeight,
+				gSpideyModernRangeValid,
+				gSpideyModernMinX,
+				gSpideyModernMaxX,
+				gSpideyModernMinY,
+				gSpideyModernMaxY,
+				gSpideyModernVertexCount,
+				gSpideyModernOutsidePhysicalX,
+				gSpideyModernOutsidePhysicalY);
 			fclose(f);
 		}
 	}
