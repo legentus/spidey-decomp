@@ -3394,3 +3394,19 @@ After Phase 0 passes:
 4. Phase 4: emulate D3D7 fixed-function 3D states/shaders and triangle fans;
 5. Phase 5: true 16:9 projection/FOV + UI safe-area work;
 6. Phase 6: DX11 becomes the default renderer and D3D7 becomes diagnostic/reference only.
+
+
+## Full new-chat handoff refreshed for DX11 frontier — 2026-09-30
+
+- Rewrote `docs/NEW_CHAT_HANDOFF.md` so it no longer points at the obsolete black-screen/DirectDraw frontier.
+- New handoff is centered on the current Direct3D 11 migration.
+- Source frontier before handoff refresh: `0fbc7b6a90c630ff8070fd6a9ed9ba14f0c101f0`.
+- Handoff document commit: `2cbc00900e27f3ce42e357fdc7c9576641250385`.
+- Exact next action remains the first DX11 Phase 0 plumbing/probe runtime test using `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+- The external full handoff ZIP should include:
+  - current documentation;
+  - DX11 migration/bridge source snapshots;
+  - repo/Drive/upstream links;
+  - latest 1440p two-session evidence;
+  - previous Sep-30 full handoff as historical baseline;
+  - disconnect/live-documentation protocol.
