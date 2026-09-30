@@ -2100,3 +2100,54 @@ NEXT IMPLEMENTATION:
 - only activate when gDxOptionRelated indicates windowed mode;
 - log copy dimensions and Win32 result;
 - leave fullscreen retail path untouched.
+
+
+## Direct-window compatibility presenter implemented — 2026-09-30
+
+New runtime evidence from `spidey-decomp-present.log` proves:
+- scene surface contains non-black pixels from frame 1 onward;
+- scene sample hash changes during runtime, so rendered content is updating;
+- primary surface sample hash remains constant across all sampled frames;
+- stored and live client rects both remain `0,0,640,480`;
+- therefore stale rectangle is ruled out;
+- failure is specifically the retail windowed DirectDraw primary-surface presentation step.
+
+Implementation commit:
+`cf3d827a11958464c73a2ac8a1ee1d1532a03d6a`
+
+Compatibility behavior:
+1. existing exact-call-site wrapper still invokes untouched retail `DXPOLY_Flip(0x00502990)` first;
+2. only when retail `gDxOptionRelated` indicates windowed mode:
+   - gets the already-rendered scene surface at retail `0x006B7908`;
+   - reads actual HWND client dimensions;
+   - gets a GDI DC from the scene surface;
+   - gets the real HWND client DC;
+   - uses `BitBlt` when scene/client sizes match;
+   - uses `StretchBlt(COLORONCOLOR)` when sizes differ;
+   - calls `GdiFlush`;
+   - releases both DCs;
+3. fullscreen path is untouched;
+4. original renderer, D3D device, scene surface and retail flip still run normally.
+
+Current observed dimensions make the common path:
+- scene = 640x480;
+- HWND client = 640x480;
+- therefore direct `BitBlt`.
+
+Presentation log now also records:
+`compat_present frame=<n> result=<0/1> error=<win32> src=<w>x<h> dst=<w>x<h> stretch=<0/1>`
+
+Static verification passed:
+- retail flip occurs before compatibility copy;
+- windowed guard present;
+- source is scene surface, not primary;
+- BitBlt + StretchBlt fallback present;
+- fullscreen untouched;
+- result logging present.
+
+NEXT TEST:
+- update/build;
+- launch normally;
+- if image appears, verify splash/title/menu visibility;
+- if still black, let it run at least 10 seconds and provide all logs;
+- key line will be `compat_present ... result=...` in `spidey-decomp-present.log`.
