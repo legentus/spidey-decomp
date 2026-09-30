@@ -2575,3 +2575,42 @@ NEXT PATCH:
    - free with the matching allocator;
    - log entry dimensions/source/palette/buffer ownership and failure stage;
 4. add guards for null source/palette and failed PVR creation before indexing the global texture table.
+
+
+## Fix batch ready: movie input activation + guarded CreateTexture256 — 2026-09-29
+
+Implementation:
+- `0d02ad0bd067093de2e9453fb70fa59a604e28bc`
+  - removed `SWP_NOACTIVATE` from the borderless `SetWindowPos` call;
+  - bringing the HWND to `HWND_TOP` can now activate it, which is required by foreground DirectInput devices used by movie skipping.
+- `c27acf0ce7735ecbd1da63b2d9d75ed7b67c6108`
+  - initializes `Pad_Update` mapped-state masks to zero before `PCINPUT_GetMappedStates`;
+  - prevents failed/unfocused polls from leaving undefined stack input state.
+- `fe6711fe9d4cfece53463707cb479db5055f77f7`
+  - first texture hardening draft; superseded immediately by scoped correction below.
+- `da9cfd83e6eeead93fd93a20b3611839b3eed714`
+  - cleanly reapplies texture hardening only to `PCTex_CreateTexture256`;
+  - restores `PCTex_CreateTexture16` exactly to its pre-diagnostic state after catching an over-broad edit during static review;
+  - logs each CreateTexture256 call and stage to `spidey-decomp-texture.log`;
+  - retains DCMem as the first allocation path;
+  - if DCMem still returns NULL, uses a temporary process-heap conversion buffer;
+  - never enters indexed-color conversion with a null destination;
+  - guards null source and null palette;
+  - returns cleanly if PVR creation/recreation fails instead of continuing with an invalid texture handle;
+  - frees the temporary conversion buffer with its matching allocator.
+- `141a4e479265848dd2bd8f881f0e5c484f57a8f5`
+  - `TEST_LATEST_BUILD.ps1` now clears/captures `spidey-decomp-texture.log` into the normal timestamped test-session folder automatically.
+
+Static verification after correction:
+- `compatConversionBuffer` and `textureCall` now occur only inside `PCTex_CreateTexture256`;
+- `PCTex_CreateTexture16` no longer contains any of the Create256 diagnostics;
+- borderless presenter and 2560x1440 mode injection remain unchanged;
+- movie presenter remains installed.
+
+NEXT TEST:
+- use the standard one-click `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+- check whether a key/button can skip a splash after the 60-frame skip delay;
+- if not skipped, let movies finish;
+- confirm whether the game reaches the start menu;
+- move the mouse at the start menu if it reaches it;
+- upload the whole new test-session output, including the automatically captured `spidey-decomp-texture.log`.
