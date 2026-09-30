@@ -3011,3 +3011,89 @@ Most useful evidence:
 - `spidey-decomp-input.log`
   - now guaranteed to be created at input initialization;
   - should show foreground deactivate/reactivate and Acquire results.
+
+
+## Runtime result: movie leak ruled out; retail input path identified; double-present race targeted — 2026-09-30
+
+Tested revision:
+`e16babda924aa82eb1910577e848317bc7c51f20`
+
+User-visible:
+- rapid building/city imagery still flashes over start and main menus;
+- Alt+Tab out/back still removes all menu control.
+
+What this run conclusively ruled out:
+- movie-surface leak is NOT the source of menu flashing;
+- `spidey-decomp-present.log` shows all four startup movie surfaces released with `remaining_refs=0`;
+- flashing remained unchanged after that cleanup.
+
+Input root cause discovered:
+- the reconstructed `DXINPUT_*` changes in `DXsound.cpp` were never on the retail host's execution path;
+- `game_patches()` did not patch retail `DXINPUT_*` entries/callers;
+- this explains why no `spidey-decomp-input.log` was ever created and why several iterations of reconstructed reacquire logic had no runtime effect.
+
+Retail input mapping recovered from untouched retail function blobs:
+- `DXINPUT_Initialize = 0x005013D0`;
+- `DXINPUT_Release = 0x00501440`;
+- `DXINPUT_SetKeyState = 0x00501510`;
+- `DXINPUT_SetMouseButtonState = 0x00501530`;
+- `DXINPUT_GetKeyName = 0x00501550`;
+- `DXINPUT_SetupKeyboard = 0x00501590`;
+- `DXINPUT_SetupMouse = 0x00501710`;
+- `DXINPUT_SetupController = 0x00501890`;
+- `DXINPUT_PollKeyboard = 0x00501B80`;
+- `DXINPUT_GetKeyState = 0x00501CB0`;
+- `DXINPUT_PollMouse = 0x00501CC0`;
+- `DXINPUT_GetMouseButtonState = 0x00501E40`;
+- `DXINPUT_PollController = 0x00501E50`;
+- `DXINPUT_GetControllerButtonState = 0x00501FB0`;
+- `DXINPUT_StartForceFeedbackEffect = 0x005021A0`;
+- `DXINPUT_StopForceFeedbackEffect = 0x005021E0`;
+- `DXINPUT_GetNumControllerButtons = 0x00502210`.
+
+Retail input globals verified from those same functions:
+- DirectInput object `0x006B7A30`;
+- input HWND `0x006B7A60`;
+- keyboard device `0x006B7A5C`;
+- mouse device `0x006B7A64`;
+- controller device `0x006B7A2C`;
+- keyboard transition state `0x006B792C`;
+- mouse-button state `0x006B7A54`;
+- controller-button state `0x006B7A34`.
+
+Presentation race diagnosis:
+- compatibility HWND is 2560x1440;
+- retail DirectDraw primary remains 1920x1080;
+- in windowed mode retail `DXPOLY_Flip` first Blts scene -> legacy primary, then `SpideyDiagDXPOLYFlip` immediately GDI-stretches scene -> HWND;
+- this means two independent presentation paths paint the same visible window every frame through different-sized targets;
+- after texture/caps/movie fixes all succeeded, this double-present path is now the strongest explanation for rapid transient foreign imagery.
+
+Fix commit:
+- `92f0d4add60dfdd6c7a9b50decc6b35a8bf01507`
+  - windowed compatibility mode no longer calls retail `DXPOLY_Flip`; direct scene -> HWND presentation is the sole windowed presenter;
+  - original retail Flip remains untouched for non-windowed mode;
+  - present log now records `present_path ... retail_flip=0 direct_hwnd=1`;
+  - installs retail-call-site wrappers for `DXINPUT_PollKeyboard 0x00501B80` and `DXINPUT_PollMouse 0x00501CC0`;
+  - wrappers operate on the actual retail keyboard/mouse/controller DirectInput objects and state arrays;
+  - foreground transition explicitly Unacquires on background and Acquires on return;
+  - keyboard failures get one explicit Acquire + retail retry;
+  - input log is created by the installer itself, proving the hook installed even before first input poll.
+
+Static verification:
+- retail input addresses above were recovered from exact original function blobs, not inferred from reconstructed DLL layout;
+- wrappers call untouched retail poll functions by absolute address, so original key/mouse transition semantics remain in charge;
+- installer rewrites only direct E8 call sites targeting the two retail poll functions;
+- the DLL wrapper calls retail by function pointer, so it cannot be recursively repatched;
+- legacy 640x480 frontend canvas, fixed D3D caps, correct texture hash table, modern mode list, movie cleanup, and borderless presentation remain enabled.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. verify splash movies and frontend boot;
+3. watch start/main menu for flashing building/city imagery;
+4. Alt+Tab out for a second and back;
+5. test keyboard, mouse, and controller if available;
+6. upload full session.
+
+Key expected logs:
+- `spidey-decomp-present.log`: `present_path ... windowed=1 retail_flip=0 direct_hwnd=1`;
+- `spidey-decomp-input.log`: installer line with nonzero keyboard/mouse call counts, then `foreground_acquire` / `background_unacquire` transitions around Alt+Tab.
