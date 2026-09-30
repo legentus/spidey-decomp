@@ -1622,7 +1622,7 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		{
 			fprintf(
 				f,
-				"frame=%lu hwnd=0x%08lX option=%lu lowgfx=%lu res=%lux%lu bpp=%lu old_rect=%ld,%ld,%ld,%ld live_rect=%ld,%ld,%ld,%ld have_live=%d corrected=%d\n",
+				"frame=%lu hwnd=0x%08lX option=%lu lowgfx=%lu saved_res=%lux%lux%lu live_res=%lux%lux%lu old_rect=%ld,%ld,%ld,%ld live_rect=%ld,%ld,%ld,%ld have_live=%d corrected=%d\n",
 				frame,
 				(unsigned long)hwnd,
 				(unsigned long)*(DWORD*)0x006B78F4,
@@ -1630,6 +1630,9 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 				(unsigned long)*(DWORD*)0x02E096F8,
 				(unsigned long)*(DWORD*)0x02E0970C,
 				(unsigned long)*(DWORD*)0x02E098E4,
+				(unsigned long)*(DWORD*)0x006B78E4,
+				(unsigned long)*(DWORD*)0x006B78E8,
+				(unsigned long)*(DWORD*)0x006B78EC,
 				(long)oldRect.left,
 				(long)oldRect.top,
 				(long)oldRect.right,
