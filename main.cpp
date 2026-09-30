@@ -3493,6 +3493,16 @@ static unsigned long gSpideyPresentFrame = 0;
 static int gSpideyShadowPreviewReady = 0;
 static int gSpideyShadowPreviewModeSynced = 0;
 
+// Phase 3E diagnostic: prove the visible DX11 replay can survive without
+// executing the matching D3D7 main-scene DrawPrimitive. This is deliberately
+// opt-in and conservative: F9 suppresses only draws already accepted by DX11
+// with a texture that is already mirrored (or no texture). Offscreen draws,
+// unsupported states, unresolved textures and the F10 D3D7 reference path
+// always continue through retail D3D7.
+static int gSpideyD3D7MainDrawSuppressionEnabled = 0;
+static unsigned long gSpideyD3D7MainDrawSuppressed = 0;
+static unsigned long gSpideyD3D7MainDrawFallback = 0;
+
 static unsigned long gSpideyRetailDrawCalls = 0;
 static unsigned long gSpideyRetailDrawTextured = 0;
 static unsigned long gSpideyRetailDrawMirrored = 0;
@@ -4350,6 +4360,34 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		++gSpideyRetailDrawSampleCount;
 	}
 
+	// Diagnostic D3D7-producer removal trial. Never suppress unless the
+	// currently visible DX11 path is fully active and this exact main-scene
+	// draw was accepted by DX11. Require an already-resident texture rather
+	// than relying on end-of-frame transient recovery so the trial fails
+	// closed: any uncertain draw still executes on D3D7.
+	const int textureReadyForSuppression =
+		!texture ||
+		mirroredTextureId >= 0;
+	const int suppressRetailMainDraw =
+		gSpideyD3D7MainDrawSuppressionEnabled &&
+		gSpideyShadowPreviewEnabled &&
+		gSpideyShadowPreviewReady &&
+		onMainScene &&
+		shadowSubmitted &&
+		textureReadyForSuppression;
+
+	if (suppressRetailMainDraw)
+	{
+		++gSpideyD3D7MainDrawSuppressed;
+		return S_OK;
+	}
+
+	if (gSpideyD3D7MainDrawSuppressionEnabled &&
+		onMainScene)
+	{
+		++gSpideyD3D7MainDrawFallback;
+	}
+
 	if (!gSpideyRetailD3D7DrawPrimitiveOriginal)
 		return E_FAIL;
 
@@ -4377,6 +4415,8 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyShadowOffscreenSkipped = 0;
 	gSpideyTransientQueued = 0;
 	gSpideyTransientMirrored = 0;
+	gSpideyD3D7MainDrawSuppressed = 0;
+	gSpideyD3D7MainDrawFallback = 0;
 	gSpideyModernRangeValid = 0;
 	gSpideyModernMinX = 0.0f;
 	gSpideyModernMaxX = 0.0f;
@@ -4407,7 +4447,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu d3d7_suppress=%d d3d7_suppressed=%lu d3d7_fallback=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -4422,6 +4462,9 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyShadowOffscreenSkipped,
 				gSpideyTransientQueued,
 				gSpideyTransientMirrored,
+				gSpideyD3D7MainDrawSuppressionEnabled,
+				gSpideyD3D7MainDrawSuppressed,
+				gSpideyD3D7MainDrawFallback,
 				SpideyRenderer11GetMirroredTextureCount(),
 				(unsigned long)gSpideyRetailD3D7DrawProbeDevice,
 				SpideyUseModernOutputAspect() ? 1 : 0,
@@ -5648,6 +5691,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		0;
 	int shadowReferenceDelay =
 		0;
+	int d3d7SuppressionToggled =
+		0;
 
 	if (!gSpideyShadowPreviewModeSynced)
 	{
@@ -5667,6 +5712,32 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 				frame,
 				gSpideyShadowPreviewEnabled);
 			fclose(previewLog);
+		}
+	}
+
+	if (GetAsyncKeyState(VK_F9) & 1)
+	{
+		gSpideyD3D7MainDrawSuppressionEnabled =
+			gSpideyD3D7MainDrawSuppressionEnabled ? 0 : 1;
+		d3d7SuppressionToggled =
+			1;
+
+		FILE* suppressionLog = fopen(
+			"spidey-decomp-present.log",
+			"a");
+		if (suppressionLog)
+		{
+			fprintf(
+				suppressionLog,
+				"d3d7_main_draw_suppression frame=%lu enabled=%d effective=%d dx11=%d ready=%d key=F9\n",
+				frame,
+				gSpideyD3D7MainDrawSuppressionEnabled,
+				gSpideyD3D7MainDrawSuppressionEnabled &&
+					gSpideyShadowPreviewEnabled &&
+					gSpideyShadowPreviewReady,
+				gSpideyShadowPreviewEnabled,
+				gSpideyShadowPreviewReady);
+			fclose(suppressionLog);
 		}
 	}
 
@@ -5857,7 +5928,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		frame <= 5 ||
 		(frame % 120) == 0 ||
 		rectCorrected ||
-		shadowPreviewToggled;
+		shadowPreviewToggled ||
+		d3d7SuppressionToggled;
 
 	if (shouldLog)
 	{
