@@ -221,3 +221,31 @@ Runtime validation on revision `a16d29d7fc6c4b60a817ca25ddcd5ef4ef599ad3` confir
 - the user reached the main menu, started a new game, entered gameplay, moved around, and exited normally.
 
 Phase 1 therefore proves DX11 ownership of final visible presentation. It does not yet prove native 2560x1440 scene rendering: gameplay is still rendered by D3D7 at 1920x1440 and aspect-fitted into the 2560x1440 DX11 swap chain.
+
+
+## Phase 2A — shader-upload presentation bridge
+
+Status: implemented, awaiting runtime validation.
+
+ABI 3 adds `SpideyRenderer11_PresentPixels`. The legacy D3D7 scene surface is locked after rendering, its 32-bit BGRA-compatible pixels are copied into a dynamic D3D11 texture, and a shader-model-4 fullscreen triangle performs the visible draw into the existing DX11 swap-chain render target.
+
+The normal Phase 2A path contains no GDI/HDC presentation. The ABI-2 HDC path remains as an intermediate fallback, followed by the direct-HWND compatibility presenter as the final fallback.
+
+This is deliberately a CPU upload bridge. It is not the final renderer architecture; its purpose is to establish:
+- DX11 texture ownership;
+- DX11 shader compilation/state;
+- DX11 viewport/aspect handling;
+- DX11 textured draw submission;
+- a safe foundation for replacing individual D3D7 texture and primitive responsibilities.
+
+### Phase 2B hook map
+
+The reconstructed source exposes a clean migration seam:
+- `PCTex_CreateTexturePVRInId`: central creation/conversion/upload point for game textures;
+- `PCTex_ReleaseSysTexture`: central destruction path;
+- `PCTex_GetDirect3DTexture`: legacy texture-handle lookup;
+- `PCGfx_ProcessTexture`: selects a texture and forwards it to `DXPOLY_SetTexture`;
+- `PCGfx_Draw*`: queues `DXPOLY` records containing the current DirectDraw texture surface;
+- `PCGfx_BeginScene` / `PCGfx_EndScene`: high-level scene bracketing.
+
+Phase 2B should introduce a sidecar DX11 texture table keyed by the existing 0..1023 game texture IDs, populate it from the same converted pixel data used by `PCTex_CreateTexturePVRInId`, release it in the same lifetime paths, and initially use it for migrated 2D/textured primitives while D3D7 remains available for non-migrated draws.
