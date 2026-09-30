@@ -2155,6 +2155,93 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 					firstVertex.v);
 			}
 
+			// Snapshot the fixed-function state only for sampled/unusual draws.
+			// These getters are observational and leave retail D3D7 untouched.
+			DWORD zEnable = 0;
+			DWORD zWrite = 0;
+			DWORD zFunc = 0;
+			DWORD alphaBlend = 0;
+			DWORD srcBlend = 0;
+			DWORD dstBlend = 0;
+			DWORD alphaTest = 0;
+			DWORD alphaRef = 0;
+			DWORD alphaFunc = 0;
+			DWORD fogEnable = 0;
+			DWORD fogColor = 0;
+			DWORD colorOp = 0;
+			DWORD colorArg1 = 0;
+			DWORD colorArg2 = 0;
+			DWORD alphaOp = 0;
+			DWORD alphaArg1 = 0;
+			DWORD alphaArg2 = 0;
+			DWORD addressU = 0;
+			DWORD addressV = 0;
+			DWORD magFilter = 0;
+			DWORD minFilter = 0;
+			D3DVIEWPORT7 viewport;
+			memset(
+				&viewport,
+				0,
+				sizeof(viewport));
+
+			if (device)
+			{
+				device->GetRenderState(D3DRENDERSTATE_ZENABLE, &zEnable);
+				device->GetRenderState(D3DRENDERSTATE_ZWRITEENABLE, &zWrite);
+				device->GetRenderState(D3DRENDERSTATE_ZFUNC, &zFunc);
+				device->GetRenderState(D3DRENDERSTATE_ALPHABLENDENABLE, &alphaBlend);
+				device->GetRenderState(D3DRENDERSTATE_SRCBLEND, &srcBlend);
+				device->GetRenderState(D3DRENDERSTATE_DESTBLEND, &dstBlend);
+				device->GetRenderState(D3DRENDERSTATE_ALPHATESTENABLE, &alphaTest);
+				device->GetRenderState(D3DRENDERSTATE_ALPHAREF, &alphaRef);
+				device->GetRenderState(D3DRENDERSTATE_ALPHAFUNC, &alphaFunc);
+				device->GetRenderState(D3DRENDERSTATE_FOGENABLE, &fogEnable);
+				device->GetRenderState(D3DRENDERSTATE_FOGCOLOR, &fogColor);
+
+				device->GetTextureStageState(0, D3DTSS_COLOROP, &colorOp);
+				device->GetTextureStageState(0, D3DTSS_COLORARG1, &colorArg1);
+				device->GetTextureStageState(0, D3DTSS_COLORARG2, &colorArg2);
+				device->GetTextureStageState(0, D3DTSS_ALPHAOP, &alphaOp);
+				device->GetTextureStageState(0, D3DTSS_ALPHAARG1, &alphaArg1);
+				device->GetTextureStageState(0, D3DTSS_ALPHAARG2, &alphaArg2);
+				device->GetTextureStageState(0, D3DTSS_ADDRESSU, &addressU);
+				device->GetTextureStageState(0, D3DTSS_ADDRESSV, &addressV);
+				device->GetTextureStageState(0, D3DTSS_MAGFILTER, &magFilter);
+				device->GetTextureStageState(0, D3DTSS_MINFILTER, &minFilter);
+				device->GetViewport(&viewport);
+			}
+
+			fprintf(
+				f,
+				" state=z:%lu zw:%lu zf:%lu ab:%lu sb:%lu db:%lu at:%lu ar:%lu af:%lu fog:%lu fogc:0x%08lX tex=co:%lu ca1:%lu ca2:%lu ao:%lu aa1:%lu aa2:%lu au:%lu av:%lu mag:%lu min:%lu viewport=%lu,%lu,%lux%lu zrange=%.4f,%.4f",
+				(unsigned long)zEnable,
+				(unsigned long)zWrite,
+				(unsigned long)zFunc,
+				(unsigned long)alphaBlend,
+				(unsigned long)srcBlend,
+				(unsigned long)dstBlend,
+				(unsigned long)alphaTest,
+				(unsigned long)alphaRef,
+				(unsigned long)alphaFunc,
+				(unsigned long)fogEnable,
+				(unsigned long)fogColor,
+				(unsigned long)colorOp,
+				(unsigned long)colorArg1,
+				(unsigned long)colorArg2,
+				(unsigned long)alphaOp,
+				(unsigned long)alphaArg1,
+				(unsigned long)alphaArg2,
+				(unsigned long)addressU,
+				(unsigned long)addressV,
+				(unsigned long)magFilter,
+				(unsigned long)minFilter,
+				(unsigned long)viewport.dwX,
+				(unsigned long)viewport.dwY,
+				(unsigned long)viewport.dwWidth,
+				(unsigned long)viewport.dwHeight,
+				viewport.dvMinZ,
+				viewport.dvMaxZ);
+
 			fputc(
 				'\n',
 				f);
