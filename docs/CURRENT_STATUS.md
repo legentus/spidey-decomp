@@ -2860,3 +2860,54 @@ Next implementation:
    - reacquire keyboard/mouse/controller on activation;
    - log WM_ACTIVATE state plus Acquire/GetDeviceData results to a dedicated input log;
 6. capture that input log in the one-click test workflow.
+
+
+## Fix batch ready: legacy frontend canvas + explicit focus reacquire — 2026-09-29
+
+Based on runtime revision:
+`ba5cff2c4e5a6271900923534eb13f7771d7162a`
+
+Implementation:
+- `9b90226fdd517136a80170ef56a468285eb44973`
+  - stops replacing the frontend's exact `640x480x16 option4=0 option5=4` request with the saved gameplay resolution;
+  - keeps the retail frontend's intended internal canvas;
+  - retains the borderless desktop-sized HWND and aspect-fit presenter;
+  - keeps modern resolution enumeration, D3D caps correction, texture hash fix, and startup saved-resolution restore;
+  - logs `frontend_legacy=1` for this exact automatic frontend request.
+- `61d0ab1813d04baf8a2f71bd7de6f0beaa8aa53b`
+  - adds explicit DirectInput application activation handling;
+  - clears keyboard/mouse/controller transition state on every focus transition;
+  - unacquires foreground devices when the app deactivates;
+  - explicitly reacquires keyboard, mouse, and controller when the app becomes active;
+  - logs activation state, Acquire HRESULTs, foreground/active/focus HWNDs;
+  - adds poll-path reacquire diagnostics for keyboard and mouse.
+- `a4d653a123412d43454ee7a3d132417b5fdf086b`
+  - exposes `DXINPUT_HandleActivation`.
+- `3cd51d4d81d85ff04b06533f99d11b53f7f294a3`
+  - handles `WM_ACTIVATEAPP` in `SpideyWndProc` and routes app focus transitions to DirectInput.
+- `e502f3b177a03a06864127350c8b9c4a3f561774`
+  - one-click test workflow now clears/captures `spidey-decomp-input.log`.
+
+Reason for frontend-canvas change:
+- the prior white/missing background problem is conclusively fixed: all formerly failing 64x64, 128x128, and 512x512 CreateTexture256 calls now complete normally;
+- the flickering unrelated building/city imagery first appeared in the build that forced the retail frontend canvas from 640x480x16 to 1280x1024x32;
+- the renderer already clears the scene each BeginScene, so this is not simply uncleared desktop memory;
+- allowing the legacy frontend canvas while scaling only at presentation is the narrowest regression test.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. verify startup movies still render;
+3. check start menu and main menu for the rapidly flashing building/city imagery;
+4. the inner frontend should now be 640x480, but the outer window must remain borderless 2560x1440 and aspect-fit;
+5. Alt+Tab out, wait briefly, Alt+Tab back;
+6. test keyboard and mouse input after return;
+7. upload full session, especially:
+   - `spidey-decomp-compat.log`;
+   - `spidey-decomp-present.log`;
+   - `spidey-decomp-texture.log`;
+   - NEW `spidey-decomp-input.log`.
+
+Expected diagnostics:
+- compat: `display_options request=640x480x16 apply=640x480x16 ... frontend_legacy=1`;
+- present: frontend scene returns to 640x480 while outer destination remains 2560x1440;
+- input: deactivate/activate pairs plus explicit DirectInput Acquire results.
