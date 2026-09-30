@@ -1141,6 +1141,365 @@ static unsigned long gSpideySelectedOutputWidth = 640;
 static unsigned long gSpideySelectedOutputHeight = 480;
 static unsigned long gSpideySelectedOutputBpp = 32;
 
+static int gSpideyAspectMode = 0;
+static const char* const gSpideyAspectLabels[] =
+{
+	"AUTO",
+	"4:3",
+	"5:4",
+	"16:9",
+	"16:10",
+	"21:9",
+	"32:9"
+};
+static char gSpideyAspectRatioMenuLabel[] =
+	"Aspect Ratio";
+static const char gSpideyModernVideoIni[] =
+	"spidey-modern-video.ini";
+
+static float SpideyGetSelectedAspectScalar()
+{
+	switch (gSpideyAspectMode)
+	{
+		case 1:
+			return 1.0f;
+		case 2:
+			return 1.06667f;
+		case 3:
+			return 0.75f;
+		case 4:
+			return 0.83333f;
+		case 5:
+			return 0.57143f;
+		case 6:
+			return 0.375f;
+		default:
+			break;
+	}
+
+	unsigned long width =
+		gSpideySelectedOutputWidth;
+	unsigned long height =
+		gSpideySelectedOutputHeight;
+
+	if (width < 1 || height < 1)
+	{
+		width =
+			(unsigned long)*(DWORD*)0x02E096F8;
+		height =
+			(unsigned long)*(DWORD*)0x02E0970C;
+	}
+
+	if (width < 1 || height < 1)
+		return 1.0f;
+
+	// This is the original PC widescreen correction used by community tools:
+	// 4:3 is 1.0; wider targets reduce the horizontal projection scalar.
+	return (4.0f * (float)height) /
+		(3.0f * (float)width);
+}
+
+static void SpideyLogAspectSetting(
+		const char* reason)
+{
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"display_aspect reason=%s mode=%d label=%s scalar=%.6f selected=%lux%lu scalar_addr=0x00550064\n",
+		reason ? reason : "unknown",
+		gSpideyAspectMode,
+		gSpideyAspectLabels[gSpideyAspectMode],
+		(double)*(float*)0x00550064,
+		gSpideySelectedOutputWidth,
+		gSpideySelectedOutputHeight);
+	fclose(f);
+}
+
+static void SpideyApplySelectedAspect(
+		const char* reason)
+{
+	if (gSpideyAspectMode < 0 ||
+		gSpideyAspectMode >=
+			(int)(sizeof(gSpideyAspectLabels) /
+				  sizeof(gSpideyAspectLabels[0])))
+	{
+		gSpideyAspectMode =
+			0;
+	}
+
+	*(float*)0x00550064 =
+		SpideyGetSelectedAspectScalar();
+
+	SpideyLogAspectSetting(
+		reason);
+}
+
+static void SpideySaveModernVideoSettings()
+{
+	char value[16];
+	sprintf(
+		value,
+		"%d",
+		gSpideyAspectMode);
+
+	WritePrivateProfileStringA(
+		"Video",
+		"AspectMode",
+		value,
+		gSpideyModernVideoIni);
+}
+
+static void SpideyLoadModernVideoSettings()
+{
+	gSpideyAspectMode =
+		GetPrivateProfileIntA(
+			"Video",
+			"AspectMode",
+			0,
+			gSpideyModernVideoIni);
+
+	if (gSpideyAspectMode < 0 ||
+		gSpideyAspectMode >=
+			(int)(sizeof(gSpideyAspectLabels) /
+				  sizeof(gSpideyAspectLabels[0])))
+	{
+		gSpideyAspectMode =
+			0;
+	}
+}
+
+static int __cdecl SpideyFormatAspectRatioValue(
+		char* dst,
+		const char*,
+		int)
+{
+	if (!dst)
+		return 0;
+
+	const char* label =
+		gSpideyAspectLabels[gSpideyAspectMode];
+
+	strcpy(
+		dst,
+		label);
+
+	return (int)strlen(label);
+}
+
+static u32 __cdecl SpideyDisplayAspectPrev(
+		u32 currentBpp)
+{
+	const int count =
+		(int)(sizeof(gSpideyAspectLabels) /
+			  sizeof(gSpideyAspectLabels[0]));
+
+	gSpideyAspectMode--;
+	if (gSpideyAspectMode < 0)
+		gSpideyAspectMode =
+			count - 1;
+
+	SpideySaveModernVideoSettings();
+	SpideyApplySelectedAspect(
+		"display_menu_prev");
+
+	// Row 1 used to return a color depth which retail writes back to the
+	// saved bpp field. Keep that field unchanged/valid while using the same
+	// left-arrow control for aspect ratio.
+	return currentBpp;
+}
+
+static u32 __cdecl SpideyDisplayAspectNext(
+		u32 currentBpp)
+{
+	const int count =
+		(int)(sizeof(gSpideyAspectLabels) /
+			  sizeof(gSpideyAspectLabels[0]));
+
+	gSpideyAspectMode++;
+	if (gSpideyAspectMode >= count)
+		gSpideyAspectMode =
+			0;
+
+	SpideySaveModernVideoSettings();
+	SpideyApplySelectedAspect(
+		"display_menu_next");
+
+	return currentBpp;
+}
+
+static int SpideyPatchDirectCall(
+		unsigned long callAddress,
+		unsigned long expectedTarget,
+		void* replacement,
+		const char* name)
+{
+	unsigned char* call =
+		(unsigned char*)callAddress;
+
+	if (!call ||
+		call[0] != 0xE8)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"display_menu_patch name=%s installed=0 reason=opcode address=0x%08lX\n",
+				name ? name : "unknown",
+				callAddress);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	long oldRel =
+		*(long*)(call + 1);
+	unsigned long oldTarget =
+		(unsigned long)(call + 5 + oldRel);
+
+	if (oldTarget != expectedTarget)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"display_menu_patch name=%s installed=0 reason=target address=0x%08lX expected=0x%08lX actual=0x%08lX\n",
+				name ? name : "unknown",
+				callAddress,
+				expectedTarget,
+				oldTarget);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	DWORD oldProtect =
+		0;
+	if (!VirtualProtect(
+			call,
+			5,
+			PAGE_EXECUTE_READWRITE,
+			&oldProtect))
+	{
+		return 0;
+	}
+
+	*(long*)(call + 1) =
+		(long)(
+			(unsigned char*)replacement -
+			(call + 5));
+
+	DWORD ignoredProtect =
+		0;
+	VirtualProtect(
+		call,
+		5,
+		oldProtect,
+		&ignoredProtect);
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		call,
+		5);
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_menu_patch name=%s installed=1 address=0x%08lX retail=0x%08lX wrapper=0x%08lX\n",
+			name ? name : "unknown",
+			callAddress,
+			expectedTarget,
+			(unsigned long)replacement);
+		fclose(f);
+	}
+
+	return 1;
+}
+
+static void SpideyInstallDisplayAspectCompat()
+{
+	SpideyLoadModernVideoSettings();
+
+	int labelInstalled =
+		0;
+
+	const char** rowOneLabel =
+		(const char**)0x0054BBD4;
+
+	DWORD oldProtect =
+		0;
+	if (VirtualProtect(
+			rowOneLabel,
+			sizeof(*rowOneLabel),
+			PAGE_READWRITE,
+			&oldProtect))
+	{
+		*rowOneLabel =
+			gSpideyAspectRatioMenuLabel;
+
+		DWORD ignoredProtect =
+			0;
+		VirtualProtect(
+			rowOneLabel,
+			sizeof(*rowOneLabel),
+			oldProtect,
+			&ignoredProtect);
+
+		labelInstalled =
+			1;
+	}
+
+	const int formatInstalled =
+		SpideyPatchDirectCall(
+			0x0050DBBB,
+			0x00529F90,
+			(void*)&SpideyFormatAspectRatioValue,
+			"aspect_format");
+
+	const int prevInstalled =
+		SpideyPatchDirectCall(
+			0x0050DDAB,
+			0x005010C0,
+			(void*)&SpideyDisplayAspectPrev,
+			"aspect_prev");
+
+	const int nextInstalled =
+		SpideyPatchDirectCall(
+			0x0050DDCE,
+			0x00501060,
+			(void*)&SpideyDisplayAspectNext,
+			"aspect_next");
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_menu_mod retail=0x0050D9B0 row1=Aspect_Ratio label=%d format=%d prev=%d next=%d modes=7\n",
+			labelInstalled,
+			formatInstalled,
+			prevInstalled,
+			nextInstalled);
+		fclose(f);
+	}
+}
+
 static void SpideyRestoreSavedRenderResolution()
 {
 	DWORD requestedWidth =
