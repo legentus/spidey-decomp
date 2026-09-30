@@ -104,6 +104,7 @@
 #include "dcfileio.h"
 #include "PCMovie.h"
 #include "flash.h"
+#include "renderer11_legacy_bridge.h"
 
 
 #include "my_patch.h"
@@ -1420,12 +1421,31 @@ typedef int (__cdecl *SpideyRenderer11PresentHdcFn)(
 		unsigned long,
 		int,
 		int);
+typedef int (__cdecl *SpideyRenderer11UpdateTextureFn)(
+		unsigned long,
+		const void*,
+		unsigned long,
+		unsigned long,
+		long,
+		unsigned long,
+		unsigned long,
+		unsigned long,
+		unsigned long,
+		unsigned long);
+typedef void (__cdecl *SpideyRenderer11ReleaseTextureFn)(
+		unsigned long);
+typedef void (__cdecl *SpideyRenderer11ReleaseAllTexturesFn)(void);
+typedef unsigned long (__cdecl *SpideyRenderer11GetResidentTextureCountFn)(void);
 typedef void (__cdecl *SpideyRenderer11ShutdownFn)(void);
 
 static SpideyRenderer11InitializeFn gSpideyRenderer11Initialize = 0;
 static SpideyRenderer11ResizeFn gSpideyRenderer11Resize = 0;
 static SpideyRenderer11PresentPixelsFn gSpideyRenderer11PresentPixels = 0;
 static SpideyRenderer11PresentHdcFn gSpideyRenderer11PresentHdc = 0;
+static SpideyRenderer11UpdateTextureFn gSpideyRenderer11UpdateTexture = 0;
+static SpideyRenderer11ReleaseTextureFn gSpideyRenderer11ReleaseTexture = 0;
+static SpideyRenderer11ReleaseAllTexturesFn gSpideyRenderer11ReleaseAllTextures = 0;
+static SpideyRenderer11GetResidentTextureCountFn gSpideyRenderer11GetResidentTextureCount = 0;
 static SpideyRenderer11ShutdownFn gSpideyRenderer11Shutdown = 0;
 static int gSpideyRenderer11BridgeReady = 0;
 static int gSpideyRenderer11Initialized = 0;
@@ -1496,6 +1516,26 @@ static int SpideyProbeRenderer11Bridge()
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_PresentHdc");
 
+	gSpideyRenderer11UpdateTexture =
+		(SpideyRenderer11UpdateTextureFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_UpdateTexture");
+
+	gSpideyRenderer11ReleaseTexture =
+		(SpideyRenderer11ReleaseTextureFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_ReleaseTexture");
+
+	gSpideyRenderer11ReleaseAllTextures =
+		(SpideyRenderer11ReleaseAllTexturesFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_ReleaseAllTextures");
+
+	gSpideyRenderer11GetResidentTextureCount =
+		(SpideyRenderer11GetResidentTextureCountFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_GetResidentTextureCount");
+
 	gSpideyRenderer11Shutdown =
 		(SpideyRenderer11ShutdownFn)GetProcAddress(
 			gSpideyRenderer11Module,
@@ -1508,13 +1548,17 @@ static int SpideyProbeRenderer11Bridge()
 		!gSpideyRenderer11Resize ||
 		!gSpideyRenderer11PresentPixels ||
 		!gSpideyRenderer11PresentHdc ||
+		!gSpideyRenderer11UpdateTexture ||
+		!gSpideyRenderer11ReleaseTexture ||
+		!gSpideyRenderer11ReleaseAllTextures ||
+		!gSpideyRenderer11GetResidentTextureCount ||
 		!gSpideyRenderer11Shutdown)
 	{
 		if (f)
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX shutdown=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
 				(unsigned long)probe,
@@ -1522,6 +1566,10 @@ static int SpideyProbeRenderer11Bridge()
 				(unsigned long)gSpideyRenderer11Resize,
 				(unsigned long)gSpideyRenderer11PresentPixels,
 				(unsigned long)gSpideyRenderer11PresentHdc,
+				(unsigned long)gSpideyRenderer11UpdateTexture,
+				(unsigned long)gSpideyRenderer11ReleaseTexture,
+				(unsigned long)gSpideyRenderer11ReleaseAllTextures,
+				(unsigned long)gSpideyRenderer11GetResidentTextureCount,
 				(unsigned long)gSpideyRenderer11Shutdown);
 			fclose(f);
 		}
@@ -1536,14 +1584,14 @@ static int SpideyProbeRenderer11Bridge()
 		probe();
 
 	gSpideyRenderer11BridgeReady =
-		abi == 3 &&
+		abi == 4 &&
 		probeResult != 0;
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=3 backend=%s probe=%d phase2_exports=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=4 backend=%s probe=%d phase2b_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
@@ -1657,6 +1705,149 @@ static int SpideyEnsureRenderer11Presentation(
 	return 1;
 }
 
+int SpideyRenderer11MirrorLegacyTexture(
+		unsigned long textureId,
+		void* legacySurface)
+{
+	if (!gSpideyRenderer11BridgeReady ||
+		!gSpideyRenderer11Initialized ||
+		!gSpideyRenderer11UpdateTexture ||
+		!legacySurface)
+	{
+		return 0;
+	}
+
+	LPDIRECTDRAWSURFACE7 surface =
+		(LPDIRECTDRAWSURFACE7)legacySurface;
+
+	DDSURFACEDESC2 desc;
+	memset(
+		&desc,
+		0,
+		sizeof(desc));
+	desc.dwSize =
+		sizeof(desc);
+
+	HRESULT lockHr =
+		surface->Lock(
+			0,
+			&desc,
+			DDLOCK_WAIT | DDLOCK_READONLY,
+			0);
+	int lockRetry =
+		0;
+
+	if (FAILED(lockHr))
+	{
+		memset(
+			&desc,
+			0,
+			sizeof(desc));
+		desc.dwSize =
+			sizeof(desc);
+
+		lockHr =
+			surface->Lock(
+				0,
+				&desc,
+				DDLOCK_WAIT,
+				0);
+		lockRetry =
+			SUCCEEDED(lockHr) ? 1 : 0;
+	}
+
+	if (FAILED(lockHr) ||
+		!desc.lpSurface ||
+		!desc.dwWidth ||
+		!desc.dwHeight ||
+		!desc.ddpfPixelFormat.dwRGBBitCount)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"dx11_mirror id=%lu result=0 lock_hr=0x%08lX ptr=0x%08lX size=%lux%lu bpp=%lu retry=%d\n",
+				textureId,
+				(unsigned long)lockHr,
+				(unsigned long)desc.lpSurface,
+				(unsigned long)desc.dwWidth,
+				(unsigned long)desc.dwHeight,
+				(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+				lockRetry);
+			fclose(f);
+		}
+
+		if (SUCCEEDED(lockHr))
+			surface->Unlock(0);
+
+		return 0;
+	}
+
+	int mirrored =
+		gSpideyRenderer11UpdateTexture(
+			textureId,
+			desc.lpSurface,
+			(unsigned long)desc.dwWidth,
+			(unsigned long)desc.dwHeight,
+			(long)desc.lPitch,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+			(unsigned long)desc.ddpfPixelFormat.dwRBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwGBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwBBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBAlphaBitMask);
+
+	surface->Unlock(0);
+
+	FILE* f = fopen(
+		"spidey-decomp-texture.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"dx11_mirror id=%lu result=%d size=%lux%lu pitch=%ld bpp=%lu masks=%08lX,%08lX,%08lX,%08lX retry=%d resident=%lu\n",
+			textureId,
+			mirrored,
+			(unsigned long)desc.dwWidth,
+			(unsigned long)desc.dwHeight,
+			(long)desc.lPitch,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+			(unsigned long)desc.ddpfPixelFormat.dwRBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwGBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwBBitMask,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBAlphaBitMask,
+			lockRetry,
+			SpideyRenderer11GetMirroredTextureCount());
+		fclose(f);
+	}
+
+	return mirrored;
+}
+
+void SpideyRenderer11ReleaseMirroredTexture(
+		unsigned long textureId)
+{
+	if (gSpideyRenderer11ReleaseTexture)
+		gSpideyRenderer11ReleaseTexture(textureId);
+}
+
+void SpideyRenderer11ReleaseAllMirroredTextures(void)
+{
+	if (gSpideyRenderer11ReleaseAllTextures)
+		gSpideyRenderer11ReleaseAllTextures();
+}
+
+unsigned long SpideyRenderer11GetMirroredTextureCount(void)
+{
+	if (!gSpideyRenderer11GetResidentTextureCount)
+		return 0;
+
+	return gSpideyRenderer11GetResidentTextureCount();
+}
+
 typedef void (__cdecl *SpideyRetailDXINITFn)(
 		HWND,
 		HINSTANCE,
@@ -1684,6 +1875,42 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 
 	SpideyInjectModernVideoModes();
 	SpideyKeepBorderlessMonitorWindow(hwnd);
+
+	// Phase 2B needs the DX11 device alive before PCTex starts creating game
+	// textures. Initialize the modern swap chain immediately after the retail
+	// DirectDraw/D3D7 init completes instead of waiting for the first Flip.
+	RECT clientRect;
+	if (GetClientRect(hwnd, &clientRect))
+	{
+		unsigned long width =
+			(unsigned long)(clientRect.right - clientRect.left);
+		unsigned long height =
+			(unsigned long)(clientRect.bottom - clientRect.top);
+
+		if (width && height)
+		{
+			int earlyReady =
+				SpideyEnsureRenderer11Presentation(
+					hwnd,
+					width,
+					height);
+
+			FILE* f = fopen(
+				"spidey-decomp-compat.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"renderer11_phase2b early_initialize hwnd=0x%08lX size=%lux%lu result=%d\n",
+					(unsigned long)hwnd,
+					width,
+					height,
+					earlyReady);
+				fclose(f);
+			}
+		}
+	}
 }
 
 static void SpideyInstallWindowedDirectDrawCompat()
