@@ -5012,3 +5012,13 @@ Recommended long-term camera split:
 3. retail scripted/boss/cutscene state can temporarily claim camera ownership;
 4. on return to ordinary gameplay, modern camera resumes without being forced behind Spider-Man;
 5. legacy collision/lookaround code may be reused selectively or replaced entirely based on feel/testing.
+
+
+#### Phase 3E static scene-dependency audit
+
+Additional static checks before runtime F9 use:
+- `PCMovie.cpp` copies decoded movie frames into `g_pDDS_Scene` with DirectDraw `Blt`; F9 only intercepts D3D7 `DrawPrimitive`, so the movie copy is outside the suppression scope;
+- retained retail `DXPOLY_SaveScreen @ 0x005033E0` was disassembled from the original function bytes and references the primary surface `0x006B7904`, not the scene surface `0x006B7908`;
+- D3D7 offscreen render-target draws are never suppressed.
+
+This does not prove there are no obscure same-frame scene-surface consumers, but it removes two obvious risks and keeps the trial reversible/fail-closed. Runtime F9 testing remains the authority before making D3D7 main-scene suppression permanent.
