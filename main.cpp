@@ -1120,6 +1120,169 @@ static void SpideyRestoreSavedRenderResolution()
 	}
 }
 
+typedef void (__cdecl *SpideyRetailSetDisplayOptionsFn)(
+		u32,
+		u32,
+		u32,
+		i32,
+		i32);
+
+static void __cdecl SpideyCompatSetDisplayOptions(
+		u32 width,
+		u32 height,
+		u32 bpp,
+		i32 option4,
+		i32 option5)
+{
+	const u32 requestedWidth =
+		width;
+	const u32 requestedHeight =
+		height;
+	const u32 requestedBpp =
+		bpp;
+
+	u32 savedWidth =
+		*(DWORD*)0x02E096F8;
+	u32 savedHeight =
+		*(DWORD*)0x02E0970C;
+	u32 savedBpp =
+		*(DWORD*)0x02E098E4;
+
+	const int savedValid =
+		savedWidth >= 512 &&
+		savedWidth <= 8192 &&
+		savedHeight >= 384 &&
+		savedHeight <= 8192;
+
+	if (savedBpp != 16 &&
+		savedBpp != 24 &&
+		savedBpp != 32)
+	{
+		savedBpp =
+			32;
+	}
+
+	int preservedSaved =
+		0;
+
+	// The retail frontend resets the display to its legacy 640x480x16
+	// baseline after the startup movies. In the windowed compatibility path,
+	// preserve the user's saved render mode for that one legacy reset while
+	// leaving genuine non-640x480 display-option requests untouched.
+	if (*(DWORD*)0x006B78F4 &&
+		width == 640 &&
+		height == 480 &&
+		bpp == 16 &&
+		savedValid &&
+		(savedWidth != 640 ||
+		 savedHeight != 480 ||
+		 savedBpp != 16))
+	{
+		width =
+			savedWidth;
+		height =
+			savedHeight;
+		bpp =
+			savedBpp;
+		preservedSaved =
+			1;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_options request=%lux%lux%lu apply=%lux%lux%lu option4=%d option5=%d preserve_saved=%d\n",
+			(unsigned long)requestedWidth,
+			(unsigned long)requestedHeight,
+			(unsigned long)requestedBpp,
+			(unsigned long)width,
+			(unsigned long)height,
+			(unsigned long)bpp,
+			option4,
+			option5,
+			preservedSaved);
+		fclose(f);
+	}
+
+	SpideyRetailSetDisplayOptionsFn retail =
+		(SpideyRetailSetDisplayOptionsFn)0x00500250;
+
+	retail(
+		width,
+		height,
+		bpp,
+		option4,
+		option5);
+
+	SpideyInjectModernVideoModes();
+	SpideyKeepBorderlessMonitorWindow(
+		*(HWND*)0x006B58D0);
+}
+
+static void SpideyInstallDisplayOptionsCompat()
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	const unsigned long retailSetDisplayOptions =
+		0x00500250;
+
+	int patched =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long rel =
+			*(long*)(p + 1);
+
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != retailSetDisplayOptions)
+			continue;
+
+		long newRel =
+			(long)(
+				(unsigned char*)&SpideyCompatSetDisplayOptions -
+				(p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+
+		patched++;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_options_compat patched_calls=%d retail=0x00500250 wrapper=0x%08lX\n",
+			patched,
+			(unsigned long)&SpideyCompatSetDisplayOptions);
+		fclose(f);
+	}
+}
+
 typedef void (__cdecl *SpideyRetailDXINITFn)(
 		HWND,
 		HINSTANCE,
