@@ -1,71 +1,71 @@
-# Spider-Man 2000 PC Decomp / Modernization — NEW CHAT HANDOFF
+# Spider-Man 2000 PC Modernization / Decomp — NEW CHAT HANDOFF
 
-Date: 2026-09-30  
-Active repository: https://github.com/legentus/spidey-decomp  
-Active branch: `dev`  
-Upstream: https://github.com/krystalgamer/spidey-decomp  
-Tools upstream: https://github.com/krystalgamer/spidey-tools  
+Date: 2026-09-30
+Active repository: https://github.com/legentus/spidey-decomp
+Active branch: `dev`
+Upstream baseline: https://github.com/krystalgamer/spidey-decomp
+Tools upstream: https://github.com/krystalgamer/spidey-tools
 User orchestration repo: https://github.com/legentus/Spiderman-2000
 Retail Google Drive source: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
 
 ## READ THIS FIRST
 
-Do **not** restart the investigation.
+Do **not** restart the investigation from old chat history.
+
+The live GitHub `dev` branch and `docs/CURRENT_STATUS.md` are authoritative.
 
 Before changing code:
 1. Read this file.
-2. Read `docs/CURRENT_STATUS.md` completely, starting from the newest entries at the bottom.
-3. Confirm the current `dev` head.
-4. Treat the repository, not chat memory, as authoritative for the current source.
-5. Preserve the user's disconnect-safe workflow: update `docs/CURRENT_STATUS.md` **during** substantial work after important findings, failed hypotheses, code changes, and before asking for a runtime test. Do not wait until the end of the chat.
+2. Read `docs/CURRENT_STATUS.md` from the newest entries at the bottom upward.
+3. Read `docs/DX11_MIGRATION.md`.
+4. Confirm the current `dev` HEAD.
+5. Preserve the disconnect-safe workflow: update `docs/CURRENT_STATUS.md` during work, not only at the end.
+6. Do not ask the user to repeat logs/tests that are already documented or included in the handoff.
 
-The user will normally send **all logs from every test**. Treat the complete log set as standard input.
+The project has now pivoted from long-term DirectDraw7/Direct3D7 patching to an incremental **Direct3D 11 renderer migration**. The old D3D7 renderer remains a temporary reference/fallback only.
 
-## MANDATORY WORK STYLE
+## USER WORK STYLE — MANDATORY
 
-- Never fabricate reverse-engineering state, offsets, bytes, signatures, or call conventions.
-- Verify retail/source behavior before patching.
-- Use exact-byte guards for retail instruction patches when possible.
-- Do static verification before asking the user to test.
-- Ask for an in-game test only when it will resolve a real runtime uncertainty.
-- Keep `master` clean/upstream-oriented; active development is on `dev`.
-- Use GitHub connector writes for repo updates.
-- The user's normal UI is BAT-first. Do not make manual PowerShell the everyday workflow.
-- Never promise background work.
-- Retail game binaries/assets do not belong in Git.
-- The user's executable can be debugged for compatibility, but do not create or distribute DRM bypasses.
+- Make concrete progress without repeatedly asking for clarification when the repo/logs already answer the question.
+- Never fabricate addresses, calling conventions, machine-code behavior, or runtime state.
+- Verify retail behavior before patching.
+- Use exact-byte guards or bounded verified call-site scans for retail patches when possible.
+- Static-check changes before asking for a runtime test.
+- Runtime tests should answer a real uncertainty.
+- Live-update `docs/CURRENT_STATUS.md` after important findings, failed hypotheses, or implementation steps.
+- Commit/push `dev` every few meaningful changes so an input-stream failure cannot erase work.
+- Keep `master` clean/upstream-oriented.
+- BAT-first user workflow; do not require manual PowerShell as the normal path.
+- Do not commit retail game binaries/assets.
+- When a chat disconnects, inspect live `dev` + `CURRENT_STATUS.md` first and continue from the real frontier.
 
-## USER / LOCAL WORKFLOW
+## USER LOCAL PATHS
 
-Local project:
+Project:
 `F:\Spider-Man 2000 Recomp\project main`
 
-Game:
+Retail game:
 `C:\Program Files (x86)\Activision\Spider-Man`
 
-Matching VS toolchain:
+Preserved matching toolchain:
 `C:\Users\alh60\AppData\Local\Spidey2000Dev\MatchingVS`
 
-Normal test:
-```bat
-UPDATE_SPIDEY_PROJECT.bat
-TEST_LATEST_BUILD.bat
-```
+Normal one-click workflow:
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
 
-The test script:
-- force-cleans the matching VS6-style build;
-- installs rebuilt `Release\spider.dll` as game `binkw32.dll`;
-- preserves retail Bink as `binkw32_.dll`;
-- fingerprints `SpideyPC.exe`;
-- launches the game;
-- collects logs into the timestamped project `logs` folder.
+That BAT:
+1. updates the project from GitHub `dev`;
+2. force-cleans/builds the legacy matching proxy;
+3. builds the modern x86 DX11 helper;
+4. installs both DLLs into the game folder;
+5. launches the game;
+6. captures the full test-session logs.
 
-## EXACT GAME EXE FINGERPRINT
+## EXACT RETAIL EXE FINGERPRINT
 
-Current and repeatedly verified:
+Repeatedly verified:
 
 ```text
-path=C:\Program Files (x86)\Activision\Spider-Man\SpideyPC.exe
 sha256=D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C
 file_size=1507328
 machine=0x014C
@@ -80,310 +80,438 @@ characteristics=0x010F
 .rsrc va=0x02A0C000 vsize=0x00000DE8 raw=0x0016F000 rawsize=0x00001000
 ```
 
-## PROXY ARCHITECTURE
+## CURRENT ARCHITECTURE
 
-The project is not yet a standalone replacement EXE.
+The game is still retail-hosted, not a standalone replacement EXE.
 
-Current Windows architecture:
+Legacy path:
 1. retail `SpideyPC.exe` loads `binkw32.dll`;
 2. rebuilt `spider.dll` is installed as proxy `binkw32.dll`;
-3. retail Bink is preserved as `binkw32_.dll`;
+3. original RAD Bink remains as `binkw32_.dll`;
 4. proxy forwards Bink exports;
-5. proxy patches selected retail functions to reconstructed C++.
+5. proxy patches verified retail functions/call sites into reconstructed code.
 
-This lets us incrementally replace/fix code while the retail executable remains the host.
+New DX11 path:
+- `spidey_renderer11.dll` is a separate modern x86 DLL;
+- built with VS 2022 / current Windows SDK;
+- legacy proxy loads it dynamically with `LoadLibraryA/GetProcAddress`;
+- communication is a versioned C ABI;
+- modern D3D11/DXGI headers do **not** enter the VC6 matching build.
 
-## CURRENT DEV FRONTIER
+## CURRENT SOURCE FRONTIER
 
-Presentation-probe implementation:
-- `6db8ea90d2e6ebe27aa61a5eeaccdc890674915f`
-  - `diag: trace and correct windowed DirectDraw presentation`
+Source frontier immediately before this handoff-document refresh:
+`0fbc7b6a90c630ff8070fd6a9ed9ba14f0c101f0`
+— `docs: checkpoint Direct3D 11 Phase 0 scaffold`
 
-Presentation-log collection:
-- `938229983c79c8d91436f54c9d07a13b90bd3ef8`
+The handoff-document update itself may advance HEAD without changing runtime behavior.
 
-Latest evidence/status checkpoint immediately before this handoff:
-- `54b57daa9576ac7b41131441cdd599be68628dc7`
-  - `docs: isolate black screen to legacy DirectDraw presentation`
+### DX11 Phase 0 is IMPLEMENTED, awaiting first runtime validation
 
-The branch head will advance when this handoff document itself is committed. No runtime code is changed by the handoff commit.
+Implemented files:
+- `renderer11/include/spidey_renderer11_api.h`
+- `renderer11/src/spidey_renderer11.cpp`
+- `renderer11/CMakeLists.txt`
+- `renderer11/spidey_renderer11.def`
+- `scripts/build_renderer11.ps1`
+- `docs/DX11_MIGRATION.md`
 
-## CURRENT USER-VISIBLE BEHAVIOR
+Stable ABI version:
+`SPIDEY_RENDERER11_ABI_VERSION = 1`
 
-Latest user report:
-- visible game window is a black box;
-- **audio works**;
-- input works;
-- user can press Start and hear/enter the main menu state;
-- no crash is required for the black condition;
-- game logic continues underneath the black window.
+Exports:
+- `SpideyRenderer11_GetAbiVersion`
+- `SpideyRenderer11_GetBackendName`
+- `SpideyRenderer11_Probe`
+- `SpideyRenderer11_Initialize`
+- `SpideyRenderer11_Resize`
+- `SpideyRenderer11_BeginFrame`
+- `SpideyRenderer11_Present`
+- `SpideyRenderer11_Shutdown`
 
-This is **not currently a general startup failure**.
+Modern backend already contains:
+- D3D11 hardware device probe;
+- D3D11 device/immediate context;
+- DXGI swap chain;
+- RGBA8 RTV;
+- D24S8 depth buffer;
+- viewport setup;
+- resize;
+- clear/present;
+- adapter + feature-level logging to `spidey-renderer11.log`.
 
-## WINDOWED DIRECTDRAW COMPATIBILITY — KEEP THIS
-
-Original exclusive fullscreen path failed at:
-`IDirectDraw7::SetDisplayMode`
-
-Original HRESULT:
-`0x80004001` = `E_NOTIMPL` / `DDERR_UNSUPPORTED`
-
-Forcing 32 bpp still produced the exact same error, so 16-bit color was ruled out.
-
-Current compatibility patch changes the retail `DXINIT_DirectX8` third argument from `2` to `3`, enabling the game's own built-in windowed DirectDraw branch while preserving the existing bit.
-
-Verified caller:
-- push site `0x00515BA9`
-- call site `0x00515BAD`
-- target `DXINIT_DirectX8 = 0x004FDE90`
-
-Do **not** go back to testing 16-vs-32-bpp SetDisplayMode unless genuinely new evidence appears.
-
-## CURRENT BLACK-SCREEN FINDING — MOST IMPORTANT SECTION
-
-The renderer is producing real, changing pixels.
-
-Retail presentation path:
-- `DXPOLY_EndScene = 0x00502A40`
-- retail `DXPOLY_Flip = 0x00502990`
-- exact call site from EndScene to Flip = `0x00502D41`
-- original call bytes = `E8 4A FC FF FF`
-
-The presentation probe hooks only that call site and then invokes untouched retail `DXPOLY_Flip`.
-
-Latest presentation log proves:
-
-### Window
-- valid HWND
-- windowed flag active
-- stored DirectDraw destination rect = `0,0,640,480`
-- actual client rect in screen coordinates = `0,0,640,480`
-- therefore stale `gRect` is **ruled out**
-
-### Offscreen scene surface
-- valid
-- 640x480
-- 32 bpp
-- not lost
-- GetDC succeeds
-- 3x3 sample grid: all 9 samples non-black
-- sample hash initially `0x7E0B5BDA`
-- by frames 360/480 it changes to `0x3B302417`
-
-The changing hash is direct evidence that the game is rendering changing visible content into the scene surface.
-
-### Primary DirectDraw surface
-- valid
-- desktop-sized 1920x1080
-- 32 bpp
-- not lost
-- GetDC succeeds
-- sampled values are non-black
-- sample hash stays frozen at `0x3565BD06` from frame 1 through frame 480
-
-### Interpretation
-
-The game renderer itself is **not black**.
-
-The game logic/input/audio all function.
-
-The offscreen scene changes while the DirectDraw primary-surface sample remains frozen and the user-visible HWND stays black.
-
-The active bug is therefore isolated to **legacy DirectDraw presentation / modern Windows composition after the offscreen render target**.
-
-Do not patch gameplay, textures, D3D scene generation, audio, or input to solve the black screen.
+Legacy bridge currently:
+- loads `spidey_renderer11.dll`;
+- verifies ABI 1;
+- calls the DX11 hardware probe;
+- logs backend/probe state;
+- **does not switch visible rendering yet**.
 
 ## EXACT NEXT ACTION
 
-Implement a narrow **direct-to-HWND compatibility presentation probe**.
+The next user action is a Phase 0 plumbing/probe test:
 
-Preferred first experiment:
-
-1. Leave all retail rendering into the offscreen scene surface unchanged.
-2. Leave the existing windowed DirectDraw setup in place.
-3. In the current presentation wrapper, after retail `DXPOLY_Flip`, directly present the already-rendered scene to the actual HWND.
-4. First try a minimal GDI path:
-   - `sceneSurface->GetDC(&sceneDC)`
-   - `GetDC(hwnd)`
-   - `BitBlt(windowDC, 0, 0, clientWidth, clientHeight, sceneDC, 0, 0, SRCCOPY)`
-   - release both DCs.
-5. Guard/log HRESULT/API failures and do not alter scene rendering.
-6. If cross-DC `BitBlt` is unsupported or still invisible, use the more deterministic fallback:
-   - Lock/read the 32-bpp scene surface;
-   - respect `lPitch`;
-   - present to HWND with `StretchDIBits` and a top-down 32-bpp `BITMAPINFO`.
-7. Treat this initially as a diagnostic compatibility presenter, not a renderer rewrite.
-
-Expected result:
-- if the image appears, the diagnosis is confirmed: modern Windows/DWM is not exposing the legacy DirectDraw primary-surface presentation correctly;
-- then keep/refine the direct HWND presenter as the modern compatibility path.
-
-**Do not spend another runtime cycle on SetDisplayMode, bpp, scene-black hypotheses, stale gRect, or surface-loss checks before trying the direct HWND presenter.**
-
-## LAST KNOWN VISIBLE / PLAYABLE HISTORICAL BASELINE
-
-Revision:
-`35e73ed3c4ca8c06b581df83f0f0913f0c915982`
-
-In two user sessions at this revision:
-- game had visible output;
-- user reached first level;
-- user controlled Spider-Man;
-- user quit back to main menu;
-- entering Options crashed at retail `0x0043EB29`.
-
-The exact same source was later restored, but the user-visible output still became black. That is one reason the current issue is treated as presentation/environment compatibility rather than ordinary source regression.
-
-## OPTIONS CRASH — PARKED UNTIL VIDEO IS VISIBLE
-
-Two independent crashes:
-- `0x0043EB29`
-- maps to retail `Font::height(char*) + 0x39`
-
-The reconstructed wrapper called the retail C++ instance method like a free function and did not correctly pass `this` in ECX.
-
-A better fix was prepared using the same FASTCALL trampoline pattern as `Font::width`:
-```cpp
-typedef i32 (FASTCALL *func_ptr)(Font*, void*, char*);
-func_ptr func = (func_ptr)0x0043EAF0;
-return func(this, 0, txt);
+```bat
+UPDATE_AND_TEST_LATEST_BUILD.bat
 ```
 
-Historical commit containing that isolated fix:
-`b8bc0957721c29499737741f1fd9c31740e7cf49`
+This is **not** expected to visually render through DX11 yet.
 
-It is **not active now** because the project was restored to the pure playable runtime while isolating the black screen.
+Expected successful behavior:
+- game still boots/renders using the known-good D3D7 compatibility path;
+- the working Alt+Tab input recovery remains working;
+- old building/city flashing remains gone;
+- whole-screen black flash remains gone;
+- `spidey-decomp-compat.log` contains something equivalent to:
+  `renderer11_bridge loaded ... abi=1 expected=1 backend=Direct3D 11 probe=1`
+- `spidey-renderer11.log` exists and records a successful hardware probe / D3D feature level;
+- test-session metadata contains `renderer11_sha256=...`.
 
-Once video is visible again, reintroduce/test this fix independently.
+User should upload the full test session after running it.
 
-## AUDIO — CURRENTLY WORKING; DO NOT RE-DIAGNOSE NOW
+### If Phase 0 passes
 
-The user initially reported no audio in experimental builds.
+Proceed to **Phase 1: DX11 owns final presentation**.
 
-Later diagnostics proved:
-- retail DirectSound device existed;
-- primary DirectSound buffer existed;
-- `SFX_Init` loaded 42 buffers;
-- menu/level spool reached 44 buffers.
+Phase 1 goal:
+- keep legacy D3D7 scene rendering initially;
+- initialize DX11 swap chain at physical client/output dimensions;
+- transfer/copy the completed D3D7 scene into a DX11 texture/staging/upload path;
+- present exclusively with DXGI;
+- remove the GDI `BitBlt/StretchBlt` compatibility presenter.
 
-After restoring the pure baseline, the user reported **sound is audible again**.
+Do not jump directly to full fixed-function 3D emulation before Phase 1 presentation parity works.
 
-Therefore audio is not the current blocker.
+## WHY THE PROJECT PIVOTED TO DX11
 
-Historical audio diagnostic commit:
-`7d42a06b1c70f8c706748926a8bfb3f5754d68ff`
+The old renderer became the dominant modernization blocker.
 
-Do not reactivate audio wrappers while fixing the black window.
+Proven D3D7 limitation:
+- a 2560x1440 DirectDraw scene surface can be created;
+- `IDirect3D7::CreateDevice` then rejects that surface with
+  `0x88760082 = DDERR_INVALIDOBJECT`;
+- this happens before the first splash frame if 2560x1440 is persisted and restored at boot.
 
-## CONTROLLER / XBOX SUPPORT — REQUIRED FUTURE FEATURE, CURRENTLY PARKED
+Two-session 1440p evidence:
+1. Boot below 1440p, enter frontend, select/save 2560x1440:
+   - game stays alive;
+   - frontend remains internally 640x480;
+   - saved setting changes to 2560x1440;
+   - **this did not prove live 2560x1440 rendering**.
+2. Next launch with 2560x1440 persisted:
+   - startup restores 2560x1440;
+   - D3D7 `CreateDevice` fails before any splash;
+   - cleanup guard prevents the old secondary null dereference.
 
-User explicitly requires:
-- full modern controller support;
-- Xbox/XInput behavior;
-- analog support;
+Therefore:
+- 2560x1440 has never actually rendered live through the D3D7 path;
+- continuing to fight D3D7 for modern resolution support was judged worse than migrating the renderer.
+
+## CURRENT D3D7 SAFETY DURING DX11 MIGRATION
+
+While DX11 is only Phase 0/probe:
+- exact 2560x1440 is quarantined from the legacy D3D7 mode table;
+- persisted 2560x1440 is recovered to the last verified safe `1440x1080x32`;
+- this prevents another pre-splash D3D7 crash;
+- native 2560x1440 is intended to return through DXGI once DX11 owns presentation/rendering.
+
+Do not remove that safety until DX11 presentation owns the output.
+
+## RECENT PROVEN FIXES — DO NOT REGRESS
+
+### 1. Alt+Tab input loss — FIXED
+
+Retail input routines were mapped exactly:
+- `DXINPUT_Initialize = 0x005013D0`
+- `DXINPUT_Release = 0x00501440`
+- `DXINPUT_SetupKeyboard = 0x00501590`
+- `DXINPUT_SetupMouse = 0x00501710`
+- `DXINPUT_PollKeyboard = 0x00501B80`
+- `DXINPUT_PollMouse = 0x00501CC0`
+- `DXINPUT_PollController = 0x00501E50`
+
+Retail globals:
+- DirectInput object `0x006B7A30`
+- input HWND `0x006B7A60`
+- keyboard device `0x006B7A5C`
+- mouse device `0x006B7A64`
+- controller device `0x006B7A2C`
+- keyboard state `0x006B792C`
+- mouse state `0x006B7A54`
+- controller state `0x006B7A34`
+
+Fix:
+- direct retail callers of PollKeyboard/PollMouse are wrapped;
+- real retail devices are explicitly Unacquired in background and Acquired on foreground return;
+- user verified Alt+Tab out/back no longer kills controls.
+
+Important commit:
+`92f0d4add60dfdd6c7a9b50decc6b35a8bf01507`
+
+### 2. Rapid flashing building/city images in menus — FIXED
+
+Root cause:
+- two presentation paths were painting the same HWND:
+  1. retail DirectDraw Flip/Blt into legacy primary;
+  2. compatibility GDI scene->HWND presenter.
+
+Legacy primary and physical client were different sizes, creating visible stale/foreign frames.
+
+Fix:
+- windowed compatibility mode uses one presenter only;
+- retail Flip remains untouched only for original non-windowed behavior;
+- user confirmed the flashing building/city imagery disappeared.
+
+Same major commit:
+`92f0d4add60dfdd6c7a9b50decc6b35a8bf01507`
+
+### 3. Whole-screen black flashing — FIXED
+
+Root cause:
+- aspect-fit presenter cleared the entire HWND black before every StretchBlt;
+- DWM/GDI could expose the clear as a transient full-black frame.
+
+Fix:
+- clear only the actual pillarbox/letterbox bars;
+- user reported the whole-screen flash was gone.
+
+Commit:
+`543b456f90495cdb8123b5437d8c1e039f832bde`
+
+### 4. White/missing menu art / absurd texture dimensions — FIXED
+
+Root cause:
+- reconstructed PCTex D3D device caps base was eight bytes wrong;
+- retail-proven D3DDEVICEDESC7 base is `0x006B5780`, not `0x006B5788`;
+- after frontend renderer reinit the shifted fields produced absurd negative/GB-scale texture buffer dimensions.
+
+Fix:
+- corrected caps base;
+- texture creation logs returned to sane 32/64/128/512 dimensions.
+
+Important commit:
+`99bcb6fc62be5398ea177c986975d408d2e390c0`
+
+### 5. Texture hash lookup — KEEP
+
+Retail texture hash table base:
+`0x006AB934`
+
+Verified from retail blob; do not revert to old guessed base.
+
+### 6. Movie surfaces
+
+Movie surface cleanup was implemented and runtime proved each startup movie surface released to refcount 0.
+Flashing buildings persisted before the double-present fix, so movie-surface leak was **ruled out** as that visual artifact.
+
+Keep cleanup; do not reopen that theory without new evidence.
+
+## PRESENTATION STATE BEFORE DX11 TAKES OVER
+
+Compatibility HWND/client:
+- physical 2560x1440 on user's monitor.
+
+Legacy D3D7 frontend:
+- 640x480 internal canvas.
+
+Known safe gameplay-ish internal modes include 1440x1080x32.
+
+Presenter:
+- preserves source aspect ratio;
+- therefore 4:3 scene becomes pillarboxed in 16:9;
+- do not “fix” this by stretching.
+
+True widescreen requires:
+1. a real 16:9 render target;
+2. projection/FOV validation;
+3. UI/HUD safe-area handling.
+
+## WIDESCREEN / UI FINDINGS
+
+The current side bars are expected while the internal scene is 4:3.
+
+Relevant source:
+- `PCSHELL_CoordsDCtoPC` maps virtual 512x240 shell coordinates independently into live X/Y resolution;
+- frontend/HUD therefore needs its own 16:9 policy rather than arbitrary stretching.
+- `M3d_RenderSetup` remains retail, so projection/FOV behavior should be measured after DX11 creates a real 16:9 gameplay target.
+
+DX11 migration Phase 5 is explicitly reserved for:
+- preserve vertical FOV / expand horizontal FOV as needed;
+- HUD/menu safe area;
+- cutscene/model-preview/special-camera validation.
+
+## DX11 MIGRATION PHASES
+
+Phase 0 — bridge/device probe
+- IMPLEMENTED, awaiting first runtime validation.
+
+Phase 1 — DX11 final presentation
+- legacy D3D7 still renders scene;
+- DX11/DXGI owns presentation;
+- remove GDI presenter.
+
+Phase 2 — texture ownership
+- migrate PCTex resources to ID3D11Texture2D + SRV;
+- preserve retail texture lookup/spooling semantics.
+
+Phase 3 — 2D/frontend
+- sprites/quads/fonts/HUD;
+- orthographic shader path;
+- proper 16:9 safe area.
+
+Phase 4 — fixed-function 3D emulation
+Known centralized legacy state families:
+- depth enable/write/function;
+- alpha blend enable/factors;
+- fog color/start/end;
+- texture address U/V;
+- min/mag filter;
+- texture-stage color/alpha operations;
+- texture binding;
+- triangle-fan submission.
+
+D3D11 has no triangle-fan topology:
+- convert fans to triangle-list indices.
+
+Phase 5 — true widescreen/FOV/UI.
+
+Phase 6 — DX11 default; D3D7 reference/diagnostic only.
+
+DX12 is intentionally **not** planned. Its explicit barriers, descriptor heaps, fences, command lists, etc. add complexity without meaningful benefit for this game.
+
+## IMPORTANT DX11 COMMITS
+
+- `09db45a1bd6cd09ed429078b3bbcaa641573c1ed` — stable C bridge API
+- `ab4c7f5461c8814ab06d233e2199c8d4febc3a72` — CMake target
+- `343de8e6f50b9448444b461f69a08c6e2a0f3f03` — D3D11 device/swap-chain backend
+- `b1fd7e3d3e93268db95c68dfd7015dbb72be66ce` — modern build script
+- `e754aca6117048555db0fb2bf2a43bfd7bed812a` — legacy bridge probe + D3D7 safety
+- `168d4d3f215dcd8c51e60b47b81f6b691e834ee7` — one-click build/install/log integration
+- `1496e2c29f6e1c35a49be9e93bd55bc3b51decbd` — migration docs
+- `453146284b3c6bedfe06277da93d45d0fef5c44f` / `b745a89c5170edef9008289044b4b4ad42273e63` — undecorated x86 exports
+- `550f0af1f897201430ac94770bd35b455d774fc6` — CMake path fallback
+- `0fbc7b6a90c630ff8070fd6a9ed9ba14f0c101f0` — Phase 0 status checkpoint
+
+## OLD D3D7 REVERSE-ENGINEERING FACTS STILL USEFUL
+
+Windowed DX init:
+- retail `DXINIT_DirectX8 = 0x004FDE90`
+- RealWinMain call site `0x00515BAD`
+- argument push site `0x00515BA9`
+- compatibility changed third arg 2 -> 3 to activate retail windowed branch.
+
+Presentation:
+- `DXPOLY_Flip = 0x00502990`
+- `DXPOLY_EndScene = 0x00502A40`
+- EndScene->Flip call site `0x00502D41`
+
+Scene/presentation globals:
+- HWND `0x006B58D0`
+- windowed flag `0x006B78F4`
+- primary surface `0x006B7904`
+- scene surface `0x006B7908`
+- rect `0x006B5958`
+- live DX width `0x006B78E4`
+- live DX height `0x006B78E8`
+- color count/bpp `0x006B78EC`
+- game width `0x00568154`
+- game height `0x00568158`
+
+Saved settings:
+- width `0x02E096F8`
+- height `0x02E0970C`
+- bpp `0x02E098E4`
+
+D3D caps:
+- retail base `0x006B5780`.
+
+D3D7 2560x1440 failure:
+- `IDirect3D7::CreateDevice` call site around `0x004FEA4A`
+- HRESULT `0x88760082 = DDERR_INVALIDOBJECT`
+- old cleanup function `0x00503AF0`
+- null dereference was `0x00503AF7` via global `0x006BBF1C`
+- cleanup is guarded now.
+
+## HISTORICAL PLAYABLE BASELINE
+
+Historical visible/playable commit:
+`35e73ed3c4ca8c06b581df83f0f0913f0c915982`
+
+At that revision user previously:
+- reached first level;
+- controlled Spider-Man;
+- returned to menu;
+- Options crashed.
+
+The old Options crash was retail `Font::height(char*)` calling convention:
+- retail function `0x0043EAF0`;
+- reconstructed wrapper originally failed to pass `this` in ECX;
+- correct FASTCALL trampoline was later restored and tested in newer work.
+
+Do not reset the project to this historical baseline unless specifically diagnosing a regression.
+
+## AUDIO
+
+Current audio is working.
+Do not reactivate old audio diagnostics unless a new audio bug is reported.
+
+## CONTROLLER / XINPUT FUTURE WORK
+
+Still desired after renderer stabilization:
+- modern Xbox/XInput backend;
+- analog sticks/triggers;
 - configurable mappings;
-- Xbox button names/prompts/UI;
+- Xbox button prompts;
 - rumble.
 
-A phase-1 XInput backend was implemented historically in:
-`568c9c20148a382c77c34e6c246afa9e556222f0`
+Historical retail button states:
+- `0xFF` new press
+- `0x7F` held
+- `0x80` release
+- `0x00` idle
 
-It was parked/removed from the active runtime while recovering the visible rendering baseline.
+Do not distract Phase 0/1 DX11 work with controller feature expansion unless the user changes priority.
 
-Verified retail input conventions:
-- analog range `-1000..+1000`;
-- POV in DirectInput hundredths-of-degrees;
-- button state:
-  - `0xFF` new press
-  - `0x7F` held
-  - `0x80` release
-  - `0x00` idle
+## LOGS TO EXPECT FROM THE NEXT TEST
 
-Planned stable Xbox indices:
-- 0 X
-- 1 A
-- 2 View
-- 3 B
-- 4 Y
-- 5 LT
-- 6 LB
-- 7 RT
-- 8 LS
-- 9 RB
-- 10 RS
-- 11 Menu
-- 12..15 D-pad
-
-Do not re-enable this until visible rendering is restored.
-
-## TEXTURE / SPOOL HISTORY — DO NOT REDO DURING BLACK-SCREEN WORK
-
-A previous startup stack overflow at retail:
-`Spool_FindTextureEntry(u32) = 0x004C9460`
-
-was tied to a temporary retail call-through and was investigated/fixed during earlier work.
-
-The retail texture lookup machine code later revealed an exact indexed table base `0x006AB934`, but experiments consuming the live retail table introduced additional instability and were rolled back.
-
-Current black-screen evidence proves the offscreen scene already contains non-black rendered output, so texture lookup is not the current frontier.
-
-Do not reopen the texture-table work until visible presentation is fixed.
-
-## OTHER IMPORTANT DEAD ENDS / LESSONS
-
-- 16 -> 32 bpp direct SetDisplayMode test: still `0x80004001`. Color depth is not the original fullscreen blocker.
-- Earlier cross-module SetDisplayMode helper/thunk experiments reported `compat_state not_seen`; superseded.
-- Stale DirectDraw destination rectangle: current probe shows stored and live rect match exactly. Ruled out.
-- Scene surface black: ruled out by non-black samples and changing hash.
-- Scene/primary surface lost: ruled out by `IsLost() == 0`.
-- Current retail EXE drift: ruled out; fingerprint repeatedly stable.
-- Source regression as sole cause: pure historical runtime source was restored and black output persisted.
-
-## BUILD / MATCHING NOTES
-
-Matching build:
-- `build.bat`
-- `spider.mak`
-- output `Release\spider.dll`
-
-The test path force-cleans because old NMAKE incremental behavior previously produced a stale DLL.
-
-Release builds can emit a linker map; recent test tooling has collected it as `proxy-link-map.txt`.
-
-## CURRENT LOGS THAT MATTER MOST
-
-The handoff ZIP should contain the latest:
-- `spidey-decomp-present.log`
-- `spidey-decomp-compat.log`
+Normal session should include:
+- `test-session.txt`
+- `game-exe-fingerprint.txt`
 - `proxy-link-map.txt`
-- `test-session*.txt`
-- `game-exe-fingerprint*.txt`
+- `spidey-decomp-compat.log`
+- `spidey-decomp-present.log`
+- `spidey-decomp-texture.log`
+- `spidey-decomp-input.log`
+- `spidey-decomp-dxerror.log` if DirectX errors occur
+- `spidey-decomp-crash.log` if a native crash occurs
+- NEW: `spidey-renderer11.log`
 
-It should also contain the two historical playable-baseline Options crash logs/session files at revision `35e73ed...`.
+Treat all logs the user uploads as a set.
 
-## USER GOALS AFTER CURRENT VIDEO FIX
+## HANDOFF / INTERRUPTION RECOVERY
 
-Near-term:
-1. restore visible rendering;
-2. verify Options fix;
-3. retain working audio;
-4. implement/test full XInput/Xbox controller support;
-5. continue bug fixes and modernization.
+If an input/message stream fails:
+1. inspect current `dev` HEAD;
+2. read newest `docs/CURRENT_STATUS.md`;
+3. read this document;
+4. determine exactly which commits landed before the interruption;
+5. continue from the actual repo frontier;
+6. document recovery immediately;
+7. keep committing in small checkpoints.
 
-Long-term:
-- plugin/runtime SDK;
-- mod support;
-- GUI/editor (“Spidey Studio”);
-- Spider-Man 2000 Dev Build 0.1 milestone.
+Do not reconstruct work from stale chat text if the repo already answers it.
 
-## RECOVERY RULE IF CHAT/INPUT STREAM FAILS
+## LONG-TERM USER GOAL
 
-Immediately:
-1. read `docs/CURRENT_STATUS.md`;
-2. read this handoff file;
-3. inspect current `dev` head;
-4. compare how far the last code change actually landed before the interruption;
-5. continue from the documented next frontier;
-6. live-update `CURRENT_STATUS.md` before substantial further work.
+The target is not merely “make the old game run.”
 
-Do not ask the user to reconstruct lost context unless repo/log evidence genuinely cannot recover it.
+The user wants a maintainable modern PC development environment that can:
+- fix original bugs;
+- add features;
+- support modern resolutions/widescreen;
+- add modern controller support;
+- expose mod/plugin APIs;
+- eventually support editor/dev tooling (“Spidey Studio” concept);
+- progressively replace/decompile/reconstruct retail systems without throwing away working gameplay.
+
+The DX11 migration is now the rendering foundation for that long-term direction.
