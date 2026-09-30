@@ -2161,11 +2161,11 @@ int __cdecl SpideyRenderer11_ShadowSubmitTriangleFan(
             SpideyRenderer11_ResolveTextureHandle(
                 state->textureHandle);
 
+        // Keep unresolved legacy handles in the command. The proxy mirrors
+        // transient DirectDraw surfaces after EndScene and before this frame
+        // is replayed, so ShadowEndFrame gets a second chance to resolve it.
         if (textureId < 0)
-        {
-            ++gShadowSkippedDraws;
-            return 0;
-        }
+            textureId = -2;
     }
 
     ShadowCommand command = {};
@@ -2385,12 +2385,28 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         ID3D11ShaderResourceView* srv =
             gShadowWhiteSrv;
 
-        if (command.textureId >= 0 &&
-            static_cast<unsigned long>(command.textureId) < kGameTextureCapacity &&
-            gGameTextures[command.textureId].srv)
+        long resolvedTextureId =
+            command.textureId;
+
+        if (command.state.textureHandle)
+        {
+            resolvedTextureId =
+                SpideyRenderer11_ResolveTextureHandle(
+                    command.state.textureHandle);
+
+            if (resolvedTextureId < 0)
+            {
+                ++skippedRender;
+                continue;
+            }
+        }
+
+        if (resolvedTextureId >= 0 &&
+            static_cast<unsigned long>(resolvedTextureId) < kGameTextureCapacity &&
+            gGameTextures[resolvedTextureId].srv)
         {
             srv =
-                gGameTextures[command.textureId].srv;
+                gGameTextures[resolvedTextureId].srv;
         }
 
         D3D11_VIEWPORT viewport = {};
