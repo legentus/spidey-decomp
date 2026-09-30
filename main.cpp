@@ -2771,10 +2771,13 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 				&gSpideyRetailShadowState);
 	}
 
-	if (shadowSubmitted)
-		++gSpideyShadowSubmitted;
-	else
-		++gSpideyShadowSkipped;
+	if (captureShadowFrame)
+	{
+		if (shadowSubmitted)
+			++gSpideyShadowSubmitted;
+		else
+			++gSpideyShadowSkipped;
+	}
 
 	const int unusual =
 		primitiveType != D3DPT_TRIANGLEFAN ||
