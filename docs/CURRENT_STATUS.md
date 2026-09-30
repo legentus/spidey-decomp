@@ -4876,3 +4876,74 @@ Recommended architecture:
 Immediate next work:
 - make Apply activate selected output/aspect in the current running frontend/gameplay without restart;
 - synchronize frontend mouse coordinate/bounds state whenever legacy physical backing and modern logical output diverge or transition.
+
+
+### Phase 3D follow-up implementation — live Apply + frontend mouse transition — 2026-09-30
+
+Implementation commits:
+- `e6797491c77a83842dee5c70d2e77b8d2ed5653e` — resynchronize retail frontend mouse bounds after display/mode transitions;
+- `70efef29479e6fc66cb42e54ec6001992bca425f` — make selected Aspect Ratio define the live non-stretched DX11 content canvas inside the selected Screen Size.
+
+#### Retail mouse RE / fix
+
+Original-symbol database and retained retail function bytes identify:
+- `PCINPUT_SetMouseBounds @ 0x0050A6B0`;
+- `PCINPUT_SetMousePosition @ 0x0050A700`;
+- `PCINPUT_GetMousePosition @ 0x0050A750`;
+- `PCINPUT_IsMouseOver @ 0x0050A820`;
+- `PCINPUT_UpdateMouse @ 0x0050A8A0`;
+- `PCSHELL_Initialize @ 0x0050C010`;
+- `PCSHELL_IsMouseOver @ 0x0050C5F0`.
+
+Retained retail disassembly proves:
+- `PCSHELL_Initialize` establishes mouse bounds from live legacy dimensions `0x006B78E4/0x006B78E8`, minus 32 pixels;
+- that bounds initialization occurs only when the shell cursor sprite is first created;
+- `PCINPUT_SetMouseBounds` stores the four clamp limits at retail globals `0x00AC0924/2C/28/30`;
+- `PCINPUT_UpdateMouse` clamps mouse X/Y against those stored bounds;
+- `PCINPUT_IsMouseOver` uses current mouse X/Y and the current resolution-dependent hotspot calculation.
+
+Therefore gameplay -> frontend can leave gameplay-sized mouse clamp bounds alive after the frontend physical D3D7 canvas returns to 640x480.
+
+New behavior:
+- every frontend display transition explicitly calls the retail mouse-bounds API using the current frontend physical canvas;
+- current mouse position is preserved when already valid;
+- if the old gameplay position lies outside the new frontend domain it is safely recentered;
+- input log marker:
+  `retail_input event=frontend_bounds_sync ...`.
+
+#### Live Aspect / Apply behavior
+
+Apply was already committing and persisting state correctly. The latest test proved both 4:3 and 16:9 commits in one run, but the frontend had no immediate visible aspect treatment because Screen Size remained the full DX11 canvas.
+
+New model:
+- **Screen Size** = selected output/swap-chain extent;
+- **Aspect Ratio** = largest non-stretched logical content canvas that fits inside that output;
+- AUTO = use the full selected output aspect;
+- explicit aspect modes aspect-fit inside the selected output.
+
+Examples at 2560x1440:
+- 16:9 -> 2560x1440 content;
+- 4:3 -> 1920x1440 content, centered/pillarboxed by the existing aspect-preserving DX11 presenter;
+- 5:4 -> 1800x1440 content;
+- 16:10 -> 2304x1440 content;
+- 21:9 -> 2560x1097 content;
+- 32:9 -> 2560x720 content.
+
+The retail projection scalar remains applied as before. The logical content canvas is refreshed immediately inside the existing Apply path, so no restart should be required.
+
+Expected compat marker now includes both output and live content:
+`logical_render_resolution ... selected=<output> content=<aspect-fit-content> aspect=<mode>`.
+
+NEXT TEST:
+1. update/build with `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. in Display Options at 2560x1440:
+   - switch 16:9 -> 4:3 and press Apply;
+   - verify the running frontend changes immediately to centered 4:3/pillarboxed content without restart;
+   - switch back to 16:9 and Apply;
+   - verify it immediately returns to full 2560x1440;
+3. verify the Display Options values remain committed after closing/reopening;
+4. enter gameplay, then back out to main menu;
+5. move and click the mouse across several main-menu items;
+6. verify input log contains `frontend_bounds_sync` after the mode transition;
+7. enter gameplay once more to ensure the mouse fix did not disturb keyboard/gameplay input;
+8. provide the full new log set; screenshots are useful if any aspect mode is stretched or miscentered.
