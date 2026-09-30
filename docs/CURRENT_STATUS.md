@@ -2210,3 +2210,33 @@ Implement a narrow compatibility presenter that bypasses the legacy DirectDraw p
 6. once visible rendering is restored, resume the parked Options fix, audio follow-up, and XInput/Xbox controller work one at a time.
 
 Do not spend another cycle on DirectDraw SetDisplayMode, bpp, texture lookup, or scene rendering before trying the direct HWND presentation probe.
+
+
+## New-chat recovery checkpoint — 2026-09-29
+
+Recovery sources checked:
+- full disconnect-safe handoff ZIP manifest: PASS;
+- prior Spider-Man 2000 project conversation context recovered;
+- live GitHub branch `dev` confirmed;
+- current branch head before this checkpoint: `974fbf073a9134de63f9d0102508bfcdb19a8805`;
+- latest archived presentation test remains revision `527aa0ba2fea79865d4b06e683defd2e59a169cc`.
+
+Important correction to the handoff wording:
+- the direct-to-HWND compatibility presenter is **already implemented** in ancestor commit
+  `cf3d827a11958464c73a2ac8a1ee1d1532a03d6a`;
+- it is present in the current `dev` history through documentation checkpoint
+  `6969ecf9c5290cee586cf0db4c6c4c922df4b0dd`;
+- the archived latest runtime logs predate that implementation, so there is no runtime result for the direct-window presenter yet.
+
+Therefore the exact current frontier is **runtime validation**, not reimplementation.
+
+NEXT TEST:
+1. run `UPDATE_SPIDEY_PROJECT.bat`;
+2. run `TEST_LATEST_BUILD.bat`;
+3. observe whether splash/title/menu become visible;
+4. if still black, leave the game running at least ~10 seconds;
+5. return all generated logs, especially `spidey-decomp-present.log`;
+6. key evidence is the new line:
+   `compat_present frame=<n> result=<0/1> error=<win32> src=<w>x<h> dst=<w>x<h> stretch=<0/1>`.
+
+Do not redo SetDisplayMode/bpp, texture-table, stale-rectangle, scene-black, or surface-loss investigation before this test.
