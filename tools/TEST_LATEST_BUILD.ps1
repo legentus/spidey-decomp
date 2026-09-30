@@ -458,6 +458,7 @@ $drawLog = Join-Path $gameDir "spidey-decomp-draw.log"
 $inputLog = Join-Path $gameDir "spidey-decomp-input.log"
 $renderer11Log = Join-Path $gameDir "spidey-renderer11.log"
 $input11Log = Join-Path $gameDir "spidey-input11.log"
+$cameraLog = Join-Path $gameDir "spidey-decomp-camera.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 
 if (Test-Path $crashLog) {
@@ -486,6 +487,9 @@ if (Test-Path $renderer11Log) {
 }
 if (Test-Path $input11Log) {
     Remove-Item -LiteralPath $input11Log -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $cameraLog) {
+    Remove-Item -LiteralPath $cameraLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $runtimeLog) {
     Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
@@ -557,6 +561,12 @@ if (Test-Path $input11Log) {
     Copy-Item -LiteralPath $input11Log -Destination (Join-Path $sessionDir "spidey-input11.log") -Force
     Write-Host "[INPUT11] Modern input helper log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-input11.log"))
+}
+
+if (Test-Path $cameraLog) {
+    Copy-Item -LiteralPath $cameraLog -Destination (Join-Path $sessionDir "spidey-decomp-camera.log") -Force
+    Write-Host "[CAMERA] Passive camera telemetry captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-camera.log"))
 }
 
 if (Test-Path $runtimeLog) {
