@@ -4,10 +4,10 @@
 **Active repository:** https://github.com/legentus/spidey-decomp  
 **Active branch:** `dev`  
 **Live source of truth:** `dev` + `docs/CURRENT_STATUS.md`  
-**Current implementation frontier:** `502bd2864c5e6fd8a1e268f18656591a8b709d0c`  
-**Current documentation frontier:** the live `dev` HEAD after the Phase 3E checkpoint commit.
+**Current implementation frontier:** `4cd7bf549696c76d8ad7176c6e3682c4ce9f4516`  
+**Current documentation frontier:** live `dev` after passive input/camera RE documentation.
 
-> **CURRENT OVERRIDE:** Later Phase 3C sections in this file are historical context. The actual pending user-facing test is now Phase 3D live Apply + frontend mouse return. Phase 3E F9 D3D7-draw suppression is implemented but defaults OFF and should only be exercised after the Phase 3D checks pass.
+> **CURRENT OVERRIDE:** Later Phase 3C sections in this file are historical context. The actual pending user-facing test is now Phase 3D live Apply + frontend mouse return. Phase 3E F9 D3D7-draw suppression is implemented but defaults OFF and should only be exercised after the Phase 3D checks pass. Modern Input Phase 0 and passive camera ownership telemetry are also implemented; both are observation-only.
 
 ### Current pending user-facing checks
 1. At 2560x1440, change 16:9 -> 4:3 -> Apply and verify the running frontend changes immediately without restart.
@@ -23,6 +23,7 @@
 
 ### Modern input/camera design document
 - `docs/MODERN_INPUT_CAMERA.md`
+- Passive camera telemetry: `spidey-decomp-camera.log`; mode 3 / `CAMERAMODE_DEMO` is now statically grounded as the ordinary gameplay camera baseline.
 - includes retail input hook anchors, normalized input architecture, dynamic glyph/remapping plan, and a two-stage camera plan that can progress to a dedicated modern camera rather than being constrained by legacy camera behavior.
 
 ### New major modernization goals
