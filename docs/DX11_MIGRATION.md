@@ -328,3 +328,30 @@ This narrows Phase 2C considerably. Rather than implementing a generic D3D7 comp
 The next implementation must be a **shadow renderer** first. Retail D3D7 remains authoritative and visible while the same live DrawPrimitive calls are submitted to a separate DX11 color/depth target. Only after shadow coverage and state parity are proven should DX11 geometry become visible or original D3D7 draws be suppressed.
 
 The remaining 9 unresolved legacy surface handles should be mirrored on-demand at the DrawPrimitive boundary rather than blocking the shadow-rendering work.
+
+
+## Phase 2C2 — live DX11 shadow preview
+
+Status: implemented, awaiting runtime validation.
+
+Phase 2C1 proved that the retail primitive stream can be reconstructed into an independent offscreen DX11 target with complete sampled draw coverage and no observed state-cache divergence. Phase 2C2 makes that target inspectable without removing D3D7.
+
+Preview architecture:
+- renderer ABI 6;
+- F10 is an opt-in runtime preview toggle;
+- D3D7 continues executing every retail draw even while DX11 is visible;
+- preview enable performs one warmup frame, then the DX11 shadow SRV is drawn directly into the existing swap-chain render target and presented through DXGI;
+- the normal D3D7 scene -> PresentPixels path remains immediately available by pressing F10 again;
+- a failed DX11 shadow present automatically falls back to the D3D7-reference presenter.
+
+While preview is active:
+- the proxy captures every eligible main-scene DrawPrimitive rather than only sampled frames;
+- renderer11 replays the shadow command buffer every frame;
+- parity readback remains sampled to avoid a per-frame GPU synchronization stall.
+
+Parity logging:
+- retail D3D7 `scene_pre` now logs the exact nine COLORREF values used by its hash;
+- renderer11 `shadow_frame` logs the corresponding nine DX11 values;
+- this supports diagnosis of half-pixel/rasterization, texture conversion, blend, depth, or color discrepancies rather than relying only on a single aggregate hash.
+
+This is still a diagnostic parity stage. Native 16:9 and removal of the D3D7 DrawPrimitive path remain blocked until visual parity is acceptable.
