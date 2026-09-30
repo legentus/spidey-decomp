@@ -1931,15 +1931,47 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 
 	SpideyRetailFlipFn retailFlip =
 		(SpideyRetailFlipFn)0x00502990;
-	retailFlip();
 
-	if (*(DWORD*)0x006B78F4)
+	const int windowedCompat =
+		*(DWORD*)0x006B78F4 ? 1 : 0;
+
+	// In the compatibility/windowed path, retail DXPOLY_Flip blits the
+	// scene into the legacy DirectDraw primary before our direct HWND
+	// presenter copies the same scene again. Runtime logs show that legacy
+	// primary at 1920x1080 while the borderless client is 2560x1440. Letting
+	// both presentation paths race can expose stale/foreign primary content
+	// between our copies. Use the direct scene->HWND presenter as the sole
+	// windowed presentation path; preserve untouched retail Flip behavior
+	// for the original non-windowed path.
+	if (!windowedCompat)
+	{
+		retailFlip();
+	}
+	else
 	{
 		SpideyCompatPresentSceneToWindow(
 			hwnd,
 			*(LPDIRECTDRAWSURFACE7*)0x006B7908,
 			frame,
 			shouldLog);
+	}
+
+	if (shouldLog)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-present.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"present_path frame=%lu windowed=%d retail_flip=%d direct_hwnd=%d\n",
+				frame,
+				windowedCompat,
+				windowedCompat ? 0 : 1,
+				windowedCompat ? 1 : 0);
+			fclose(f);
+		}
 	}
 
 	if (shouldLog)
@@ -2273,6 +2305,254 @@ static void SpideyInstallPresentProbe()
 #endif
 
 #ifdef _WIN32
+typedef i32 (__cdecl *SpideyRetailPollKeyboardFn)(void);
+typedef i32 (__cdecl *SpideyRetailPollMouseFn)(i32*, i32*);
+
+static i32 gSpideyRetailInputForeground = -1;
+static unsigned long gSpideyRetailInputSyncCount = 0;
+
+static void SpideyLogRetailInput(
+		const char* eventName,
+		HRESULT keyboardHr,
+		HRESULT mouseHr,
+		HRESULT controllerHr)
+{
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"retail_input event=%s count=%lu hwnd=0x%08lX foreground=0x%08lX active=0x%08lX focus=0x%08lX keyboard=0x%08lX mouse=0x%08lX controller=0x%08lX\n",
+		eventName ? eventName : "unknown",
+		++gSpideyRetailInputSyncCount,
+		(unsigned long)*(HWND*)0x006B7A60,
+		(unsigned long)GetForegroundWindow(),
+		(unsigned long)GetActiveWindow(),
+		(unsigned long)GetFocus(),
+		(unsigned long)keyboardHr,
+		(unsigned long)mouseHr,
+		(unsigned long)controllerHr);
+	fclose(f);
+}
+
+static i32 SpideySyncRetailInputForeground(void)
+{
+	HWND hwnd =
+		*(HWND*)0x006B7A60;
+
+	const i32 foreground =
+		hwnd &&
+		GetForegroundWindow() == hwnd;
+
+	if (foreground == gSpideyRetailInputForeground)
+		return foreground;
+
+	gSpideyRetailInputForeground =
+		foreground;
+
+	LPDIRECTINPUTDEVICE8A keyboard =
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A5C;
+	LPDIRECTINPUTDEVICE8A mouse =
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A64;
+	LPDIRECTINPUTDEVICE8A controller =
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C;
+
+	// Clear the real retail transition-state arrays on every focus edge so
+	// a held/released key from before Alt+Tab cannot poison menu navigation.
+	memset(
+		(void*)0x006B792C,
+		0,
+		0x100);
+	memset(
+		(void*)0x006B7A54,
+		0,
+		3);
+	memset(
+		(void*)0x006B7A34,
+		0,
+		0x20);
+
+	HRESULT keyboardHr =
+		DI_OK;
+	HRESULT mouseHr =
+		DI_OK;
+	HRESULT controllerHr =
+		DI_OK;
+
+	if (foreground)
+	{
+		if (keyboard)
+			keyboardHr = keyboard->Acquire();
+		if (mouse)
+			mouseHr = mouse->Acquire();
+		if (controller)
+			controllerHr = controller->Acquire();
+
+		SpideyLogRetailInput(
+			"foreground_acquire",
+			keyboardHr,
+			mouseHr,
+			controllerHr);
+	}
+	else
+	{
+		if (keyboard)
+			keyboardHr = keyboard->Unacquire();
+		if (mouse)
+			mouseHr = mouse->Unacquire();
+		if (controller)
+			controllerHr = controller->Unacquire();
+
+		SpideyLogRetailInput(
+			"background_unacquire",
+			keyboardHr,
+			mouseHr,
+			controllerHr);
+	}
+
+	return foreground;
+}
+
+static i32 __cdecl SpideyCompatRetailPollKeyboard(void)
+{
+	if (!SpideySyncRetailInputForeground())
+		return -1;
+
+	SpideyRetailPollKeyboardFn retail =
+		(SpideyRetailPollKeyboardFn)0x00501B80;
+
+	i32 result =
+		retail();
+
+	if (result < 0)
+	{
+		LPDIRECTINPUTDEVICE8A keyboard =
+			*(LPDIRECTINPUTDEVICE8A*)0x006B7A5C;
+		HRESULT acquireHr =
+			keyboard ? keyboard->Acquire() : E_FAIL;
+
+		SpideyLogRetailInput(
+			"keyboard_retry",
+			acquireHr,
+			DI_OK,
+			DI_OK);
+
+		if (keyboard &&
+			SUCCEEDED(acquireHr))
+		{
+			result =
+				retail();
+		}
+	}
+
+	return result;
+}
+
+static i32 __cdecl SpideyCompatRetailPollMouse(
+		i32* pY,
+		i32* pX)
+{
+	if (!SpideySyncRetailInputForeground())
+	{
+		if (pY)
+			*pY = 0;
+		if (pX)
+			*pX = 0;
+		return 0;
+	}
+
+	SpideyRetailPollMouseFn retail =
+		(SpideyRetailPollMouseFn)0x00501CC0;
+
+	return retail(
+		pY,
+		pX);
+}
+
+static void SpideyInstallRetailInputCompat()
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+
+	const unsigned long retailKeyboard =
+		0x00501B80;
+	const unsigned long retailMouse =
+		0x00501CC0;
+
+	i32 keyboardCalls =
+		0;
+	i32 mouseCalls =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long rel =
+			*(long*)(p + 1);
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		void* wrapper =
+			0;
+
+		if (target == retailKeyboard)
+		{
+			wrapper =
+				(void*)&SpideyCompatRetailPollKeyboard;
+			keyboardCalls++;
+		}
+		else if (target == retailMouse)
+		{
+			wrapper =
+				(void*)&SpideyCompatRetailPollMouse;
+			mouseCalls++;
+		}
+		else
+		{
+			continue;
+		}
+
+		long newRel =
+			(long)(
+				(unsigned char*)wrapper -
+				(p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"retail_input_compat installed keyboard_calls=%d mouse_calls=%d keyboard=0x00501B80 mouse=0x00501CC0 hwnd=0x006B7A60\n",
+			keyboardCalls,
+			mouseCalls);
+		fclose(f);
+	}
+
+	// Force the first live poll to establish and log foreground state.
+	gSpideyRetailInputForeground =
+		-1;
+}
+
 static const char gSpideyDxKindDI[] = "DI";
 static const char gSpideyDxKindDS[] = "DS";
 static const char gSpideyDxKindD3D[] = "D3D";
@@ -2430,6 +2710,7 @@ void game_patches(void)
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
+	SpideyInstallRetailInputCompat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
