@@ -2507,3 +2507,22 @@ NEXT ACTION:
 2. run `TEST_LATEST_BUILD.bat`;
 3. first confirm matching build succeeds;
 4. only if it launches, continue the existing runtime checks for borderless sizing, splash playback, allocator fallback, menu reachability, mouse movement, and 2560x1440.
+
+
+## Workflow convenience: one-click update + build/test BAT — 2026-09-29
+
+Added:
+- `UPDATE_AND_TEST_LATEST_BUILD.bat`
+- commit `d31834725336edbb629948d48a9b3a2baec988a8`
+
+Behavior:
+1. runs `UPDATE_SPIDEY_PROJECT.bat`;
+2. stops immediately if update fails;
+3. re-enters the project directory;
+4. runs `TEST_LATEST_BUILD.bat` (forced clean matching build, install, launch, log capture);
+5. propagates failure exit codes.
+
+This is now the preferred normal test workflow after the file has been pulled once:
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+For the first use on a checkout that predates this file, run `UPDATE_SPIDEY_PROJECT.bat` once to obtain it.
