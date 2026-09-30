@@ -3252,3 +3252,56 @@ NEXT TEST:
    - if D3D7 still rejects it, cleanup guard should prevent the old null-deref and logs will show the remaining renderer limitation cleanly.
 
 Do not implement projection/FOV stretching before this test: first determine whether DPI-aware DirectDraw now exposes a true 2560x1440 primary and whether retail M3d projection naturally handles the 16:9 render target.
+
+
+## Two-session 1440p comparison: selectable != renderable — 2026-09-30
+
+Compared user ZIPs:
+- `initialloadNOTat1440.zip`, session 20260930-021227;
+- `second attempt to load at 1440.zip`, session 20260930-021422.
+Both tested revision:
+`423cbf0ed7f9c6e72bb41890d6c40b1c4779cae4`.
+
+First session (booted below 2560x1440):
+- early DPI call reported `process_aware=1 metrics=2560x1440`;
+- saved startup mode was `1920x1440x32`;
+- modern mode injection exposed native `2560x1440`;
+- game booted successfully;
+- full-screen black flashing was gone after bar-only clear change;
+- sole direct-HWND presenter remained active;
+- DirectDraw primary STILL reported 1920x1080 even though HWND/client and Win32 metrics were 2560x1440;
+- frontend stayed internally 640x480 after startup;
+- selecting/scrolling to 2560x1440 only changed the saved-resolution fields (`saved_res=2560x1440x32`) while `live_res` remained 640x480;
+- therefore this session did NOT prove a live 2560x1440 D3D render target.
+
+Second session (boot with persisted 2560x1440):
+- early DPI call again reported `process_aware=1 metrics=2560x1440`;
+- startup restored `2560x1440x32` live;
+- mode list exposed 2560x1440;
+- before any splash/present frame, retail `IDirect3D7::CreateDevice` failed with `0x88760082 = DDERR_INVALIDOBJECT` at call site `0x004FEA4A`;
+- cleanup guard prevented the old secondary null-deref and logged `cleanup_503AF0 skipped null_global=0x006BBF1C`;
+- retail input hook installed but no poll occurred before D3D failure.
+
+Conclusion:
+- DPI awareness is useful for physical Win32 metrics and mode enumeration, but it does not by itself make DirectDraw expose a 2560x1440 primary; DirectDraw still reports 1920x1080;
+- 2560x1440 has never actually rendered on the current D3D7 device path;
+- the renderer must be made tolerant of a render target larger than the legacy DirectDraw primary/device bootstrap target.
+
+Next experiment:
+1. move DPI-awareness setup to the very first DLL_PROCESS_ATTACH work and request per-monitor-v2 dynamically before AllocConsole/other UI work;
+2. retain 2560x1440 in mode selection;
+3. wrap retail `initDirect3D7 0x004FE1B0` only for the 2560x1440 path;
+4. hook IDirect3D7::CreateDevice during that call:
+   - first try untouched CreateDevice on the real 2560x1440 scene;
+   - on DDERR_INVALIDOBJECT, create a known-good 1920x1080 video-memory 3D bootstrap surface;
+   - copy/create a matching Z-buffer attachment when possible;
+   - create the retail-selected D3D device on the bootstrap;
+   - try `SetRenderTarget(real_2560x1440_scene)`;
+   - if SetRenderTarget succeeds, continue retail init at true 2560x1440;
+   - if it fails, switch the retail scene/global live resolution to the 1920x1080 bootstrap so startup remains safe instead of exiting/crashing.
+5. log every HRESULT/caps transition so the next test distinguishes true 1440p from safe 1080p fallback.
+
+Widescreen note:
+- menus remaining 640x480/4:3 are separate from gameplay render resolution;
+- do not stretch the 4:3 frontend;
+- once a live 16:9 gameplay target is working, validate retail projection/FOV and then patch UI safe-area mapping independently.
