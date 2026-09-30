@@ -903,6 +903,371 @@ static void SpideyInstallWindowedDirectDrawCompat()
 }
 #endif
 
+
+#ifdef _WIN32
+static unsigned long gSpideyPresentFrame = 0;
+
+static int SpideyGetCurrentClientScreenRect(
+		HWND hwnd,
+		RECT* outRect)
+{
+	if (!hwnd || !outRect)
+		return 0;
+
+	RECT client;
+	if (!GetClientRect(hwnd, &client))
+		return 0;
+
+	POINT tl;
+	POINT br;
+	tl.x = client.left;
+	tl.y = client.top;
+	br.x = client.right;
+	br.y = client.bottom;
+
+	if (!ClientToScreen(hwnd, &tl) ||
+		!ClientToScreen(hwnd, &br))
+	{
+		return 0;
+	}
+
+	outRect->left = tl.x;
+	outRect->top = tl.y;
+	outRect->right = br.x;
+	outRect->bottom = br.y;
+	return 1;
+}
+
+static void SpideyLogSurfaceState(
+		FILE* f,
+		const char* label,
+		LPDIRECTDRAWSURFACE7 surface,
+		int sampleAsPrimary,
+		const RECT* primaryRect)
+{
+	if (!f)
+		return;
+
+	if (!surface)
+	{
+		fprintf(
+			f,
+			"%s ptr=0x00000000\n",
+			label);
+		return;
+	}
+
+	DDSURFACEDESC2 desc;
+	memset(&desc, 0, sizeof(desc));
+	desc.dwSize = sizeof(desc);
+
+	HRESULT descHr =
+		surface->GetSurfaceDesc(&desc);
+	HRESULT lostHr =
+		surface->IsLost();
+
+	fprintf(
+		f,
+		"%s ptr=0x%08lX desc_hr=0x%08lX lost_hr=0x%08lX",
+		label,
+		(unsigned long)surface,
+		(unsigned long)descHr,
+		(unsigned long)lostHr);
+
+	if (SUCCEEDED(descHr))
+	{
+		fprintf(
+			f,
+			" width=%lu height=%lu pitch=%ld bpp=%lu caps=0x%08lX",
+			(unsigned long)desc.dwWidth,
+			(unsigned long)desc.dwHeight,
+			(long)desc.lPitch,
+			(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
+			(unsigned long)desc.ddsCaps.dwCaps);
+	}
+
+	HDC dc = 0;
+	HRESULT dcHr =
+		surface->GetDC(&dc);
+
+	fprintf(
+		f,
+		" getdc_hr=0x%08lX",
+		(unsigned long)dcHr);
+
+	if (SUCCEEDED(dcHr) && dc)
+	{
+		int xs[3];
+		int ys[3];
+
+		if (sampleAsPrimary && primaryRect)
+		{
+			int width =
+				primaryRect->right - primaryRect->left;
+			int height =
+				primaryRect->bottom - primaryRect->top;
+
+			xs[0] = primaryRect->left + width / 4;
+			xs[1] = primaryRect->left + width / 2;
+			xs[2] = primaryRect->left + (width * 3) / 4;
+			ys[0] = primaryRect->top + height / 4;
+			ys[1] = primaryRect->top + height / 2;
+			ys[2] = primaryRect->top + (height * 3) / 4;
+		}
+		else
+		{
+			int width =
+				SUCCEEDED(descHr) ? (int)desc.dwWidth : 640;
+			int height =
+				SUCCEEDED(descHr) ? (int)desc.dwHeight : 480;
+
+			xs[0] = width / 4;
+			xs[1] = width / 2;
+			xs[2] = (width * 3) / 4;
+			ys[0] = height / 4;
+			ys[1] = height / 2;
+			ys[2] = (height * 3) / 4;
+		}
+
+		unsigned long sampleHash =
+			2166136261UL;
+		int nonBlack =
+			0;
+
+		for (int y = 0; y < 3; ++y)
+		{
+			for (int x = 0; x < 3; ++x)
+			{
+				COLORREF pixel =
+					GetPixel(
+						dc,
+						xs[x],
+						ys[y]);
+
+				sampleHash ^=
+					(unsigned long)pixel;
+				sampleHash *=
+					16777619UL;
+
+				if (pixel != RGB(0, 0, 0) &&
+					pixel != CLR_INVALID)
+				{
+					nonBlack++;
+				}
+			}
+		}
+
+		fprintf(
+			f,
+			" sample_hash=0x%08lX nonblack=%d",
+			sampleHash,
+			nonBlack);
+
+		surface->ReleaseDC(dc);
+	}
+
+	fputc('\n', f);
+}
+
+typedef void (__cdecl *SpideyRetailFlipFn)(void);
+
+static void __cdecl SpideyDiagDXPOLYFlip(void)
+{
+	const unsigned long frame =
+		++gSpideyPresentFrame;
+
+	HWND hwnd =
+		*(HWND*)0x006B58D0;
+	RECT* storedRect =
+		(RECT*)0x006B5958;
+
+	RECT oldRect =
+		*storedRect;
+	RECT liveRect;
+	memset(&liveRect, 0, sizeof(liveRect));
+
+	int haveLiveRect =
+		SpideyGetCurrentClientScreenRect(
+			hwnd,
+			&liveRect);
+
+	int rectCorrected =
+		0;
+
+	if (haveLiveRect &&
+		liveRect.right > liveRect.left &&
+		liveRect.bottom > liveRect.top &&
+		(oldRect.left != liveRect.left ||
+		 oldRect.top != liveRect.top ||
+		 oldRect.right != liveRect.right ||
+		 oldRect.bottom != liveRect.bottom))
+	{
+		*storedRect =
+			liveRect;
+		rectCorrected =
+			1;
+	}
+
+	const int shouldLog =
+		frame <= 5 ||
+		(frame % 120) == 0 ||
+		rectCorrected;
+
+	if (shouldLog)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-present.log",
+			"a");
+
+		if (f)
+		{
+			fprintf(
+				f,
+				"frame=%lu hwnd=0x%08lX option=%lu lowgfx=%lu res=%lux%lu bpp=%lu old_rect=%ld,%ld,%ld,%ld live_rect=%ld,%ld,%ld,%ld have_live=%d corrected=%d\n",
+				frame,
+				(unsigned long)hwnd,
+				(unsigned long)*(DWORD*)0x006B78F4,
+				(unsigned long)*(DWORD*)0x006B78F8,
+				(unsigned long)*(DWORD*)0x02E096F8,
+				(unsigned long)*(DWORD*)0x02E0970C,
+				(unsigned long)*(DWORD*)0x02E098E4,
+				(long)oldRect.left,
+				(long)oldRect.top,
+				(long)oldRect.right,
+				(long)oldRect.bottom,
+				(long)liveRect.left,
+				(long)liveRect.top,
+				(long)liveRect.right,
+				(long)liveRect.bottom,
+				haveLiveRect,
+				rectCorrected);
+
+			SpideyLogSurfaceState(
+				f,
+				"scene_pre",
+				*(LPDIRECTDRAWSURFACE7*)0x006B7908,
+				0,
+				0);
+
+			fclose(f);
+		}
+	}
+
+	SpideyRetailFlipFn retailFlip =
+		(SpideyRetailFlipFn)0x00502990;
+	retailFlip();
+
+	if (shouldLog)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-present.log",
+			"a");
+
+		if (f)
+		{
+			RECT finalRect =
+				*storedRect;
+
+			SpideyLogSurfaceState(
+				f,
+				"primary_post",
+				*(LPDIRECTDRAWSURFACE7*)0x006B7904,
+				1,
+				&finalRect);
+
+			fprintf(
+				f,
+				"frame_end=%lu final_rect=%ld,%ld,%ld,%ld\n",
+				frame,
+				(long)finalRect.left,
+				(long)finalRect.top,
+				(long)finalRect.right,
+				(long)finalRect.bottom);
+
+			fclose(f);
+		}
+	}
+}
+
+static void SpideyInstallPresentProbe()
+{
+	unsigned char* site =
+		(unsigned char*)0x00502D41;
+
+	const unsigned char expected[5] =
+	{
+		0xE8, 0x4A, 0xFC, 0xFF, 0xFF
+	};
+
+	FILE* f = fopen(
+		"spidey-decomp-present.log",
+		"a");
+
+	if (memcmp(
+			site,
+			expected,
+			sizeof(expected)) != 0)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"present_probe NOT installed: unexpected bytes at 0x00502D41: %02X %02X %02X %02X %02X\n",
+				site[0],
+				site[1],
+				site[2],
+				site[3],
+				site[4]);
+			fclose(f);
+		}
+		return;
+	}
+
+	unsigned long oldTarget =
+		(unsigned long)(
+			site +
+			5 +
+			*(long*)(site + 1));
+
+	if (oldTarget != 0x00502990)
+	{
+		if (f)
+		{
+			fprintf(
+				f,
+				"present_probe NOT installed: target=0x%08lX expected=0x00502990\n",
+				oldTarget);
+			fclose(f);
+		}
+		return;
+	}
+
+	long rel =
+		(long)(
+			(unsigned char*)SpideyDiagDXPOLYFlip -
+			(site + 5));
+
+	site[0] =
+		0xE8;
+	*(long*)(site + 1) =
+		rel;
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		site,
+		5);
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"present_probe installed call_site=0x00502D41 retail_target=0x00502990 wrapper=0x%08lX\n",
+			(unsigned long)SpideyDiagDXPOLYFlip);
+		fclose(f);
+	}
+}
+#endif
+
 #ifdef _WIN32
 static const char gSpideyDxKindDI[] = "DI";
 static const char gSpideyDxKindDS[] = "DS";
@@ -1056,6 +1421,7 @@ void game_patches(void)
 
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
+	SpideyInstallPresentProbe();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
