@@ -21,6 +21,10 @@
 - F10 remains the complete D3D7 reference path.
 - Inspect `d3d7_suppressed` / `d3d7_fallback` telemetry and visual behavior before making suppression permanent.
 
+### Modern input/camera design document
+- `docs/MODERN_INPUT_CAMERA.md`
+- includes retail input hook anchors, normalized input architecture, dynamic glyph/remapping plan, and a two-stage camera plan that can progress to a dedicated modern camera rather than being constrained by legacy camera behavior.
+
 ### New major modernization goals
 - full modern controller support with remapping and dynamic glyph UI;
 - modern mouse/right-stick camera;
