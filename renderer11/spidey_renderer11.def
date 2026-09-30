@@ -12,6 +12,7 @@ EXPORTS
     SpideyRenderer11_PresentHdc
     SpideyRenderer11_UpdateTexture
     SpideyRenderer11_AssociateTextureHandle
+    SpideyRenderer11_ResolveTextureHandle
     SpideyRenderer11_ReleaseTexture
     SpideyRenderer11_ReleaseAllTextures
     SpideyRenderer11_GetResidentTextureCount
