@@ -4152,3 +4152,97 @@ NEXT FRONTIER — Phase 2C2:
 - run shadow capture continuously only while preview is enabled;
 - preserve instant switch back to the known-good D3D7-reference presentation path;
 - use direct visual comparison + per-pixel samples to correct half-pixel, blend, depth, texture/color, or viewport differences before suppressing any D3D7 draw.
+
+
+## DX11 Phase 2C2 live shadow preview ready for runtime test — 2026-09-30
+
+Phase 2C1 validation source run:
+`ba57b5c7adaf49878b23f8a5cdc09bca33eb747a`
+
+Validated before implementing 2C2:
+- normal boot succeeded;
+- all 7 live retail D3D7 hooks installed;
+- ABI 5 bridge loaded;
+- zero sampled cache mismatches;
+- all sampled active frames had shadow_submit == retail calls;
+- shadow_skip == 0;
+- shadow_offscreen_skip == 0;
+- renderer replay had queued == submitted == rendered and skipped_render == 0;
+- 8 transient surfaces were recovered into synthetic IDs 1024..1031;
+- subsequent sampled frames reported missing=0;
+- resident DX11 texture count reached 576;
+- shadow target was nonblack on every compared active sample;
+- D3D7 and DX11 nonblack occupancy matched on every compared sampled frame, including 8/9 at frame 3120;
+- renderer emitted no shadow setup/map/state creation failure.
+
+Observed parity limitation:
+- the 3x3 DX11 shadow hash does not yet equal the D3D7 scene hash;
+- diagnostic byte ordering was verified equivalent, so the mismatch represents actual pixel/raster/state differences rather than hash encoding.
+
+Phase 2C2 implementation:
+- renderer ABI bumped to 6;
+- new exports:
+  - `SpideyRenderer11_ShadowSetContinuous(int)`;
+  - `SpideyRenderer11_PresentShadow(int preserveAspect, int vsync)`;
+- F10 toggles live DX11 shadow preview;
+- enabling preview has a deliberate one-frame warmup so the first visible shadow frame is fully captured;
+- while preview is enabled:
+  - every main-scene retail triangle fan is shadow-captured;
+  - shadow replay runs every frame;
+  - the DX11 shadow color target is presented directly to the existing DXGI swap chain;
+  - D3D7 still executes every original DrawPrimitive in the background;
+- pressing F10 again immediately returns to the known-good D3D7 scene -> PresentPixels path;
+- if PresentShadow fails, the proxy automatically falls back to the D3D7-reference presenter;
+- preview remains aspect-fitted, so current 4:3 pillarboxing is expected;
+- exact nine COLORREF sample values are now logged on both:
+  - D3D7 `scene_pre ... samples=...`;
+  - DX11 `shadow_frame ... samples=...`;
+- expensive DX11 pixel readback remains sampled (first frames/every 120th), even while shadow rendering/presentation runs continuously;
+- `present_path` now identifies `dx11_shadow=1`, preview enabled/ready state, and path code 4.
+
+Implementation commits:
+- `2b4b69b7e7de94ee73280e78e19d325193d88003` — ABI 6 declarations;
+- `64e2b6d11e5b4f1a9e2fd3a3101fd54a7906acec` — ABI 6 exports;
+- `2b36515e2598a0a16644ecb3c7e0ae9d19ee5fc1` — continuous shadow replay, direct shadow presentation, exact DX11 sample colors;
+- `b99323d9a13f440f701b6a97840dfdee048e2fbe` — legacy preview-control declarations;
+- `13c382f8dd1216a8c866652b7435e34b28618d92` — proxy loads ABI 6 preview exports;
+- `2d6d5b8a962b93126f68b8af1aa0184b96e6bc30` — proxy preview bridge wrappers;
+- `2fd8bddda9d05496571b87775dcdd289e6d802ea` — exact D3D7 sample colors;
+- `ecb3eb6245c949a8a92a0eeba22050956e177d6e` — continuous capture while preview is active;
+- `b279fcf9edc5beeff5159f0d5fd5565f48a73b15` — F10 preview toggle and path-4 presentation;
+- `72f202b65d9eff538f2995dbf53119730a574bf0` — sampled-only parity readback during continuous preview.
+
+NEXT TEST:
+1. Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+2. Boot normally into gameplay.
+3. First verify the game still looks normal before touching F10.
+4. Press **F10 once** to switch visible output to the DX11 shadow renderer.
+5. Move around/look around for several seconds and inspect:
+   - geometry placement;
+   - textures;
+   - HUD/menu;
+   - transparency/blending;
+   - depth/occlusion;
+   - any half-pixel or shimmering offset;
+   - missing/black/flickering elements.
+6. Press **F10 again** and confirm the normal D3D7-reference image returns instantly.
+7. If useful, toggle back and forth several times.
+8. Exit normally and provide screenshots plus the captured logs.
+
+Expected ABI/runtime markers:
+- compat: `abi=6 expected=6 ... phase2c2_exports=1`;
+- normal presentation before F10:
+  `dx11_shadow=0 dx11_pixels=1 ... compat_result=3`;
+- toggle:
+  `shadow_preview_toggle ... enabled=1 key=F10`;
+  renderer: `shadow_continuous enabled=1`;
+- after one warmup frame:
+  `present_path ... dx11_shadow=1 ... shadow_preview=1 shadow_ready=1 compat_result=4`;
+  renderer: `present_shadow ...`;
+- F10 off:
+  `shadow_preview_toggle ... enabled=0`;
+  renderer: `shadow_continuous enabled=0`;
+  presentation returns to compat_result=3.
+
+GOAL OF THIS TEST:
+Visually characterize the first independently-rendered DX11 Spider-Man scene. Do not suppress D3D7 yet. Use the new exact sample colors + screenshots to correct parity before making DX11 authoritative.
