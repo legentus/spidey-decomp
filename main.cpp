@@ -2192,6 +2192,10 @@ unsigned long SpideyRenderer11GetMirroredTextureCount(void)
 	return gSpideyRenderer11GetResidentTextureCount();
 }
 
+typedef HRESULT (WINAPI *SpideyRetailD3D7SetRenderTargetFn)(
+		LPDIRECT3DDEVICE7,
+		LPDIRECTDRAWSURFACE7,
+		DWORD);
 typedef HRESULT (WINAPI *SpideyRetailD3D7ClearFn)(
 		LPDIRECT3DDEVICE7,
 		DWORD,
@@ -2235,6 +2239,7 @@ struct SpideyRetailTLVertexProbe
 	f32 v;
 };
 
+static SpideyRetailD3D7SetRenderTargetFn gSpideyRetailD3D7SetRenderTargetOriginal = 0;
 static SpideyRetailD3D7ClearFn gSpideyRetailD3D7ClearOriginal = 0;
 static SpideyRetailD3D7SetViewportFn gSpideyRetailD3D7SetViewportOriginal = 0;
 static SpideyRetailD3D7SetRenderStateFn gSpideyRetailD3D7SetRenderStateOriginal = 0;
@@ -2246,11 +2251,13 @@ static void** gSpideyRetailD3D7DrawProbeVtable = 0;
 
 static SpideyRenderer11LegacyShadowState gSpideyRetailShadowState;
 static int gSpideyRetailShadowStateValid = 0;
+static LPDIRECTDRAWSURFACE7 gSpideyRetailShadowRenderTarget = 0;
 
 static LPDIRECTDRAWSURFACE7 gSpideyPendingTransientSurfaces[32];
 static unsigned long gSpideyPendingTransientCount = 0;
 static unsigned long gSpideyShadowSubmitted = 0;
 static unsigned long gSpideyShadowSkipped = 0;
+static unsigned long gSpideyShadowOffscreenSkipped = 0;
 static unsigned long gSpideyTransientQueued = 0;
 static unsigned long gSpideyTransientMirrored = 0;
 static unsigned long gSpideyPresentFrame = 0;
@@ -2469,6 +2476,19 @@ static void SpideyInitializeRetailShadowState(
 			viewport.dvMaxZ;
 	}
 
+	LPDIRECTDRAWSURFACE7 renderTarget =
+		0;
+
+	if (SUCCEEDED(
+			device->GetRenderTarget(
+				&renderTarget)) &&
+		renderTarget)
+	{
+		gSpideyRetailShadowRenderTarget =
+			renderTarget;
+		renderTarget->Release();
+	}
+
 	LPDIRECTDRAWSURFACE7 texture =
 		0;
 
@@ -2485,6 +2505,29 @@ static void SpideyInitializeRetailShadowState(
 
 	gSpideyRetailShadowStateValid =
 		1;
+}
+
+static HRESULT WINAPI SpideyShadowD3D7SetRenderTarget(
+		LPDIRECT3DDEVICE7 device,
+		LPDIRECTDRAWSURFACE7 renderTarget,
+		DWORD flags)
+{
+	if (!gSpideyRetailD3D7SetRenderTargetOriginal)
+		return E_FAIL;
+
+	HRESULT hr =
+		gSpideyRetailD3D7SetRenderTargetOriginal(
+			device,
+			renderTarget,
+			flags);
+
+	if (SUCCEEDED(hr))
+	{
+		gSpideyRetailShadowRenderTarget =
+			renderTarget;
+	}
+
+	return hr;
 }
 
 static HRESULT WINAPI SpideyShadowD3D7Clear(
@@ -2510,7 +2553,9 @@ static HRESULT WINAPI SpideyShadowD3D7Clear(
 			stencil);
 
 	if (SUCCEEDED(hr) &&
-		count == 0)
+		count == 0 &&
+		gSpideyRetailShadowRenderTarget ==
+			*(LPDIRECTDRAWSURFACE7*)0x006B7908)
 	{
 		SpideyRenderer11ShadowSetClear(
 			(unsigned long)flags,
@@ -2757,7 +2802,18 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		shadowFrame <= 5 ||
 		(shadowFrame % 120) == 0;
 
+	const int onMainScene =
+		gSpideyRetailShadowRenderTarget ==
+		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
 	if (captureShadowFrame &&
+		!onMainScene)
+	{
+		++gSpideyShadowOffscreenSkipped;
+	}
+
+	if (captureShadowFrame &&
+		onMainScene &&
 		gSpideyRetailShadowStateValid &&
 		primitiveType == D3DPT_TRIANGLEFAN &&
 		vertexTypeDesc == 324 &&
@@ -2998,6 +3054,7 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyRetailDrawOtherFvf = 0;
 	gSpideyShadowSubmitted = 0;
 	gSpideyShadowSkipped = 0;
+	gSpideyShadowOffscreenSkipped = 0;
 	gSpideyTransientQueued = 0;
 	gSpideyTransientMirrored = 0;
 }
@@ -3022,7 +3079,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu transient_queued=%lu transient_mirrored=%lu resident=%lu device=0x%08lX\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu resident=%lu device=0x%08lX\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -3034,6 +3091,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyRetailDrawOtherFvf,
 				gSpideyShadowSubmitted,
 				gSpideyShadowSkipped,
+				gSpideyShadowOffscreenSkipped,
 				gSpideyTransientQueued,
 				gSpideyTransientMirrored,
 				SpideyRenderer11GetMirroredTextureCount(),
