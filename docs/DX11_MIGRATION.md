@@ -397,3 +397,30 @@ The frontend remains on its original 640x480 logical/physical canvas for the fir
 The implementation is aspect-generic: the logical target follows the client rather than hard-coding 16:9. 16:9 is the first validation target; 16:10/ultrawide can use the same mechanism once projection behavior is proven.
 
 A geometry-range diagnostic was added to establish whether the retail software projection naturally becomes Hor+ when `gGameResolutionX/Y` are widened. If not, the next stage will hook only the projection/FOV setup while keeping this native DX11 target architecture.
+
+
+## Phase 3B — explicit modern video settings
+
+Status: implemented; awaiting runtime validation.
+
+The original Display Options screen is retained rather than replaced. Its three rows are now used as:
+1. Screen Size
+2. Aspect Ratio
+3. Brightness
+
+Screen Size continues using the retail resolution-navigation code, but the injected table now exposes 2560x1440. A selected modern output is persisted independently from the D3D7 compatibility backing. This is the key architectural change that lets the UI honestly say 2560x1440 while the old device quietly receives 1920x1440 only where required.
+
+The old Color Depth row is obsolete because the modern DX11 output is always 32-bit. Its value formatter and left/right handlers are therefore redirected, with exact retail target verification, to a seven-mode aspect selector. The selector writes the game's existing projection/aspect scalar at runtime rather than adding a separate post-process stretch.
+
+Aspect modes:
+- AUTO
+- 4:3
+- 5:4
+- 16:9
+- 16:10
+- 21:9
+- 32:9
+
+AUTO derives the correction from the selected Screen Size. Explicit modes use their corresponding projection scalar. The aspect choice persists in `spidey-modern-video.ini` beside the executable.
+
+This phase intentionally leaves the retail 640x480 frontend canvas intact. The immediate target is native-resolution/widescreen gameplay with a stable original menu; frontend/HUD layout modernization remains a later phase after gameplay projection is validated.
