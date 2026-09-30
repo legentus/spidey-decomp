@@ -8,4 +8,5 @@ EXPORTS
     SpideyRenderer11_Resize
     SpideyRenderer11_BeginFrame
     SpideyRenderer11_Present
+    SpideyRenderer11_PresentHdc
     SpideyRenderer11_Shutdown
