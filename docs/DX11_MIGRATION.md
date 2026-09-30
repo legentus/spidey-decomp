@@ -208,3 +208,16 @@ For this transitional phase, D3D7 still renders the game scene. The legacy proxy
 This is intentionally a migration bridge, not the final renderer architecture. It proves ownership of final presentation without yet porting textures, 2D primitives, or fixed-function 3D rendering. A runtime failure automatically falls back to the known-good direct-HWND presenter.
 
 Native 2560x1440 remains quarantined from D3D7 during this phase. True 16:9 / 2560x1440 rendering follows after DX11 presentation is proven stable.
+
+
+## Phase 1 status: PASSED
+
+Runtime validation on revision `a16d29d7fc6c4b60a817ca25ddcd5ef4ef599ad3` confirmed:
+- ABI 2 bridge loaded successfully;
+- a 2560x1440 DX11/DXGI swap chain initialized;
+- the D3D7 scene was presented through `SpideyRenderer11_PresentHdc`;
+- `dx11=1 direct_hwnd=0` remained active through frontend transitions and live gameplay;
+- at least 5160 presented frames were logged without falling back to the old direct-HWND path;
+- the user reached the main menu, started a new game, entered gameplay, moved around, and exited normally.
+
+Phase 1 therefore proves DX11 ownership of final visible presentation. It does not yet prove native 2560x1440 scene rendering: gameplay is still rendered by D3D7 at 1920x1440 and aspect-fitted into the 2560x1440 DX11 swap chain.
