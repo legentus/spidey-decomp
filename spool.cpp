@@ -95,74 +95,27 @@ static Texture** SpideyResolveRetailTextureHashTable(void)
 
 	gSpideyRetailTextureHashTableResolved = 1;
 
-	// The reconstructed global layout places the 512-entry pointer table
-	// immediately before retail G_LOWGRAPHICS (0x006B78F8), which implies
-	// 0x006B70F8. Do not trust that inference by itself: verify that the
-	// untouched retail Spool_FindTextureEntry code actually embeds this
-	// absolute address before using it.
-	const u32 expectedBase = 0x006B70F8;
-	const unsigned char* retailCode =
-		reinterpret_cast<const unsigned char*>(0x004C9460);
-	const i32 retailSize = 132;
-	i32 found = 0;
+	// Verified from the untouched retail function blob:
+	// tools/functions/5018720.bin == retail Spool_FindTextureEntry
+	//
+	//   004C9466  and eax, 0x1FF
+	//   004C946B  mov eax, [eax*4 + 0x006AB934]
+	//
+	// The old 0x006B70F8 value was inferred from reconstructed global
+	// layout and was wrong. Runtime verification against 0x004C9460 also
+	// could never succeed after PATCH_PUSH_RET had replaced that entry with
+	// the DLL trampoline.
+	const u32 verifiedBase =
+		0x006AB934;
 
-	__try
-	{
-		for (i32 i = 0; i <= retailSize - 4; i++)
-		{
-			u32 value =
-				*reinterpret_cast<const u32*>(retailCode + i);
+	gSpideyRetailTextureChecksumHashTable =
+		reinterpret_cast<Texture**>(verifiedBase);
 
-			if (value == expectedBase)
-			{
-				found = 1;
-				break;
-			}
-		}
-	}
-	__except(EXCEPTION_EXECUTE_HANDLER)
-	{
-		found = 0;
-	}
+	SpideyLogTextureCompat(
+		"texture_hash_table retail_blob_verified base=0x%08X",
+		verifiedBase);
 
-	if (found)
-	{
-		gSpideyRetailTextureChecksumHashTable =
-			reinterpret_cast<Texture**>(expectedBase);
-
-		SpideyLogTextureCompat(
-			"texture_hash_table verified retail_base=0x%08X",
-			expectedBase);
-		return gSpideyRetailTextureChecksumHashTable;
-	}
-
-	FILE* f = fopen("spidey-decomp-compat.log", "a");
-	if (f)
-	{
-		fprintf(
-			f,
-			"texture_hash_table UNRESOLVED expected_base=0x%08X retail_code=",
-			expectedBase);
-
-		__try
-		{
-			for (i32 i = 0; i < retailSize; i++)
-			{
-				fprintf(f, "%02X", retailCode[i]);
-				if (i != retailSize - 1)
-					fputc(' ', f);
-			}
-		}
-		__except(EXCEPTION_EXECUTE_HANDLER)
-		{
-			fprintf(f, "<unreadable>");
-		}
-
-		fputc('\n', f);
-		fclose(f);
-	}
-
-	return 0;
+	return gSpideyRetailTextureChecksumHashTable;
 }
 
 static Texture* SpideyFindTextureInHashTable(
