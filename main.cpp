@@ -1943,6 +1943,7 @@ static void SpideyRestoreSavedRenderResolution()
 
 static int gSpideyModernAspectEnabled = 1;
 static int gSpideyFrontendLegacyMode = 1;
+static int gSpideyShadowPreviewEnabled = 1;
 static unsigned long gSpideyModernLogicalWidth = 0;
 static unsigned long gSpideyModernLogicalHeight = 0;
 static unsigned long gSpideyLegacyPhysicalWidth = 640;
@@ -2001,10 +2002,9 @@ static void SpideyRefreshModernLogicalResolution()
 		height;
 }
 
-static int SpideyUseModernGameplayAspect()
+static int SpideyUseModernOutputAspect()
 {
 	return gSpideyModernAspectEnabled &&
-		!gSpideyFrontendLegacyMode &&
 		gSpideyModernLogicalWidth >= 640 &&
 		gSpideyModernLogicalHeight >= 480;
 }
@@ -2019,7 +2019,7 @@ static void SpideyApplyLogicalRenderResolution(
 		gSpideyLegacyPhysicalHeight;
 
 	if (useModern &&
-		SpideyUseModernGameplayAspect())
+		SpideyUseModernOutputAspect())
 	{
 		width =
 			gSpideyModernLogicalWidth;
@@ -2171,7 +2171,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 
 	SpideyRefreshModernLogicalResolution();
 	SpideyApplyLogicalRenderResolution(
-		!gSpideyFrontendLegacyMode,
+		gSpideyShadowPreviewEnabled ? 1 : 0,
 		gSpideyFrontendLegacyMode ?
 			"display_options_frontend" :
 			"display_options_gameplay");
@@ -3294,7 +3294,6 @@ static unsigned long gSpideyShadowOffscreenSkipped = 0;
 static unsigned long gSpideyTransientQueued = 0;
 static unsigned long gSpideyTransientMirrored = 0;
 static unsigned long gSpideyPresentFrame = 0;
-static int gSpideyShadowPreviewEnabled = 1;
 static int gSpideyShadowPreviewReady = 0;
 static int gSpideyShadowPreviewModeSynced = 0;
 
@@ -3928,7 +3927,7 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		SpideyRenderer11LegacyShadowState shadowState =
 			gSpideyRetailShadowState;
 
-		if (SpideyUseModernGameplayAspect() &&
+		if (SpideyUseModernOutputAspect() &&
 			gSpideyShadowPreviewEnabled)
 		{
 			shadowState.viewportX = 0;
@@ -4229,7 +4228,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyTransientMirrored,
 				SpideyRenderer11GetMirroredTextureCount(),
 				(unsigned long)gSpideyRetailD3D7DrawProbeDevice,
-				SpideyUseModernGameplayAspect() ? 1 : 0,
+				SpideyUseModernOutputAspect() ? 1 : 0,
 				gSpideyModernLogicalWidth,
 				gSpideyModernLogicalHeight,
 				gSpideyLegacyPhysicalWidth,
@@ -5557,7 +5556,7 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		}
 	}
 
-	if (SpideyUseModernGameplayAspect())
+	if (SpideyUseModernOutputAspect())
 	{
 		shadowWidth =
 			gSpideyModernLogicalWidth;
@@ -5619,8 +5618,9 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		}
 	}
 
-	// The original D3D7 draw path remains authoritative and visible. These
-	// counters describe the same completed retail frame that was shadowed.
+	// Retail D3D7 remains the compatibility/reference producer, while the
+	// default visible path replays the same completed primitive stream in DX11.
+	// These counters describe the just-completed retail source frame.
 	SpideyFlushRetailD3D7DrawProbeFrame(
 		frame);
 	SpideyInstallRetailD3D7DrawProbe();
