@@ -6,6 +6,7 @@ Active branch: `dev`
 Upstream: https://github.com/krystalgamer/spidey-decomp  
 Tools upstream: https://github.com/krystalgamer/spidey-tools  
 User orchestration repo: https://github.com/legentus/Spiderman-2000
+Retail Google Drive source: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
 
 ## READ THIS FIRST
 
