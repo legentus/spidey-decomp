@@ -5022,3 +5022,17 @@ Additional static checks before runtime F9 use:
 - D3D7 offscreen render-target draws are never suppressed.
 
 This does not prove there are no obscure same-frame scene-surface consumers, but it removes two obvious risks and keeps the trial reversible/fail-closed. Runtime F9 testing remains the authority before making D3D7 main-scene suppression permanent.
+
+
+### Modern input/camera architecture documented
+
+New design document:
+- `docs/MODERN_INPUT_CAMERA.md`
+- commit `811e5713b4afd8c5d5f62f3324ad75202e29ffec`.
+
+Key compatibility seam:
+- `PCINPUT_GetMappedStates @ 0x0050A190` is the preferred initial digital-action injection point;
+- `Pad_Update @ 0x00505720` remains the downstream legacy action consumer;
+- right-stick/mouse camera intent must stay separate from the legacy digital mask.
+
+The document explicitly preserves the option to replace ordinary legacy camera ownership with a dedicated modern gameplay camera after evaluating the first free-look prototype.
