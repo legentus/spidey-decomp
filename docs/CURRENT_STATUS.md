@@ -4102,3 +4102,53 @@ GO criteria for Phase 2C2:
 - DX11 shadow sample is nonblack on actual rendered gameplay frames.
 
 If those pass, next step is Phase 2C2: make a diagnostic copy/view of the DX11 shadow scene for visual parity inspection, correct any half-pixel/blend/depth differences, then prepare the first controlled switch where DX11 geometry becomes visible while D3D7 remains a fallback.
+
+
+## DX11 Phase 2C1 PASSED — offscreen retail geometry shadow validated — 2026-09-30
+
+Tested revision:
+`ba57b5c7adaf49878b23f8a5cdc09bca33eb747a`
+
+User-visible result:
+- normal boot succeeded;
+- no visible regression reported;
+- existing D3D7-reference -> DX11 PresentPixels path remained the visible output.
+
+Runtime validation:
+- ABI 5 bridge loaded successfully with `phase2c_exports=1`;
+- all seven retail D3D7 state/draw hooks installed successfully;
+- live device validated with GetCaps=S_OK;
+- sampled draw-state diagnostics reported **zero cache mismatches**;
+- every sampled active retail frame had:
+  - `shadow_submit == calls`;
+  - `shadow_skip == 0`;
+  - `shadow_offscreen_skip == 0`;
+- renderer shadow replay had:
+  - `queued == submitted == rendered`;
+  - `skipped_submit == 0`;
+  - `skipped_render == 0`;
+- large gameplay samples successfully replayed thousands of real draws, including 8,271 draws at frame 2760 and 8,139 at frame 3240;
+- shadow target sampled non-black on every compared active frame;
+- the unusual frame 3120 had matching non-black occupancy on both paths: 8/9 samples;
+- the remaining transient texture gap was successfully closed in this run:
+  - 8 previously-unmapped DirectDraw surfaces were mirrored into synthetic IDs 1024..1031;
+  - subsequent sampled frames reported `missing=0`;
+  - one recovered surface was RGB565, demonstrating the transient conversion path is not limited to A1R5G5B5;
+- resident DX11 texture count reached 576;
+- renderer emitted no shadow setup/map/state creation failures.
+
+Quantitative parity:
+- the DX11 3x3 shadow sample hashes do not yet equal the retail D3D7 scene hashes;
+- hash byte ordering was verified equivalent: both compute FNV-style accumulation over COLORREF-compatible 0x00BBGGRR values;
+- therefore the mismatch represents actual pixel-value/rasterization/state differences, not merely diagnostic byte ordering;
+- non-black occupancy nevertheless matches on every compared logged frame, strongly indicating the scene is structurally present and positioned plausibly.
+
+Phase 2C1 conclusion:
+The live retail primitive stream can now be reconstructed into an independent DX11 color/depth scene with complete sampled draw coverage and no observed state-cache divergence. D3D7 remains authoritative/visible.
+
+NEXT FRONTIER — Phase 2C2:
+- add exact nine-pixel sample-value logging to both D3D7 and DX11 diagnostics;
+- add an opt-in runtime preview toggle that presents the DX11 shadow color target while D3D7 continues rendering in the background;
+- run shadow capture continuously only while preview is enabled;
+- preserve instant switch back to the known-good D3D7-reference presentation path;
+- use direct visual comparison + per-pixel samples to correct half-pixel, blend, depth, texture/color, or viewport differences before suppressing any D3D7 draw.
