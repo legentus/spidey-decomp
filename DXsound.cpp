@@ -433,7 +433,25 @@ i32 DXINPUT_PollKeyboard(void)
 	{
 		memset(gKeyState, 0, sizeof(gKeyState));
 
-		hr = g_pKeyboard->Acquire();
+		HRESULT acquireHr = g_pKeyboard->Acquire();
+
+		{
+			FILE* f = fopen(
+				"spidey-decomp-input.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"keyboard_poll_reacquire trigger=0x%08lX result=0x%08lX foreground=0x%08lX\n",
+					(unsigned long)hr,
+					(unsigned long)acquireHr,
+					(unsigned long)GetForegroundWindow());
+				fclose(f);
+			}
+		}
+
+		hr = acquireHr;
 		if (hr == DIERR_OTHERAPPHASPRIO)
 		{
 			DXERR_printf("Other application has priority when attempting to acquire keyboard\n");
@@ -517,7 +535,25 @@ i32 DXINPUT_PollMouse(i32 *pY, i32 *pX)
 	{
 		memset(gMouseButtonState, 0, sizeof(gMouseButtonState));
 
-		hr = g_pMouse->Acquire();
+		HRESULT acquireHr = g_pMouse->Acquire();
+
+		{
+			FILE* f = fopen(
+				"spidey-decomp-input.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"mouse_poll_reacquire trigger=0x%08lX result=0x%08lX foreground=0x%08lX\n",
+					(unsigned long)hr,
+					(unsigned long)acquireHr,
+					(unsigned long)GetForegroundWindow());
+				fclose(f);
+			}
+		}
+
+		hr = acquireHr;
 		if (hr == DIERR_OTHERAPPHASPRIO)
 			return 0;
 
@@ -579,6 +615,81 @@ i32 DXINPUT_PollMouse(i32 *pY, i32 *pX)
 	(void)pY;
 	(void)pX;
 	return 0;
+#endif
+}
+
+static void SpideyLogInputActivation(
+		i32 active,
+		HRESULT keyboardHr,
+		HRESULT mouseHr,
+		HRESULT controllerHr)
+{
+#ifdef _WIN32
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"activation active=%d keyboard=0x%08lX mouse=0x%08lX controller=0x%08lX foreground=0x%08lX active_window=0x%08lX focus=0x%08lX\n",
+		active,
+		(unsigned long)keyboardHr,
+		(unsigned long)mouseHr,
+		(unsigned long)controllerHr,
+		(unsigned long)GetForegroundWindow(),
+		(unsigned long)GetActiveWindow(),
+		(unsigned long)GetFocus());
+	fclose(f);
+#else
+	(void)active;
+	(void)keyboardHr;
+	(void)mouseHr;
+	(void)controllerHr;
+#endif
+}
+
+void DXINPUT_HandleActivation(i32 active)
+{
+#ifdef _WIN32
+	memset(gKeyState, 0, sizeof(gKeyState));
+	memset(gMouseButtonState, 0, sizeof(gMouseButtonState));
+	memset(gControllerButtonState, 0, sizeof(gControllerButtonState));
+
+	HRESULT keyboardHr = DI_OK;
+	HRESULT mouseHr = DI_OK;
+	HRESULT controllerHr = DI_OK;
+
+	if (!active)
+	{
+		if (g_pKeyboard)
+			keyboardHr = g_pKeyboard->Unacquire();
+		if (g_pMouse)
+			mouseHr = g_pMouse->Unacquire();
+		if (gControllerRelated)
+			controllerHr = gControllerRelated->Unacquire();
+
+		SpideyLogInputActivation(
+			0,
+			keyboardHr,
+			mouseHr,
+			controllerHr);
+		return;
+	}
+
+	if (g_pKeyboard)
+		keyboardHr = g_pKeyboard->Acquire();
+	if (g_pMouse)
+		mouseHr = g_pMouse->Acquire();
+	if (gControllerRelated)
+		controllerHr = gControllerRelated->Acquire();
+
+	SpideyLogInputActivation(
+		1,
+		keyboardHr,
+		mouseHr,
+		controllerHr);
 #endif
 }
 
