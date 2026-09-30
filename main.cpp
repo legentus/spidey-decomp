@@ -1400,6 +1400,31 @@ static HMODULE gSpideyRenderer11Module = 0;
 typedef unsigned long (__cdecl *SpideyRenderer11GetAbiVersionFn)(void);
 typedef const char* (__cdecl *SpideyRenderer11GetBackendNameFn)(void);
 typedef int (__cdecl *SpideyRenderer11ProbeFn)(void);
+typedef int (__cdecl *SpideyRenderer11InitializeFn)(
+		HWND,
+		unsigned long,
+		unsigned long);
+typedef int (__cdecl *SpideyRenderer11ResizeFn)(
+		unsigned long,
+		unsigned long);
+typedef int (__cdecl *SpideyRenderer11PresentHdcFn)(
+		HDC,
+		unsigned long,
+		unsigned long,
+		int,
+		int);
+typedef void (__cdecl *SpideyRenderer11ShutdownFn)(void);
+
+static SpideyRenderer11InitializeFn gSpideyRenderer11Initialize = 0;
+static SpideyRenderer11ResizeFn gSpideyRenderer11Resize = 0;
+static SpideyRenderer11PresentHdcFn gSpideyRenderer11PresentHdc = 0;
+static SpideyRenderer11ShutdownFn gSpideyRenderer11Shutdown = 0;
+static int gSpideyRenderer11BridgeReady = 0;
+static int gSpideyRenderer11Initialized = 0;
+static int gSpideyRenderer11PresentationDisabled = 0;
+static HWND gSpideyRenderer11Window = 0;
+static unsigned long gSpideyRenderer11Width = 0;
+static unsigned long gSpideyRenderer11Height = 0;
 
 static int SpideyProbeRenderer11Bridge()
 {
@@ -1442,18 +1467,46 @@ static int SpideyProbeRenderer11Bridge()
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_Probe");
 
+	gSpideyRenderer11Initialize =
+		(SpideyRenderer11InitializeFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_Initialize");
+
+	gSpideyRenderer11Resize =
+		(SpideyRenderer11ResizeFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_Resize");
+
+	gSpideyRenderer11PresentHdc =
+		(SpideyRenderer11PresentHdcFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_PresentHdc");
+
+	gSpideyRenderer11Shutdown =
+		(SpideyRenderer11ShutdownFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_Shutdown");
+
 	if (!getAbi ||
 		!getName ||
-		!probe)
+		!probe ||
+		!gSpideyRenderer11Initialize ||
+		!gSpideyRenderer11Resize ||
+		!gSpideyRenderer11PresentHdc ||
+		!gSpideyRenderer11Shutdown)
 	{
 		if (f)
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_hdc=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
-				(unsigned long)probe);
+				(unsigned long)probe,
+				(unsigned long)gSpideyRenderer11Initialize,
+				(unsigned long)gSpideyRenderer11Resize,
+				(unsigned long)gSpideyRenderer11PresentHdc,
+				(unsigned long)gSpideyRenderer11Shutdown);
 			fclose(f);
 		}
 		return 0;
@@ -1466,20 +1519,126 @@ static int SpideyProbeRenderer11Bridge()
 	int probeResult =
 		probe();
 
+	gSpideyRenderer11BridgeReady =
+		abi == 2 &&
+		probeResult != 0;
+
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=1 backend=%s probe=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=2 backend=%s probe=%d phase1_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
-			probeResult);
+			probeResult,
+			gSpideyRenderer11BridgeReady ? 1 : 0);
 		fclose(f);
 	}
 
-	return abi == 1 &&
-		probeResult != 0;
+	return gSpideyRenderer11BridgeReady;
+}
+
+static int SpideyEnsureRenderer11Presentation(
+		HWND hwnd,
+		unsigned long width,
+		unsigned long height)
+{
+	if (!gSpideyRenderer11BridgeReady ||
+		gSpideyRenderer11PresentationDisabled ||
+		!gSpideyRenderer11Initialize ||
+		!gSpideyRenderer11Resize ||
+		!gSpideyRenderer11Shutdown ||
+		!hwnd ||
+		!width ||
+		!height)
+	{
+		return 0;
+	}
+
+	if (gSpideyRenderer11Initialized &&
+		gSpideyRenderer11Window != hwnd)
+	{
+		gSpideyRenderer11Shutdown();
+		gSpideyRenderer11Initialized = 0;
+		gSpideyRenderer11Window = 0;
+		gSpideyRenderer11Width = 0;
+		gSpideyRenderer11Height = 0;
+	}
+
+	if (!gSpideyRenderer11Initialized)
+	{
+		int initialized =
+			gSpideyRenderer11Initialize(
+				hwnd,
+				width,
+				height);
+
+		FILE* f = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"renderer11_phase1 initialize hwnd=0x%08lX size=%lux%lu result=%d\n",
+				(unsigned long)hwnd,
+				width,
+				height,
+				initialized);
+			fclose(f);
+		}
+
+		if (!initialized)
+		{
+			gSpideyRenderer11PresentationDisabled = 1;
+			return 0;
+		}
+
+		gSpideyRenderer11Initialized = 1;
+		gSpideyRenderer11Window = hwnd;
+		gSpideyRenderer11Width = width;
+		gSpideyRenderer11Height = height;
+		return 1;
+	}
+
+	if (gSpideyRenderer11Width != width ||
+		gSpideyRenderer11Height != height)
+	{
+		int resized =
+			gSpideyRenderer11Resize(
+				width,
+				height);
+
+		FILE* f = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"renderer11_phase1 resize old=%lux%lu new=%lux%lu result=%d\n",
+				gSpideyRenderer11Width,
+				gSpideyRenderer11Height,
+				width,
+				height,
+				resized);
+			fclose(f);
+		}
+
+		if (!resized)
+		{
+			gSpideyRenderer11Shutdown();
+			gSpideyRenderer11Initialized = 0;
+			gSpideyRenderer11PresentationDisabled = 1;
+			return 0;
+		}
+
+		gSpideyRenderer11Width = width;
+		gSpideyRenderer11Height = height;
+	}
+
+	return 1;
 }
 
 typedef void (__cdecl *SpideyRetailDXINITFn)(
@@ -1911,6 +2070,65 @@ static int SpideyCompatPresentSceneToWindow(
 		return 0;
 	}
 
+	if (SpideyEnsureRenderer11Presentation(
+			hwnd,
+			(unsigned long)dstWidth,
+			(unsigned long)dstHeight) &&
+		gSpideyRenderer11PresentHdc)
+	{
+		int dx11Presented =
+			gSpideyRenderer11PresentHdc(
+				sceneDC,
+				(unsigned long)desc.dwWidth,
+				(unsigned long)desc.dwHeight,
+				1,
+				0);
+
+		if (dx11Presented)
+		{
+			scene->ReleaseDC(
+				sceneDC);
+
+			if (shouldLog)
+			{
+				FILE* f = fopen(
+					"spidey-decomp-present.log",
+					"a");
+				if (f)
+				{
+					fprintf(
+						f,
+						"compat_present_dx11 frame=%lu result=1 src=%lux%lu dst=%dx%d aspect_fit=1\n",
+						frame,
+						(unsigned long)desc.dwWidth,
+						(unsigned long)desc.dwHeight,
+						dstWidth,
+						dstHeight);
+					fclose(f);
+				}
+			}
+
+			return 2;
+		}
+
+		FILE* compat = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (compat)
+		{
+			fprintf(
+				compat,
+				"renderer11_phase1 present_failed disabling_dx11_present_fallback=gdi_hwnd\n");
+			fclose(compat);
+		}
+
+		if (gSpideyRenderer11Shutdown)
+			gSpideyRenderer11Shutdown();
+
+		gSpideyRenderer11Initialized = 0;
+		gSpideyRenderer11PresentationDisabled = 1;
+	}
+
 	HDC windowDC =
 		::GetDC(hwnd);
 
@@ -2206,17 +2424,21 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	// between our copies. Use the direct scene->HWND presenter as the sole
 	// windowed presentation path; preserve untouched retail Flip behavior
 	// for the original non-windowed path.
+	int compatPresentPath =
+		0;
+
 	if (!windowedCompat)
 	{
 		retailFlip();
 	}
 	else
 	{
-		SpideyCompatPresentSceneToWindow(
-			hwnd,
-			*(LPDIRECTDRAWSURFACE7*)0x006B7908,
-			frame,
-			shouldLog);
+		compatPresentPath =
+			SpideyCompatPresentSceneToWindow(
+				hwnd,
+				*(LPDIRECTDRAWSURFACE7*)0x006B7908,
+				frame,
+				shouldLog);
 	}
 
 	if (shouldLog)
@@ -2228,11 +2450,13 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		{
 			fprintf(
 				f,
-				"present_path frame=%lu windowed=%d retail_flip=%d direct_hwnd=%d\n",
+				"present_path frame=%lu windowed=%d retail_flip=%d dx11=%d direct_hwnd=%d compat_result=%d\n",
 				frame,
 				windowedCompat,
 				windowedCompat ? 0 : 1,
-				windowedCompat ? 1 : 0);
+				compatPresentPath == 2 ? 1 : 0,
+				compatPresentPath == 1 ? 1 : 0,
+				compatPresentPath);
 			fclose(f);
 		}
 	}
