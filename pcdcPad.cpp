@@ -18,8 +18,11 @@ EXPORT SPdPadBig gBigPad[NUM_PADS];
 i32 Pad_Update(void)
 {
 	Pad_IdleTime++;
-	u32 v3;
-	u32 v4;
+	// PCINPUT_GetMappedStates only writes a mask when it observes an input.
+	// Initialise both masks so an unfocused/failed DirectInput poll cannot
+	// leave movie/menu controls reading stale stack data.
+	u32 v3 = 0;
+	u32 v4 = 0;
 	PCINPUT_GetMappedStates(&v3, &v4);
 
 	if (PCSHELL_UpdateMouse())
