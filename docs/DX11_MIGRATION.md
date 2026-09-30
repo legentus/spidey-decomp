@@ -355,3 +355,26 @@ Parity logging:
 - this supports diagnosis of half-pixel/rasterization, texture conversion, blend, depth, or color discrepancies rather than relying only on a single aggregate hash.
 
 This is still a diagnostic parity stage. Native 16:9 and removal of the D3D7 DrawPrimitive path remain blocked until visual parity is acceptable.
+
+
+## Phase 2C3 — DX11 geometry promoted to default visibility
+
+Phase 2C2 passed runtime and visual validation. The user repeatedly switched the live shadow renderer on/off with F10 and reported that the DX11 image looked correct and possibly slightly better.
+
+Runtime evidence from the validated F10 run:
+- ABI 6 and all 7 live D3D7 hooks succeeded;
+- continuous shadow presentation was stable;
+- no renderer setup/map/present failures;
+- no cache mismatches;
+- no sampled shadow submission or replay skips;
+- representative frame 4080 replayed 5,007/5,007 retail draws;
+- exact D3D7/DX11 samples are close but not bit-identical, with median absolute channel delta of 1 across matched sample sets.
+
+Phase 2C3 changes default ownership of the **visible image**:
+- DX11 shadow/geometry rendering starts enabled;
+- renderer11 continuous replay is synchronized at first Flip;
+- DX11 scene -> DXGI is the normal presentation path;
+- F10 is retained as a live D3D7-reference A/B switch;
+- original D3D7 DrawPrimitive is still executed for now, so this is not yet removal of D3D7 geometry work.
+
+The next gate after default-visible validation is controlled suppression of original main-scene D3D7 DrawPrimitive while the DX11 path remains authoritative.
