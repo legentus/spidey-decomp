@@ -4,6 +4,7 @@
 #include "dcfileio.h"
 #include "DXinit.h"
 #include "SpideyDX.h"
+#include "renderer11_legacy_bridge.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -1508,6 +1509,14 @@ scannedHard:
 			hr = G_GLOBAL_TEXTURES[a1].mD3DTex->Blt(0, pTempSurf, 0, DDBLT_WAIT, 0);
 			D3D_ERROR_LOG_AND_QUIT(hr);
 
+			// Phase 2B: the temp surface contains the exact final pixels and
+			// pixel format that D3D7 receives, after all legacy palette/PVR
+			// conversion. Mirror that finished texture into renderer11 under
+			// the same game texture ID before releasing the staging surface.
+			SpideyRenderer11MirrorLegacyTexture(
+					(unsigned long)a1,
+					pTempSurf);
+
 			hr = pTempSurf->Release();
 			D3D_ERROR_LOG_AND_QUIT(hr);
 #endif
@@ -1995,12 +2004,20 @@ void PCTex_ReleaseAllTextures(void)
 	{
 		releaseClutPc(G_CLUT_PC_RELATED);
 	}
+
+	// The per-slot releases above should already have removed every sidecar.
+	// Clear the modern table as a final lifetime invariant.
+	SpideyRenderer11ReleaseAllMirroredTextures();
 }
 
 // @Ok
 // @AlmostMatching: sligthly different order on the 9FF and thingy
 void PCTex_ReleaseSysTexture(i32 a1, bool a2)
 {
+	// Keep the DX11 sidecar lifetime identical to the existing PCTex slot.
+	SpideyRenderer11ReleaseMirroredTexture(
+			(unsigned long)a1);
+
 	if (G_GLOBAL_TEXTURES[a1].mD3DTex)
 	{
 		if (G_GLOBAL_TEXTURES[a1].mFlags & 0x400)
