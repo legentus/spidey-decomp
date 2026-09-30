@@ -3868,3 +3868,63 @@ Safety expectation:
 GO/NO-GO for actual Phase 2C rendering:
 - GO when live retail draws are overwhelmingly/fully TRIANGLEFAN + FVF 0x144 and textured draws resolve to DX11 mirrored IDs with negligible missing coverage;
 - any other primitive/FVF/state pattern will be implemented explicitly before D3D7 suppression.
+
+
+## Phase 2C0 retail DrawPrimitive probe PASSED — gameplay run 2026-09-30
+
+Tested revision:
+`88c37819fb3935ed7d8a8dd649044a111e4b5752`
+
+User result:
+- booted successfully;
+- entered gameplay and played for a while;
+- no new visible regression reported.
+
+Probe validation:
+- retail EXE fingerprint still matches the known target;
+- live D3D7 device slot `0x006B791C` validated with `GetCaps = S_OK`;
+- DrawPrimitive vtable hook installed successfully across D3D7 device recreation;
+- Phase 2A DX11 presentation remained active and stable.
+
+Full draw-log aggregate:
+- logged active draws: **2,423,890**;
+- triangle fans: **2,423,890 / 2,423,890 (100%)**;
+- FVF 0x144: **2,423,890 / 2,423,890 (100%)**;
+- other primitive types: **0**;
+- other FVFs: **0**;
+- textured draws: **2,384,258**;
+- DX11-mirrored textured draws: **2,383,026**;
+- unresolved textured draws: **1,232**;
+- mirrored coverage: **99.9483%** of textured draws;
+- unresolved draws involve only **9 distinct DirectDraw surface pointers**;
+- max observed calls in a logged frame: **9,316**;
+- resident DX11 texture set reached 568.
+
+Observed baseline fixed-function state:
+- primitive = D3DPT_TRIANGLEFAN (6);
+- FVF = 324 / 0x144;
+- transformed/lit vertex shape matches XYZRHW + diffuse + UV;
+- common depth: Z enabled, ZWRITE enabled for opaque and disabled for translucent, ZFUNC=4 (LESSEQUAL);
+- common opaque blend: ALPHABLEND=0, SRC=2, DST=1;
+- common translucent blend observed on unresolved surfaces: ALPHABLEND=1, SRC=5, DST=6;
+- texture color/alpha op commonly 4 (MODULATE), ARG1=2 (TEXTURE), ARG2=0 (DIFFUSE);
+- addressing observed WRAP(1) and CLAMP(3);
+- MAG/MIN filter observed value 2 (linear);
+- viewport tracks the retail internal target (e.g. 640x480 frontend).
+
+Important conclusion:
+The live retail renderer is dramatically narrower than a general D3D7 backend. The complete observed primitive stream is one primitive family + one FVF. This makes a direct DX11 TL-vertex compatibility pipeline practical.
+
+NEXT FRONTIER:
+1. add on-demand mirroring for the 9 transient/unresolved DirectDraw texture surfaces at the draw boundary;
+2. extend renderer11 ABI for parallel retail primitive submission;
+3. render triangle-fan/FVF-0x144 draws into a separate DX11 offscreen scene target while D3D7 remains the visible reference;
+4. initially emulate the reconstructed fixed-function subset:
+   - depth enable/write/compare;
+   - blend modes used by DXPOLY_SetBlendMode;
+   - texture modulate/select behavior;
+   - texture alpha enable;
+   - wrap/clamp;
+   - point/linear filter;
+   - viewport;
+5. compare/log DX11 shadow frame coverage before suppressing any D3D7 draw.
