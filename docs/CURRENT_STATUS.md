@@ -4718,3 +4718,66 @@ Initial backdrop evidence:
 - gameplay DX11 shadow draws are active at logical 2560x1440 with physical D3D7 backing 1920x1440;
 - frame telemetry includes transformed vertices with extreme screen-coordinate ranges (millions), while normal frontend pre-transformed geometry stays around the original 640x480 coordinate space;
 - investigate special transformed/backdrop geometry and RHW/viewport conversion before changing projection globally.
+
+
+### Phase 3D implementation frontier — modern frontend + TL clipping correction — 2026-09-30
+
+Source commits:
+- `653680d8bb6e4661964cfdb83a90bdc4f85737a6` — preserve D3D7 transformed-vertex screen-space clipping in renderer11;
+- `f74f2ee31e85cfe291bd8dbaa95f9c687c340335` — drive frontend logical resolution / DX11 replay target from selected modern output.
+
+#### Background/backdrop distortion correction
+
+Observed geometry is D3D7 FVF 0x144 / XYZRHW: X/Y/Z are already transformed screen-space values and RHW is carried for perspective interpolation.
+
+Previous renderer11 conversion:
+- computed NDC from X/Y;
+- reconstructed clip W as `1 / RHW`;
+- multiplied X/Y/Z by that clip W;
+- let DX11 clip in varying homogeneous W.
+
+That is not faithful to already-transformed TL geometry when very large off-screen triangles cross viewport boundaries. Gameplay telemetry contains exactly those extreme transformed coordinates, and the visual symptom is moving/warping backgrounds.
+
+New conversion:
+- keep output clip position in screen-space-derived NDC with fixed shader `W = 1`;
+- store source RHW in the input position.w payload only;
+- perform screen-space clipping with constant W;
+- preserve RHW texture perspective explicitly by interpolating `uv * rhw` and `rhw`, then dividing in the pixel shader;
+- depth remains source post-transform Z;
+- F10 D3D7 reference path remains available.
+
+Expected renderer marker:
+`shadow pipeline ready shader_model=4_0 tl_vertex=screen_space manual_uv_perspective=1`.
+
+#### Modern frontend/menu resolution
+
+The frontend still requests a safe legacy 640x480x16 D3D7 device. That physical compatibility backing is intentionally retained.
+
+What changes:
+- selected modern output is now allowed in frontend as the game's logical render resolution;
+- the shell/global logical width/height can therefore be 2560x1440 while the hidden legacy frontend device remains 640x480;
+- DX11 shadow capture/replay viewport and target use the selected modern output in frontend as well as gameplay;
+- F10 reference mode still calls the physical-resolution logical path.
+
+This deliberately separates:
+- **legacy physical backing**: 640x480 frontend / 1920x1440 backing for selected 2560x1440 gameplay;
+- **modern logical + visible DX11 output**: selected resolution/aspect in both frontend and gameplay.
+
+Expected frontend markers after selecting 2560x1440:
+- `logical_render_resolution reason=display_options_frontend modern=1 frontend=1 logical=2560x1440 physical=640x480 selected=2560x1440`;
+- draw frames in frontend: `modern=1 logical=2560x1440 physical=640x480`;
+- renderer11 shadow target remains `2560x1440` across gameplay -> frontend transitions.
+
+NEXT TEST:
+1. update/build with `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. confirm build succeeds and renderer log contains `tl_vertex=screen_space manual_uv_perspective=1`;
+3. confirm Display Options still show/persist 2560x1440 + 16:9;
+4. inspect the main menu before gameplay and after returning from gameplay:
+   - it should now use the selected modern resolution/aspect rather than a 640x480 4:3 render;
+   - check menu artwork, text, cursor/mouse hit-testing, and Options navigation;
+5. enter a level and specifically watch distant level backgrounds/backdrops while moving and rotating the camera;
+6. verify foreground geometry, HUD, transparency, and texture perspective remain stable;
+7. press F10 only if an A/B reference is useful; DX11 should be default and D3D7 should still provide the old reference;
+8. exit and provide full logs plus screenshots of main menu and a gameplay scene if distortion remains.
+
+Do not remove the 640x480 frontend D3D7 backing yet. This test is about modern logical/DX11 frontend ownership while retaining the safe compatibility device.
