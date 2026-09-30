@@ -9,6 +9,7 @@ $SourceDir = Join-Path $RepoRoot "input11"
 $BuildDir = Join-Path $RepoRoot "out\input11\build"
 $ArtifactDir = Join-Path $RepoRoot "out\input11"
 $Artifact = Join-Path $ArtifactDir "spidey_input11.dll"
+$ProbeArtifact = Join-Path $ArtifactDir "spidey_input11_probe.exe"
 
 $cmakeCommand = Get-Command cmake.exe -ErrorAction SilentlyContinue
 $cmakePath = $null
@@ -36,6 +37,9 @@ New-Item -ItemType Directory -Path $ArtifactDir -Force | Out-Null
 
 if (Test-Path -LiteralPath $Artifact) {
     Remove-Item -LiteralPath $Artifact -Force
+}
+if (Test-Path -LiteralPath $ProbeArtifact) {
+    Remove-Item -LiteralPath $ProbeArtifact -Force
 }
 
 $artifactPdb = Join-Path $ArtifactDir "spidey_input11.pdb"
@@ -79,7 +83,13 @@ if (-not (Test-Path $built)) {
     throw "Modern-input build returned success but '$built' was not produced."
 }
 
+$builtProbe = Join-Path $BuildDir "Release\spidey_input11_probe.exe"
+if (-not (Test-Path $builtProbe)) {
+    throw "Modern-input build returned success but '$builtProbe' was not produced."
+}
+
 Copy-Item -LiteralPath $built -Destination $Artifact -Force
+Copy-Item -LiteralPath $builtProbe -Destination $ProbeArtifact -Force
 
 $pdb = Join-Path $BuildDir "Release\spidey_input11.pdb"
 if (Test-Path $pdb) {
@@ -91,4 +101,5 @@ $hash = Get-FileHash -Algorithm SHA256 -LiteralPath $Artifact
 Write-Host ""
 Write-Host "[OK] Modern-input build complete."
 Write-Host "Artifact: $Artifact"
+Write-Host "Probe:    $ProbeArtifact"
 Write-Host "SHA-256: $($hash.Hash)"
