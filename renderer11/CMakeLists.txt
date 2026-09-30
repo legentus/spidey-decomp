@@ -29,6 +29,7 @@ endif()
 target_link_libraries(spidey_renderer11 PRIVATE
     d3d11
     dxgi
+    gdi32
 )
 
 set_target_properties(spidey_renderer11 PROPERTIES
