@@ -4338,3 +4338,72 @@ If Phase 2C3 passes:
 - keep D3D7 state setters, texture/resource creation, and any offscreen passes intact initially;
 - provide a reference-mode switch that re-enables D3D7 draws with a warmup frame;
 - prove the visible game no longer depends on D3D7 geometry rendering before moving scene/depth/resource ownership further into DX11.
+
+
+## DX11 Phase 2C3 PASSED; Phase 3A native desktop gameplay implemented — 2026-09-30
+
+Latest user validation:
+- DX11 geometry default-visible run completed cleanly;
+- user reported no visual issues;
+- F10 reference/DX11 toggling remained clean;
+- the user noted tiny frametime hitches roughly every 0.5–1 second, but reports they were already present before the DX11 conversion and occur regardless of renderer;
+- treat the hitch as a separate profiling item after native-resolution/aspect work unless new evidence ties it to renderer diagnostics.
+
+Runtime evidence:
+- ABI 6 / seven retail D3D7 hooks remained healthy;
+- default mode starts with DX11 geometry enabled;
+- once scene geometry becomes active, presentation runs through `dx11_shadow=1`, `dx11_pixels=0`, `compat_result=4`;
+- sampled gameplay draws continue with zero shadow skips and zero missing textures after transient capture.
+
+Phase 3A implementation:
+- preserve a safe physical D3D7 compatibility surface;
+- separate that from the game's **logical gameplay resolution**;
+- after each retail display-mode transition:
+  - frontend remains its original physical/logical 640x480 path;
+  - gameplay logical resolution is set to the borderless client/desktop dimensions;
+- on the current 2560x1440 desktop this creates:
+  - D3D7 compatibility backing: 1920x1440 (current known-good mode);
+  - game logical gameplay viewport: 2560x1440;
+  - DX11 shadow color/depth target: 2560x1440;
+- shadow DrawPrimitive state uses the modern logical viewport while the retail D3D7 device keeps its physical viewport;
+- renderer11 therefore presents the gameplay shadow target 1:1 to the 2560x1440 swap chain instead of aspect-fitting a 1920x1440 target;
+- frontend remains 4:3/pillarboxed for this first native-gameplay phase;
+- F10 fallback now restores legacy logical dimensions before exposing the D3D7 reference, and keeps the completed DX11 frame visible during that one-frame handoff;
+- F10 back to DX11 restores the desktop-native logical dimensions with the existing warmup.
+
+Aspect handling:
+- this is desktop/client driven rather than hard-coded 2560x1440;
+- 16:9, 16:10, ultrawide, and other client aspects feed the same logical-resolution path;
+- the first required runtime proof is 2560x1440/16:9 on the user's current display.
+
+True Hor+ verification:
+- the DrawPrimitive probe now logs per-frame TL-vertex X/Y ranges;
+- it also reports how many vertices extend outside the physical 4:3 D3D7 width/height;
+- if logical 2560x1440 causes vertices to populate X > 1920 while the vertical range remains appropriate, the original engine projection is naturally responding to the new logical width and true Hor+ is active;
+- if geometry remains confined to the physical 4:3 range, the next step is a narrowly scoped upstream projection/FOV hook rather than stretching the image.
+
+Implementation commits:
+- `dee4d8165afd880cf2961d084cccd2ecd3585425` — desktop-native logical-resolution controls;
+- `e3ce9f6bc8ebe4595a4c548291e97559b8eb609f` — apply modern logical gameplay dimensions after retail mode changes;
+- `b4e57dc4e5e6309e8dc3c209eb2df437e4c36e70` — bind captured draws to modern logical viewport + geometry-range telemetry;
+- `2884cde0e82513d3e413dbf75b7f3e10976b4a21` — native-sized DX11 target + clean F10 legacy handoff.
+
+NEXT TEST:
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected gameplay on the current system:
+- compat log:
+  `logical_render_resolution ... modern=1 frontend=0 logical=2560x1440 physical=1920x1440 client=2560x1440`;
+- renderer log:
+  `shadow targets ready width=2560 height=1440`;
+  `present_shadow ... src=2560x1440 dst=2560x1440 rect=0,0,2560x1440`;
+- present log should show DX11 shadow default without the old 320-pixel pillarbox;
+- draw log should show:
+  `modern=1 logical=2560x1440 physical=1920x1440 xrange=... outside_physical_x=...`.
+
+Visual checks:
+- gameplay fills 16:9 without horizontal stretch;
+- compare vertical framing against the old 4:3 view: desired behavior is same vertical FOV with more world visible left/right;
+- inspect HUD placement and cutscene/gameplay transitions;
+- frontend is intentionally still 4:3;
+- F10 should fall back to a clean 4:3 D3D7 reference, then restore native DX11 on the next toggle.
