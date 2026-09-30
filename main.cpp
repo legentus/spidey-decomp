@@ -870,8 +870,17 @@ static void SpideyInjectModernVideoModes()
 		if (dm.dmPelsWidth == 2560 &&
 			dm.dmPelsHeight == 1440)
 		{
+			// Runtime-proven unsafe on the current DirectDraw7/D3D7 path:
+			// IDirect3D7::CreateDevice rejects the 2560x1440 scene surface
+			// with DDERR_INVALIDOBJECT. Keep detecting the desktop mode for
+			// diagnostics, but do not expose it as a selectable render mode
+			// until the render-target compatibility path is fixed.
 			saw1440 =
 				1;
+
+			memset(&dm, 0, sizeof(dm));
+			dm.dmSize = sizeof(dm);
+			continue;
 		}
 
 		added +=
@@ -887,19 +896,6 @@ static void SpideyInjectModernVideoModes()
 		dm.dmSize = sizeof(dm);
 	}
 
-	// 2560x1440 is a first-class supported render size for the modern
-	// compatibility path even when legacy DirectDraw mode enumeration does
-	// not advertise it. In windowed mode this controls the real offscreen
-	// render target and viewport, not a post-process upscale.
-	if (*(int*)0x006B5998 < 64)
-	{
-		added +=
-			SpideyAppendModernMode(
-				2560,
-				1440,
-				32);
-	}
-
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
 		"a");
@@ -908,7 +904,7 @@ static void SpideyInjectModernVideoModes()
 	{
 		fprintf(
 			f,
-			"modern_modes before=%d after=%d added=%d windows_1440=%d explicit_2560x1440=1\n",
+			"modern_modes before=%d after=%d added=%d windows_1440=%d explicit_2560x1440=0 quarantined_2560x1440=1\n",
 			before,
 			*(int*)0x006B5998,
 			added,
@@ -1068,6 +1064,13 @@ static void SpideyRestoreSavedRenderResolution()
 	DWORD savedBpp =
 		*(DWORD*)0x02E098E4;
 
+	const DWORD requestedWidth =
+		savedWidth;
+	const DWORD requestedHeight =
+		savedHeight;
+	const DWORD requestedBpp =
+		savedBpp;
+
 	if (savedWidth < 512 ||
 		savedWidth > 8192 ||
 		savedHeight < 384 ||
@@ -1084,10 +1087,36 @@ static void SpideyRestoreSavedRenderResolution()
 			32;
 	}
 
+	int quarantined2560 =
+		0;
+
+	// 2560x1440 currently reaches scene-surface creation but the retail
+	// D3D7 CreateDevice call rejects that render target with
+	// DDERR_INVALIDOBJECT. Recover persisted settings to the most recent
+	// runtime-verified working internal mode instead of bricking startup.
+	if (savedWidth == 2560 &&
+		savedHeight == 1440)
+	{
+		savedWidth =
+			1440;
+		savedHeight =
+			1080;
+		savedBpp =
+			32;
+		quarantined2560 =
+			1;
+
+		*(DWORD*)0x02E096F8 =
+			savedWidth;
+		*(DWORD*)0x02E0970C =
+			savedHeight;
+		*(DWORD*)0x02E098E4 =
+			savedBpp;
+	}
+
 	// RealWinMain resets the live render globals to 640x480 after loading
-	// the user's settings. Restore the saved values immediately before
-	// retail DXINIT_DirectX8 so surface creation and the D3D viewport are
-	// actually native to the selected resolution.
+	// the user's settings. Restore the validated/recovered values
+	// immediately before retail DXINIT_DirectX8.
 	*(DWORD*)0x006B78E4 =
 		savedWidth;
 	*(DWORD*)0x006B78E8 =
@@ -1095,7 +1124,6 @@ static void SpideyRestoreSavedRenderResolution()
 	*(DWORD*)0x006B78EC =
 		savedBpp;
 
-	// Retail gGameResolutionX/Y mirrors used by gameplay/render scaling.
 	*(DWORD*)0x00568154 =
 		savedWidth;
 	*(DWORD*)0x00568158 =
@@ -1109,13 +1137,14 @@ static void SpideyRestoreSavedRenderResolution()
 	{
 		fprintf(
 			f,
-			"restore_saved_resolution %lux%lux%lu live_dx=%lux%lux%lu\n",
+			"restore_saved_resolution request=%lux%lux%lu apply=%lux%lux%lu quarantined_2560x1440=%d\n",
+			(unsigned long)requestedWidth,
+			(unsigned long)requestedHeight,
+			(unsigned long)requestedBpp,
 			(unsigned long)savedWidth,
 			(unsigned long)savedHeight,
 			(unsigned long)savedBpp,
-			(unsigned long)*(DWORD*)0x006B78E4,
-			(unsigned long)*(DWORD*)0x006B78E8,
-			(unsigned long)*(DWORD*)0x006B78EC);
+			quarantined2560);
 		fclose(f);
 	}
 }
@@ -1140,6 +1169,29 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		height;
 	const u32 requestedBpp =
 		bpp;
+
+	int quarantined2560 =
+		0;
+
+	if (width == 2560 &&
+		height == 1440)
+	{
+		width =
+			1440;
+		height =
+			1080;
+		bpp =
+			32;
+		quarantined2560 =
+			1;
+
+		*(DWORD*)0x02E096F8 =
+			width;
+		*(DWORD*)0x02E0970C =
+			height;
+		*(DWORD*)0x02E098E4 =
+			bpp;
+	}
 
 	// Retail deliberately moves the frontend to a 640x480x16 internal
 	// canvas after the startup movies. Forcing that legacy frontend canvas
@@ -1169,7 +1221,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	{
 		fprintf(
 			f,
-			"display_options request=%lux%lux%lu apply=%lux%lux%lu option4=%d option5=%d preserve_saved=%d frontend_legacy=%d\n",
+			"display_options request=%lux%lux%lu apply=%lux%lux%lu option4=%d option5=%d preserve_saved=%d frontend_legacy=%d quarantined_2560x1440=%d\n",
 			(unsigned long)requestedWidth,
 			(unsigned long)requestedHeight,
 			(unsigned long)requestedBpp,
@@ -1179,7 +1231,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			option4,
 			option5,
 			preservedSaved,
-			frontendLegacy);
+			frontendLegacy,
+			quarantined2560);
 		fclose(f);
 	}
 
@@ -2305,6 +2358,88 @@ static void SpideyInstallPresentProbe()
 #endif
 
 #ifdef _WIN32
+typedef void (__cdecl *SpideyRetailCleanup503AF0Fn)(void);
+
+static void __cdecl SpideyCompatCleanup503AF0()
+{
+	void* object =
+		*(void**)0x006BBF1C;
+
+	if (!object)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"cleanup_503AF0 skipped null_global=0x006BBF1C\n");
+			fclose(f);
+		}
+		return;
+	}
+
+	SpideyRetailCleanup503AF0Fn retail =
+		(SpideyRetailCleanup503AF0Fn)0x00503AF0;
+	retail();
+}
+
+static void SpideyInstallCleanup503AF0Compat()
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	const unsigned long retailTarget =
+		0x00503AF0;
+	i32 patched =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long rel =
+			*(long*)(p + 1);
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != retailTarget)
+			continue;
+
+		long newRel =
+			(long)(
+				(unsigned char*)&SpideyCompatCleanup503AF0 -
+				(p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+		patched++;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"cleanup_503AF0_compat patched_calls=%d retail=0x00503AF0 wrapper=0x%08lX\n",
+			patched,
+			(unsigned long)&SpideyCompatCleanup503AF0);
+		fclose(f);
+	}
+}
+
 typedef i32 (__cdecl *SpideyRetailPollKeyboardFn)(void);
 typedef i32 (__cdecl *SpideyRetailPollMouseFn)(i32*, i32*);
 
@@ -2711,6 +2846,7 @@ void game_patches(void)
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
+	SpideyInstallCleanup503AF0Compat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);
