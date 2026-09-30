@@ -2253,6 +2253,7 @@ static unsigned long gSpideyShadowSubmitted = 0;
 static unsigned long gSpideyShadowSkipped = 0;
 static unsigned long gSpideyTransientQueued = 0;
 static unsigned long gSpideyTransientMirrored = 0;
+static unsigned long gSpideyPresentFrame = 0;
 
 static unsigned long gSpideyRetailDrawCalls = 0;
 static unsigned long gSpideyRetailDrawTextured = 0;
@@ -2750,7 +2751,14 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 	int shadowSubmitted =
 		0;
 
-	if (gSpideyRetailShadowStateValid &&
+	const unsigned long shadowFrame =
+		gSpideyPresentFrame + 1;
+	const int captureShadowFrame =
+		shadowFrame <= 5 ||
+		(shadowFrame % 120) == 0;
+
+	if (captureShadowFrame &&
+		gSpideyRetailShadowStateValid &&
 		primitiveType == D3DPT_TRIANGLEFAN &&
 		vertexTypeDesc == 324 &&
 		vertices &&
@@ -3542,8 +3550,6 @@ static void SpideyInstallWindowedDirectDrawCompat()
 
 
 #ifdef _WIN32
-static unsigned long gSpideyPresentFrame = 0;
-
 static int SpideyGetCurrentClientScreenRect(
 		HWND hwnd,
 		RECT* outRect)
