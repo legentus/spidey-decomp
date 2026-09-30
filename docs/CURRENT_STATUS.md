@@ -5082,3 +5082,48 @@ Next implementation steps:
 2. load/probe/poll `spidey_input11.dll` from the proxy without injecting actions yet;
 3. validate helper telemetry with and without a controller connected;
 4. only after passive validation, merge semantic controller actions into `PCINPUT_GetMappedStates @ 0x0050A190`.
+
+
+### Modern Input Phase 0 — passive bridge integrated — 2026-09-30
+
+Implementation now includes:
+- legacy-safe `input11_legacy_bridge.h`;
+- proxy-side dynamic loading/probing of `spidey_input11.dll`;
+- ABI v1 validation;
+- per-frame passive polling from the completed-frame path;
+- no gameplay action injection yet;
+- connection/state telemetry in `spidey-decomp-input.log`;
+- helper-provider lifecycle log in `spidey-input11.log`;
+- standard updater/test workflow builds, installs and collects the helper automatically;
+- 32-bit `spidey_input11_probe.exe` preflight runs before the game launches.
+
+Important commits:
+- `44cbb396a1951a995d23e134012d6c0b339a1415` — legacy-safe bridge header;
+- `0dcc44185aa4dacb23246efe6a8e86b0f11cdbb8` — proxy passive load/poll integration;
+- `9c46347e3b5db7f981f59f4015dfc475a0c2ed75` — build/install/log collection;
+- `9bb457f7ba3ac53a07991e73a709a84a3cdc3b91` — 32-bit preflight source;
+- `67eb23e911e2e864ac8e99e255704a4bf01b4ed8` — build probe target;
+- `04f0110c820896974173b26b02ab9b429f27d4b6` — export probe artifact;
+- `84d18970a2d01999682a41308763080fc2d6d057` — run preflight before game;
+- `af0beffbd61db96eb44e726882a97da80f2ec00e` — isolate preflight working directory.
+
+Expected passive runtime markers:
+- updater console:
+  `abi=1 expected=1 backend=spidey_input11/xinput-dynamic probe=1`;
+- proxy input log:
+  `input11_bridge loaded ... abi=1 expected=1 ... passive=1`;
+- no controller:
+  `input11_state ... connected=0 ... passive=1`;
+- connected XInput pad:
+  `input11_state ... connected=1 family=1 user=<n> ... move=... camera=... triggers=... passive=1`;
+- helper log:
+  `backend loaded provider=xinput dll=<chosen xinput dll> abi=1`;
+  plus controller connect/disconnect transitions.
+
+Safety:
+- this phase cannot alter player movement/buttons/camera because the normalized state is observation-only;
+- retail DirectInput remains authoritative until passive runtime proof is received.
+
+Provider roadmap note:
+- current XInput provider is intentionally dependency-free and limited to the Phase 0 proof;
+- broad PlayStation/generic gamepad support remains provider-pluggable behind the same ABI.
