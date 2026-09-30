@@ -3579,3 +3579,44 @@ NEXT TEST:
    - `spidey_renderer11.cpp` compiling;
    - successful renderer11 link;
 3. only after that does the actual Phase 1 runtime presentation test begin.
+
+
+## DX11 Phase 1 PASSED — 2026-09-30
+
+Tested revision:
+`a16d29d7fc6c4b60a817ca25ddcd5ef4ef599ad3`
+
+User-visible result:
+- game booted successfully;
+- reached the main menu;
+- started a new game;
+- entered live gameplay and ran around for roughly a minute;
+- user exited normally after the gameplay test.
+
+Runtime proof:
+- renderer bridge loaded with ABI 2 and `phase1_exports=1`;
+- DX11 Phase 1 initialized successfully at a 2560x1440 client size;
+- renderer11 created the hardware D3D11 device/swap chain and 2560x1440 targets;
+- present log shows the visible windowed path consistently using `dx11=1 direct_hwnd=0 compat_result=2`;
+- renderer11 `present_hdc` continued through at least frame 5160 with no logged fallback;
+- frontend transitions continued to use the legacy 640x480 source while gameplay returned to the 1920x1440 D3D7 scene source;
+- legacy DirectDraw primary remains 1920x1080 but is no longer the visible presentation owner;
+- 2560x1440 remains intentionally quarantined from the legacy D3D7 render-mode path;
+- black side bars therefore remain expected because the active gameplay source is still 1920x1440 (4:3), aspect-fitted to the DX11 2560x1440 swap chain at x=320.
+
+Architecture now:
+1. Retail/reconstructed D3D7 still creates and renders the scene.
+2. The scene surface HDC is handed across the ABI-2 bridge.
+3. `spidey_renderer11.dll` owns the real 2560x1440 DXGI swap chain.
+4. DX11 copies/aspect-fits the legacy scene into its backbuffer.
+5. DXGI Present is now the sole visible presentation path in compatibility/windowed mode.
+6. Direct-HWND GDI presentation remains only as automatic fallback.
+
+Phase 1 is CLOSED.
+
+NEXT FRONTIER:
+- remove the transitional GDI/HDC copy from the normal DX11 path and establish DX11-owned frame/texture upload;
+- then migrate render resources/2D/fixed-function responsibilities until D3D7 no longer constrains scene dimensions;
+- only once DX11 owns the scene render target should 2560x1440 be re-enabled as a true internal render resolution and 16:9 projection/FOV/UI work proceed.
+
+Do not interpret the current 2560x1440 swap-chain size as native 2560x1440 game rendering yet: the current gameplay source remains 1920x1440 and the frontend remains 640x480.
