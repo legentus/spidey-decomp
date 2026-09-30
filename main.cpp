@@ -2617,6 +2617,14 @@ static int gSpideyInput11LastConnected = -1;
 static unsigned long gSpideyInput11LastUser = 0xFFFFFFFFUL;
 static int gSpideyRetailActionMapLogged = 0;
 
+// Raw relative mouse motion is captured later by the existing retail
+// DXINPUT_PollMouse compatibility wrapper, but the passive camera sampler is
+// defined earlier in this translation unit. Keep the shared observation state
+// here so the matching/VC6-era proxy sees declarations before first use.
+static i32 gSpideyRawMouseDeltaX = 0;
+static i32 gSpideyRawMouseDeltaY = 0;
+static unsigned long gSpideyRawMousePollCount = 0;
+
 static void SpideyLogRetailActionMap()
 {
 	if (gSpideyRetailActionMapLogged)
@@ -7001,12 +7009,6 @@ typedef i32 (__cdecl *SpideyRetailPollMouseFn)(i32*, i32*);
 static i32 gSpideyRetailInputForeground = -1;
 static unsigned long gSpideyRetailInputSyncCount = 0;
 
-// Raw relative mouse motion captured transparently from the existing
-// DXINPUT_PollMouse compatibility wrapper. Retail behavior is unchanged;
-// these values are observation-only until the modern camera is enabled.
-static i32 gSpideyRawMouseDeltaX = 0;
-static i32 gSpideyRawMouseDeltaY = 0;
-static unsigned long gSpideyRawMousePollCount = 0;
 
 static void SpideyLogRetailInput(
 		const char* eventName,
