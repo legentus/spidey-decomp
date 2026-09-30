@@ -7,7 +7,7 @@ typedef void* HWND;
 typedef void* HDC;
 #endif
 
-#define SPIDEY_RENDERER11_ABI_VERSION 2UL
+#define SPIDEY_RENDERER11_ABI_VERSION 3UL
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +29,13 @@ __declspec(dllexport) void __cdecl SpideyRenderer11_BeginFrame(
     float b,
     float a);
 __declspec(dllexport) int __cdecl SpideyRenderer11_Present(
+    int vsync);
+__declspec(dllexport) int __cdecl SpideyRenderer11_PresentPixels(
+    const void* pixels,
+    unsigned long sourceWidth,
+    unsigned long sourceHeight,
+    long sourcePitch,
+    int preserveAspect,
     int vsync);
 __declspec(dllexport) int __cdecl SpideyRenderer11_PresentHdc(
     HDC source,
