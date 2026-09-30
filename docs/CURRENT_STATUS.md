@@ -3809,3 +3809,62 @@ NEXT FRONTIER:
   - resolve each current texture surface against the already-proven DX11 sidecar table;
   - log real retail draw coverage and FVF/primitive usage;
 - do not suppress or alter D3D7 rendering until runtime coverage is proven.
+
+
+## Phase 2C0 live retail DrawPrimitive probe ready — 2026-09-30
+
+Purpose:
+Observe the actual retail D3D7 primitive stream before suppressing or replacing any D3D7 draw.
+
+Why this is needed:
+- Phase 2B proved PCTex resource mirroring, but reconstructed `DXsound.cpp::renderScene()` is not on the live retail execution path;
+- therefore coverage must be measured at the live COM device boundary rather than the proxy-owned reconstructed scene queue.
+
+Implementation:
+- recovered retail `IDirect3DDevice7*` slot: `0x006B791C`;
+- validates the live pointer with `GetCaps`;
+- resolves and validates the device vtable;
+- hooks only `IDirect3DDevice7::DrawPrimitive` at vtable index 25;
+- original method is preserved and ALWAYS called; this build does not suppress, duplicate, or replace a primitive;
+- first/unusual draws log:
+  - primitive type;
+  - FVF;
+  - vertex count/flags;
+  - stage-0 legacy texture pointer;
+  - resolved DX11 sidecar texture ID;
+  - first TL vertex when FVF is 0x144;
+  - viewport;
+  - depth, alpha blend/test, fog, texture color/alpha ops, addressing, and filtering state;
+- per presented frame logs aggregate calls/textured/mirrored/missing/primitive/FVF counts;
+- probe is revalidated after display-option changes because retail can recreate the D3D7 device;
+- probe is also revalidated at the verified Flip boundary;
+- `tools/TEST_LATEST_BUILD.ps1` now captures `spidey-decomp-draw.log`.
+
+Code commits:
+- `cfa1db3759beba806a1e5a45fc92088e5d756c83` — live pass-through D3D7 DrawPrimitive probe;
+- `524d17a3f7823cf54b5df586e8ee05ccfa0df986` — test harness captures draw log;
+- `071e69d34a6a3903094e4b4e038cf7804ae767d5` — fixed-function/viewport state snapshot on sampled draws.
+
+NEXT TEST:
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat` and boot through menus into gameplay.
+
+Expected new log:
+`spidey-decomp-draw.log`
+
+Expected installation marker:
+`draw_probe installed device_slot=0x006B791C ... index=25 ... getcaps_hr=0x00000000`
+
+Expected live draw samples:
+`draw_sample ... primitive=... fvf=... count=... texture=... mirrored_id=... v0=... state=... viewport=...`
+
+Expected frame coverage:
+`draw_frame frame=... calls=... textured=... mirrored=... missing=... triangle_fan=... fvf_0x144=... other_primitive=... other_fvf=... resident=...`
+
+Safety expectation:
+- visuals should be unchanged;
+- every probed draw is still executed by the original D3D7 DrawPrimitive;
+- Phase 2A framebuffer upload/presentation remains the visible path.
+
+GO/NO-GO for actual Phase 2C rendering:
+- GO when live retail draws are overwhelmingly/fully TRIANGLEFAN + FVF 0x144 and textured draws resolve to DX11 mirrored IDs with negligible missing coverage;
+- any other primitive/FVF/state pattern will be implemented explicitly before D3D7 suppression.
