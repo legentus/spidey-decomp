@@ -965,7 +965,6 @@ static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
 		top,
 		width,
 		height,
-		SWP_NOACTIVATE |
 		SWP_FRAMECHANGED |
 		SWP_SHOWWINDOW);
 
