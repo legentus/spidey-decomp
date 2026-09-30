@@ -1,11 +1,11 @@
 LIBRARY spidey_renderer11
 
 EXPORTS
-    SpideyRenderer11_GetAbiVersion=_SpideyRenderer11_GetAbiVersion
-    SpideyRenderer11_GetBackendName=_SpideyRenderer11_GetBackendName
-    SpideyRenderer11_Probe=_SpideyRenderer11_Probe
-    SpideyRenderer11_Initialize=_SpideyRenderer11_Initialize
-    SpideyRenderer11_Resize=_SpideyRenderer11_Resize
-    SpideyRenderer11_BeginFrame=_SpideyRenderer11_BeginFrame
-    SpideyRenderer11_Present=_SpideyRenderer11_Present
-    SpideyRenderer11_Shutdown=_SpideyRenderer11_Shutdown
+    SpideyRenderer11_GetAbiVersion
+    SpideyRenderer11_GetBackendName
+    SpideyRenderer11_Probe
+    SpideyRenderer11_Initialize
+    SpideyRenderer11_Resize
+    SpideyRenderer11_BeginFrame
+    SpideyRenderer11_Present
+    SpideyRenderer11_Shutdown
