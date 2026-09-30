@@ -378,3 +378,22 @@ Phase 2C3 changes default ownership of the **visible image**:
 - original D3D7 DrawPrimitive is still executed for now, so this is not yet removal of D3D7 geometry work.
 
 The next gate after default-visible validation is controlled suppression of original main-scene D3D7 DrawPrimitive while the DX11 path remains authoritative.
+
+
+## Phase 3A — desktop-native gameplay resolution and aspect
+
+Status: implemented, awaiting runtime validation.
+
+The renderer migration is now far enough along that physical D3D7 surface dimensions no longer need to define the visible game's resolution. Phase 3A separates three concepts:
+
+1. **physical D3D7 compatibility surface** — retained only so the legacy device/state/resource path remains alive;
+2. **logical game resolution** — the dimensions the retail engine sees for gameplay projection/layout;
+3. **DX11 render/swap target** — the actual modern visible resolution.
+
+For gameplay, logical dimensions now follow the borderless client. On a 2560x1440 desktop the engine is told 2560x1440 while the known-good D3D7 backing remains 1920x1440. Captured TL vertices are replayed using a 2560x1440 logical viewport into a 2560x1440 DX11 color/depth target.
+
+The frontend remains on its original 640x480 logical/physical canvas for the first pass. This intentionally separates gameplay widescreen/FOV work from menu/HUD modernization.
+
+The implementation is aspect-generic: the logical target follows the client rather than hard-coding 16:9. 16:9 is the first validation target; 16:10/ultrawide can use the same mechanism once projection behavior is proven.
+
+A geometry-range diagnostic was added to establish whether the retail software projection naturally becomes Hor+ when `gGameResolutionX/Y` are widened. If not, the next stage will hook only the projection/FOV setup while keeping this native DX11 target architecture.
