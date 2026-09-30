@@ -4781,3 +4781,98 @@ NEXT TEST:
 8. exit and provide full logs plus screenshots of main menu and a gameplay scene if distortion remains.
 
 Do not remove the 640x480 frontend D3D7 backing yet. This test is about modern logical/DX11 frontend ownership while retaining the safe compatibility device.
+
+
+## Phase 3D runtime result — visual pass; live-apply/input follow-ups — 2026-09-30
+
+Tested revision:
+- `e836711981744db3916b6dad636f88879ead0bfb`.
+
+User result:
+- modern frontend/main-menu rendering is a major visual improvement;
+- the transformed-vertex clipping correction makes gameplay backgrounds/backdrops look substantially better;
+- two remaining UX issues:
+  1. changing Display Options and pressing Apply commits/saves the selection, but the visible running scene does not always reflect the new setting until restart;
+  2. after leaving gameplay and returning to the main menu, the mouse cursor still moves but mouse clicking/hover selection no longer works correctly.
+
+Runtime proof:
+- renderer11 initializes at 2560x1440 and the new pipeline marker is active:
+  `tl_vertex=screen_space manual_uv_perspective=1`;
+- frontend is now modern logical 2560x1440 while retaining the safe hidden 640x480 D3D7 backing;
+- Apply commits are recorded for both 4:3 and 16:9 in the same run, including `saved_now=1`;
+- gameplay is modern logical 2560x1440 over the 1920x1440 legacy compatibility backing;
+- steady-state observed main-scene frames are entirely the expected triangle-fan / FVF 0x144 subset and submit all observed draws to renderer11 with `shadow_skip=0`;
+- transient texture misses occur during resource/mode transitions but settle to zero after mirroring.
+
+Interpretation:
+- persistence/transaction logic is working;
+- remaining Apply issue is **live presentation/layout activation**, not failure to save the setting;
+- mouse device is still live (cursor movement continues and input log shows successful foreground acquisition); likely failure is stale frontend mouse coordinate/bounds state across gameplay -> frontend logical-resolution transition.
+
+### DX11 migration status after Phase 3D
+
+Current validated position:
+- DX11 owns the visible modern output path;
+- DX11 mirrors retail textures and fixed-function state;
+- DX11 replays effectively 100% of the observed current main-scene primitive stream in sampled frontend/gameplay frames;
+- modern 2560x1440 logical rendering and selected aspect behavior are operational;
+- transformed TL-vertex clipping/perspective semantics are now much closer to retail D3D7 and visually validated.
+
+Still legacy-dependent:
+- retail D3D7 device/surfaces still exist as compatibility/source infrastructure;
+- retail D3D7 still produces the transformed primitive/state stream that renderer11 mirrors/replays;
+- some offscreen/resource/movie/device-lifecycle responsibilities still pass through legacy DirectDraw/D3D7 infrastructure;
+- F10 intentionally preserves a D3D7 reference path for A/B diagnosis.
+
+Next renderer milestone is therefore not basic draw coverage; it is **removing D3D7 as the producer/dependency beneath the already-working DX11 visible path**.
+
+### New major modernization goals accepted
+
+#### Modern controller layer
+Target:
+- complete modern gamepad support;
+- left-stick movement;
+- right-stick camera;
+- triggers/bumpers/start/back/stick buttons;
+- deadzones, sensitivity, inversion;
+- rumble;
+- controller menu navigation;
+- persistent per-action remapping;
+- dynamic button-prompt UI/glyphs based on last active input device;
+- retain keyboard/mouse interoperability.
+
+Existing game already has useful foundations:
+- controller action-mapping tables and setters/getters;
+- controller polling and button-state paths;
+- legacy controller configuration/menu concepts;
+- force-feedback entry points.
+
+Plan:
+- add a normalized modern controller state layer rather than exposing raw legacy DirectInput joystick assumptions directly to gameplay;
+- feed that state into the existing action mapping where appropriate;
+- keep a dedicated right-stick axis pair available for modern camera control.
+
+#### Modern mouse/right-stick camera
+Target:
+- user-controlled third-person camera during normal gameplay;
+- mouse and right-stick yaw/pitch;
+- Spider-Man movement no longer forcibly dictates camera heading;
+- preserve scripted, boss, cutscene, fixed, special traversal, and camera-collision behavior;
+- optional configurable recenter behavior rather than mandatory continuous recentering.
+
+Existing game camera has strong reusable foundations:
+- camera modes include NORMAL, LOOSE, USER, LOOKAROUND and others;
+- camera angle/distance/offset setters already exist;
+- player `PutCameraBehind` is a concrete current recenter path that follows Spider-Man heading;
+- lookaround setup/exit machinery and camera-angle locks already exist in retail.
+
+Recommended architecture:
+1. finish current live Apply + frontend mouse-state fixes;
+2. stabilize the DX11/D3D7 lifecycle boundary;
+3. create normalized modern input/controller layer;
+4. add mouse/right-stick free-look as an overlay on existing camera state, suppressing automatic `PutCameraBehind` recenter only in normal user-controlled gameplay;
+5. add button glyphs/remapping UI after normalized action state is stable.
+
+Immediate next work:
+- make Apply activate selected output/aspect in the current running frontend/gameplay without restart;
+- synchronize frontend mouse coordinate/bounds state whenever legacy physical backing and modern logical output diverge or transition.
