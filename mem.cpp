@@ -418,8 +418,10 @@ void *Mem_NewTop(size_t size)
 	pBlock = pChoice;
 	pLast = pChoiceLast;
 
-	// if the found block is too small, error
-	if (pBlock->Size<size)
+	// If the fixed heap is completely exhausted there may be no free-list
+	// node at all. Return NULL so DCMem_New can use the compatibility heap
+	// instead of dereferencing a null pBlock.
+	if (!pBlock || pBlock->Size<size)
 	{
 		return NULL;
 	}
