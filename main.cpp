@@ -2893,6 +2893,9 @@ const SpideyInput11LegacyState* SpideyInput11GetState()
 
 static CCamera* gSpideyCameraTelemetryLastCamera = 0;
 static int gSpideyCameraTelemetryLastMode = -9999;
+static i32 gSpideyFrameMouseDeltaX = 0;
+static i32 gSpideyFrameMouseDeltaY = 0;
+static unsigned long gSpideyFrameMousePollCount = 0;
 
 static const char* SpideyCameraModeName(
 		int mode)
@@ -2930,6 +2933,22 @@ static const char* SpideyCameraModeName(
 static void SpideyCameraPassivePoll(
 		unsigned long frame)
 {
+	// Snapshot and clear relative mouse motion once per completed frame.
+	// The input wrapper may be called more than once before Flip, so accumulate
+	// there and consume here.
+	gSpideyFrameMouseDeltaX =
+		gSpideyRawMouseDeltaX;
+	gSpideyFrameMouseDeltaY =
+		gSpideyRawMouseDeltaY;
+	gSpideyFrameMousePollCount =
+		gSpideyRawMousePollCount;
+	gSpideyRawMouseDeltaX =
+		0;
+	gSpideyRawMouseDeltaY =
+		0;
+	gSpideyRawMousePollCount =
+		0;
+
 	// 0x0056F3B8 is the retail active-camera pointer used by
 	// CPlayer::PutCameraBehind. Read only; Phase 0 camera work must not
 	// mutate retail camera state.
@@ -3066,7 +3085,7 @@ static void SpideyCameraPassivePoll(
 		{
 			fprintf(
 				f,
-				"camera_state frame=%lu camera=0x%08lX event=%s mode=%d mode_name=%s pushed_mode=%d heading=%d transform_heading=%d pos=%d,%d,%d focus=%d,%d,%d xz_dist=%d y_dist=%d zoom=%d collision_rays=%d,%d input_connected=%d input_camera=%.4f,%.4f passive=1\n",
+				"camera_state frame=%lu camera=0x%08lX event=%s mode=%d mode_name=%s pushed_mode=%d heading=%d transform_heading=%d pos=%d,%d,%d focus=%d,%d,%d xz_dist=%d y_dist=%d zoom=%d collision_rays=%d,%d input_connected=%d input_camera=%.4f,%.4f input_mouse=%d,%d mouse_polls=%lu passive=1\n",
 				frame,
 				(unsigned long)camera,
 				cameraChanged ? "camera_change" :
@@ -3090,7 +3109,10 @@ static void SpideyCameraPassivePoll(
 				collisionRayBack,
 				modernController,
 				input ? input->cameraX : 0.0f,
-				input ? input->cameraY : 0.0f);
+				input ? input->cameraY : 0.0f,
+				gSpideyFrameMouseDeltaX,
+				gSpideyFrameMouseDeltaY,
+				gSpideyFrameMousePollCount);
 			fclose(f);
 		}
 	}
@@ -6979,6 +7001,13 @@ typedef i32 (__cdecl *SpideyRetailPollMouseFn)(i32*, i32*);
 static i32 gSpideyRetailInputForeground = -1;
 static unsigned long gSpideyRetailInputSyncCount = 0;
 
+// Raw relative mouse motion captured transparently from the existing
+// DXINPUT_PollMouse compatibility wrapper. Retail behavior is unchanged;
+// these values are observation-only until the modern camera is enabled.
+static i32 gSpideyRawMouseDeltaX = 0;
+static i32 gSpideyRawMouseDeltaY = 0;
+static unsigned long gSpideyRawMousePollCount = 0;
+
 static void SpideyLogRetailInput(
 		const char* eventName,
 		HRESULT keyboardHr,
@@ -7135,9 +7164,27 @@ static i32 __cdecl SpideyCompatRetailPollMouse(
 	SpideyRetailPollMouseFn retail =
 		(SpideyRetailPollMouseFn)0x00501CC0;
 
-	return retail(
-		pY,
-		pX);
+	const i32 result =
+		retail(
+			pY,
+			pX);
+
+	if (result)
+	{
+		// Despite the historical local parameter names, retail
+		// PCINPUT_UpdateMouse applies the first DXINPUT_PollMouse output to
+		// gMouseX and the second output to gMouseY. Preserve the retail call
+		// untouched and only mirror those relative deltas for camera telemetry.
+		if (pY)
+			gSpideyRawMouseDeltaX +=
+				*pY;
+		if (pX)
+			gSpideyRawMouseDeltaY +=
+				*pX;
+		++gSpideyRawMousePollCount;
+	}
+
+	return result;
 }
 
 static void SpideyInstallRetailInputCompat()
