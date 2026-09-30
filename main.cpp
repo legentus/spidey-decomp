@@ -1141,7 +1141,12 @@ static unsigned long gSpideySelectedOutputWidth = 640;
 static unsigned long gSpideySelectedOutputHeight = 480;
 static unsigned long gSpideySelectedOutputBpp = 32;
 
+static unsigned long gSpideyPendingOutputWidth = 640;
+static unsigned long gSpideyPendingOutputHeight = 480;
 static int gSpideyAspectMode = 0;
+static int gSpideyPendingAspectMode = 0;
+static CMenu* gSpideyDisplayMenu = 0;
+
 static const char* const gSpideyAspectLabels[] =
 {
 	"AUTO",
@@ -1154,6 +1159,8 @@ static const char* const gSpideyAspectLabels[] =
 };
 static char gSpideyAspectRatioMenuLabel[] =
 	"Aspect Ratio";
+static char gSpideyDisplayApplyMenuLabel[] =
+	"Apply";
 static char gSpideyModernVideoIniPath[MAX_PATH];
 
 static const char* SpideyGetModernVideoIniPath()
@@ -1216,9 +1223,12 @@ static const char* SpideyGetModernVideoIniPath()
 	return gSpideyModernVideoIniPath;
 }
 
-static float SpideyGetSelectedAspectScalar()
+static float SpideyGetAspectScalar(
+		int mode,
+		unsigned long width,
+		unsigned long height)
 {
-	switch (gSpideyAspectMode)
+	switch (mode)
 	{
 		case 1:
 			return 1.0f;
@@ -1236,6 +1246,15 @@ static float SpideyGetSelectedAspectScalar()
 			break;
 	}
 
+	if (width < 1 || height < 1)
+		return 1.0f;
+
+	return (4.0f * (float)height) /
+		(3.0f * (float)width);
+}
+
+static float SpideyGetSelectedAspectScalar()
+{
 	unsigned long width =
 		gSpideySelectedOutputWidth;
 	unsigned long height =
@@ -1249,13 +1268,10 @@ static float SpideyGetSelectedAspectScalar()
 			(unsigned long)*(DWORD*)0x02E0970C;
 	}
 
-	if (width < 1 || height < 1)
-		return 1.0f;
-
-	// This is the original PC widescreen correction used by community tools:
-	// 4:3 is 1.0; wider targets reduce the horizontal projection scalar.
-	return (4.0f * (float)height) /
-		(3.0f * (float)width);
+	return SpideyGetAspectScalar(
+		gSpideyAspectMode,
+		width,
+		height);
 }
 
 static void SpideyLogAspectSetting(
@@ -1269,13 +1285,16 @@ static void SpideyLogAspectSetting(
 
 	fprintf(
 		f,
-		"display_aspect reason=%s mode=%d label=%s scalar=%.6f selected=%lux%lu scalar_addr=0x00550064\n",
+		"display_aspect reason=%s mode=%d label=%s scalar=%.6f selected=%lux%lu pending=%lux%lu pending_aspect=%s scalar_addr=0x00550064\n",
 		reason ? reason : "unknown",
 		gSpideyAspectMode,
 		gSpideyAspectLabels[gSpideyAspectMode],
 		(double)*(float*)0x00550064,
 		gSpideySelectedOutputWidth,
-		gSpideySelectedOutputHeight);
+		gSpideySelectedOutputHeight,
+		gSpideyPendingOutputWidth,
+		gSpideyPendingOutputHeight,
+		gSpideyAspectLabels[gSpideyPendingAspectMode]);
 	fclose(f);
 }
 
@@ -1330,6 +1349,51 @@ static void SpideyLoadModernVideoSettings()
 		gSpideyAspectMode =
 			0;
 	}
+
+	gSpideyPendingAspectMode =
+		gSpideyAspectMode;
+}
+
+static void SpideyResetPendingDisplaySettings(
+		const char* reason)
+{
+	gSpideyPendingOutputWidth =
+		gSpideySelectedOutputWidth;
+	gSpideyPendingOutputHeight =
+		gSpideySelectedOutputHeight;
+	gSpideyPendingAspectMode =
+		gSpideyAspectMode;
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_pending_reset reason=%s selected=%lux%lu aspect=%s\n",
+			reason ? reason : "unknown",
+			gSpideyPendingOutputWidth,
+			gSpideyPendingOutputHeight,
+			gSpideyAspectLabels[gSpideyPendingAspectMode]);
+		fclose(f);
+	}
+}
+
+static int __cdecl SpideyFormatPendingResolution(
+		char* dst,
+		const char*,
+		u32,
+		u32)
+{
+	if (!dst)
+		return 0;
+
+	return sprintf(
+		dst,
+		"%lux%lu",
+		gSpideyPendingOutputWidth,
+		gSpideyPendingOutputHeight);
 }
 
 static int __cdecl SpideyFormatAspectRatioValue(
@@ -1341,7 +1405,7 @@ static int __cdecl SpideyFormatAspectRatioValue(
 		return 0;
 
 	const char* label =
-		gSpideyAspectLabels[gSpideyAspectMode];
+		gSpideyAspectLabels[gSpideyPendingAspectMode];
 
 	strcpy(
 		dst,
@@ -1357,18 +1421,24 @@ static u32 __cdecl SpideyDisplayAspectPrev(
 		(int)(sizeof(gSpideyAspectLabels) /
 			  sizeof(gSpideyAspectLabels[0]));
 
-	gSpideyAspectMode--;
-	if (gSpideyAspectMode < 0)
-		gSpideyAspectMode =
+	gSpideyPendingAspectMode--;
+	if (gSpideyPendingAspectMode < 0)
+		gSpideyPendingAspectMode =
 			count - 1;
 
-	SpideySaveModernVideoSettings();
-	SpideyApplySelectedAspect(
-		"display_menu_prev");
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_pending_aspect direction=prev value=%s committed=%s\n",
+			gSpideyAspectLabels[gSpideyPendingAspectMode],
+			gSpideyAspectLabels[gSpideyAspectMode]);
+		fclose(f);
+	}
 
-	// Row 1 used to return a color depth which retail writes back to the
-	// saved bpp field. Keep that field unchanged/valid while using the same
-	// left-arrow control for aspect ratio.
 	return currentBpp;
 }
 
@@ -1379,17 +1449,159 @@ static u32 __cdecl SpideyDisplayAspectNext(
 		(int)(sizeof(gSpideyAspectLabels) /
 			  sizeof(gSpideyAspectLabels[0]));
 
-	gSpideyAspectMode++;
-	if (gSpideyAspectMode >= count)
-		gSpideyAspectMode =
+	gSpideyPendingAspectMode++;
+	if (gSpideyPendingAspectMode >= count)
+		gSpideyPendingAspectMode =
 			0;
 
-	SpideySaveModernVideoSettings();
-	SpideyApplySelectedAspect(
-		"display_menu_next");
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_pending_aspect direction=next value=%s committed=%s\n",
+			gSpideyAspectLabels[gSpideyPendingAspectMode],
+			gSpideyAspectLabels[gSpideyAspectMode]);
+		fclose(f);
+	}
 
 	return currentBpp;
 }
+
+typedef u8 (__cdecl *SpideyRetailResolutionStepFn)(
+		u32*,
+		u32*,
+		u32,
+		i32,
+		bool);
+
+static u8 SpideyStepPendingResolution(
+		unsigned long retailAddress,
+		const char* direction,
+		u32,
+		i32,
+		bool)
+{
+	u32 width =
+		(u32)gSpideyPendingOutputWidth;
+	u32 height =
+		(u32)gSpideyPendingOutputHeight;
+
+	SpideyRetailResolutionStepFn retail =
+		(SpideyRetailResolutionStepFn)retailAddress;
+
+	u8 result =
+		retail(
+			&width,
+			&height,
+			32,
+			0,
+			false);
+
+	if (result)
+	{
+		gSpideyPendingOutputWidth =
+			width;
+		gSpideyPendingOutputHeight =
+			height;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_pending_resolution direction=%s result=%d value=%lux%lu committed=%lux%lu\n",
+			direction ? direction : "unknown",
+			result ? 1 : 0,
+			gSpideyPendingOutputWidth,
+			gSpideyPendingOutputHeight,
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight);
+		fclose(f);
+	}
+
+	return result;
+}
+
+static u8 __cdecl SpideyDisplayPendingPrevResolution(
+		u32*,
+		u32*,
+		u32 bpp,
+		i32 option,
+		bool exact)
+{
+	return SpideyStepPendingResolution(
+		0x00500F40,
+		"prev",
+		bpp,
+		option,
+		exact);
+}
+
+static u8 __cdecl SpideyDisplayPendingNextResolution(
+		u32*,
+		u32*,
+		u32 bpp,
+		i32 option,
+		bool exact)
+{
+	return SpideyStepPendingResolution(
+		0x00500E20,
+		"next",
+		bpp,
+		option,
+		exact);
+}
+
+static u8 __cdecl SpideyDisplayAspectResolutionNoop(
+		u32*,
+		u32*,
+		u32,
+		i32,
+		bool)
+{
+	// Retail used to change resolution after changing color depth. Row 1 is
+	// now Aspect Ratio, so that compatibility search must not touch Screen Size.
+	return 1;
+}
+
+typedef void (__thiscall *SpideyRetailMenuAddEntryFn)(
+		CMenu*,
+		const char*);
+
+static void __fastcall SpideyDisplayAddBrightnessAndApply(
+		CMenu* menu,
+		void*,
+		const char* brightnessLabel)
+{
+	SpideyRetailMenuAddEntryFn retailAdd =
+		(SpideyRetailMenuAddEntryFn)0x0043FFF0;
+
+	retailAdd(
+		menu,
+		brightnessLabel);
+	retailAdd(
+		menu,
+		gSpideyDisplayApplyMenuLabel);
+
+	gSpideyDisplayMenu =
+		menu;
+
+	SpideyResetPendingDisplaySettings(
+		"menu_open");
+}
+
+static void __cdecl SpideyDisplayConfirmOrApply(
+		u32,
+		u32,
+		u32,
+		i32,
+		i32);
 
 static int SpideyPatchDirectCall(
 		unsigned long callAddress,
@@ -1522,26 +1734,75 @@ static void SpideyInstallDisplayAspectCompat()
 			1;
 	}
 
-	const int formatInstalled =
+	const int resolutionFormatInstalled =
+		SpideyPatchDirectCall(
+			0x0050DB56,
+			0x00529F90,
+			(void*)&SpideyFormatPendingResolution,
+			"resolution_format_pending");
+
+	const int aspectFormatInstalled =
 		SpideyPatchDirectCall(
 			0x0050DBBB,
 			0x00529F90,
 			(void*)&SpideyFormatAspectRatioValue,
-			"aspect_format");
+			"aspect_format_pending");
 
-	const int prevInstalled =
+	const int aspectPrevInstalled =
 		SpideyPatchDirectCall(
 			0x0050DDAB,
 			0x005010C0,
 			(void*)&SpideyDisplayAspectPrev,
-			"aspect_prev");
+			"aspect_prev_pending");
 
-	const int nextInstalled =
+	const int aspectNextInstalled =
 		SpideyPatchDirectCall(
 			0x0050DDCE,
 			0x00501060,
 			(void*)&SpideyDisplayAspectNext,
-			"aspect_next");
+			"aspect_next_pending");
+
+	const int aspectResolutionNextDisabled =
+		SpideyPatchDirectCall(
+			0x0050DDFB,
+			0x00500E20,
+			(void*)&SpideyDisplayAspectResolutionNoop,
+			"aspect_resolution_next_disabled");
+
+	const int aspectResolutionPrevDisabled =
+		SpideyPatchDirectCall(
+			0x0050DE1F,
+			0x00500F40,
+			(void*)&SpideyDisplayAspectResolutionNoop,
+			"aspect_resolution_prev_disabled");
+
+	const int resolutionPrevInstalled =
+		SpideyPatchDirectCall(
+			0x0050DE71,
+			0x00500F40,
+			(void*)&SpideyDisplayPendingPrevResolution,
+			"resolution_prev_pending");
+
+	const int resolutionNextInstalled =
+		SpideyPatchDirectCall(
+			0x0050DE88,
+			0x00500E20,
+			(void*)&SpideyDisplayPendingNextResolution,
+			"resolution_next_pending");
+
+	const int applyEntryInstalled =
+		SpideyPatchDirectCall(
+			0x0050DA72,
+			0x0043FFF0,
+			(void*)&SpideyDisplayAddBrightnessAndApply,
+			"apply_entry");
+
+	const int applyConfirmInstalled =
+		SpideyPatchDirectCall(
+			0x0050DCF8,
+			0x00500250,
+			(void*)&SpideyDisplayConfirmOrApply,
+			"apply_confirm");
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
@@ -1550,11 +1811,18 @@ static void SpideyInstallDisplayAspectCompat()
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 row1=Aspect_Ratio label=%d format=%d prev=%d next=%d modes=7\n",
+			"display_menu_mod retail=0x0050D9B0 rows=4 row1=Aspect_Ratio row3=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d\n",
 			labelInstalled,
-			formatInstalled,
-			prevInstalled,
-			nextInstalled);
+			resolutionFormatInstalled,
+			aspectFormatInstalled,
+			aspectPrevInstalled,
+			aspectNextInstalled,
+			aspectResolutionNextDisabled,
+			aspectResolutionPrevDisabled,
+			resolutionPrevInstalled,
+			resolutionNextInstalled,
+			applyEntryInstalled,
+			applyConfirmInstalled);
 		fclose(f);
 	}
 }
