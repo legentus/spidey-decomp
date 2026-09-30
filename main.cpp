@@ -917,6 +917,78 @@ static void SpideyInjectModernVideoModes()
 	}
 }
 
+
+typedef void (__cdecl *SpideyRetailInitDirectDrawFn)(HWND);
+
+static void __cdecl SpideyCompatInitDirectDraw7(
+		HWND hwnd)
+{
+	SpideyRetailInitDirectDrawFn retail =
+		(SpideyRetailInitDirectDrawFn)0x004FEDD0;
+
+	retail(hwnd);
+	SpideyInjectModernVideoModes();
+}
+
+static void SpideyInstallModernModeReinitCompat()
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	const unsigned long retailInitDirectDraw =
+		0x004FEDD0;
+
+	int patched =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		long rel =
+			*(long*)(p + 1);
+
+		unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != retailInitDirectDraw)
+			continue;
+
+		long newRel =
+			(long)(
+				(unsigned char*)&SpideyCompatInitDirectDraw7 -
+				(p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+
+		patched++;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"modern_mode_reinit patched_calls=%d retail_init=0x004FEDD0 wrapper=0x%08lX\n",
+			patched,
+			(unsigned long)&SpideyCompatInitDirectDraw7);
+		fclose(f);
+	}
+}
+
 static void SpideyRestoreSavedRenderResolution()
 {
 	DWORD savedWidth =
@@ -1935,6 +2007,7 @@ void game_patches(void)
 
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
+	SpideyInstallModernModeReinitCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 
