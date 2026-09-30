@@ -1570,8 +1570,12 @@ static u8 __cdecl SpideyDisplayAspectResolutionNoop(
 	return 1;
 }
 
-typedef void (__thiscall *SpideyRetailMenuAddEntryFn)(
+// MSVC6 does not accept an explicit __thiscall function-pointer typedef.
+// Use an ABI-compatible __fastcall declaration instead: menu -> ECX,
+// unused dummy -> EDX, and the retail AddEntry label remains on the stack.
+typedef void (__fastcall *SpideyRetailMenuAddEntryFn)(
 		CMenu*,
+		void*,
 		const char*);
 
 static void __fastcall SpideyDisplayAddBrightnessAndApply(
@@ -1584,9 +1588,11 @@ static void __fastcall SpideyDisplayAddBrightnessAndApply(
 
 	retailAdd(
 		menu,
+		0,
 		brightnessLabel);
 	retailAdd(
 		menu,
+		0,
 		gSpideyDisplayApplyMenuLabel);
 
 	gSpideyDisplayMenu =
