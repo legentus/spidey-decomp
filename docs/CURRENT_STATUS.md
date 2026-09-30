@@ -3767,3 +3767,45 @@ Expected:
 
 Important:
 A successful 2B test still renders polygons with D3D7. It proves resource parity and handle coverage. Phase 2C will use these SRVs and the already-decoded `SDXPolyField` layout to replace the centralized D3D7 `DrawPrimitive(D3DPT_TRIANGLEFAN,...)` path incrementally.
+
+
+## DX11 Phase 2B resource mirroring PASSED; retail draw hook required — 2026-09-30
+
+Tested revision:
+`ba3e494f52edf269d22f7cde82e78527978a2cdd`
+
+User result:
+- game booted normally;
+- user entered gameplay and played successfully.
+
+Resource-mirroring proof from the uploaded logs:
+- renderer bridge loaded ABI 4 with `phase2b_exports=1`;
+- early DX11 initialization succeeded at 2560x1440;
+- 2,002 PCTex mirror operations succeeded;
+- 2,002 legacy-handle associations succeeded;
+- zero `dx11_mirror ... result=0` records were emitted;
+- all observed mirrored source textures in this run were 16-bit A1R5G5B5-style surfaces (R=0x7C00 G=0x03E0 B=0x001F A=0x8000);
+- resident DX11 texture count reached 568;
+- Phase 2A presentation remained `dx11_pixels=1 dx11_hdc=0 direct_hwnd=0 compat_result=3` through gameplay.
+
+Important discovery:
+- no `dx11_draw_coverage` lines were emitted at all;
+- therefore the retail EXE is still executing its own `renderScene()` / DXPOLY loop;
+- the reconstructed `DXsound.cpp::renderScene()` implementation is not a live patched path;
+- the PCTex hooks are live because `patch_pctex()` redirects those functions, but DXPOLY has not yet been redirected.
+
+Retail D3D7 device address recovered from existing runtime disassembly evidence:
+- prior DX error diagnostics around the verified retail CreateDevice call at `0x004FEA4A` include:
+  `A1 18 79 6B 00` -> retail IDirect3D7* at `0x006B7918`;
+  `8B 15 08 79 6B 00` -> scene surface at `0x006B7908`;
+  `68 1C 79 6B 00` -> address of the CreateDevice output slot;
+- therefore the live retail `IDirect3DDevice7*` is stored at `0x006B791C`.
+
+NEXT FRONTIER:
+- hook the live retail IDirect3DDevice7 vtable rather than the reconstructed DXPOLY queue;
+- first hook is diagnostic/pass-through only:
+  - validate the device pointer with GetCaps;
+  - wrap BeginScene/EndScene/DrawPrimitive (and optionally Clear) while always calling the original D3D7 methods;
+  - resolve each current texture surface against the already-proven DX11 sidecar table;
+  - log real retail draw coverage and FVF/primitive usage;
+- do not suppress or alter D3D7 rendering until runtime coverage is proven.
