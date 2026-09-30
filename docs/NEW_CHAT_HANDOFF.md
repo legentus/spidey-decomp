@@ -4,16 +4,61 @@
 **Active repository:** https://github.com/legentus/spidey-decomp  
 **Active branch:** `dev`  
 **Live source of truth:** `dev` + `docs/CURRENT_STATUS.md`  
-**Current implementation frontier:** `4cd7bf549696c76d8ad7176c6e3682c4ce9f4516`  
-**Current documentation frontier:** live `dev` after passive input/camera RE documentation.
+**Current implementation frontier:** `201fc404605746f2fe5811f692d1c39b7fa6bcc6`  
+**Current documentation frontier:** live `dev`; passive modern-input/action/camera/mouse telemetry is documented and the next boundary is one combined runtime test.
 
 > **CURRENT OVERRIDE:** Later Phase 3C sections in this file are historical context. The actual pending user-facing test is now Phase 3D live Apply + frontend mouse return. Phase 3E F9 D3D7-draw suppression is implemented but defaults OFF and should only be exercised after the Phase 3D checks pass. Modern Input Phase 0 and passive camera ownership telemetry are also implemented; both are observation-only.
 
-### Current pending user-facing checks
-1. At 2560x1440, change 16:9 -> 4:3 -> Apply and verify the running frontend changes immediately without restart.
-2. Change back to 16:9 -> Apply and verify immediate full-width restoration.
-3. Enter gameplay, return to main menu, and verify mouse hover/click works after the gameplay -> frontend transition.
-4. Confirm logs contain `frontend_bounds_sync` and the new `logical_render_resolution ... selected=... content=... aspect=...` fields.
+### Current combined runtime test
+
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+The normal/default path must be tested first; F9 stays OFF until the normal checks pass.
+
+1. Confirm the updater builds:
+   - matching proxy;
+   - `spidey_renderer11.dll`;
+   - `spidey_input11.dll`;
+   - 32-bit `spidey_input11_probe.exe`.
+2. Confirm input preflight prints:
+   `abi=1 expected=1 backend=spidey_input11/xinput-dynamic probe=1`.
+3. Display Options at 2560x1440:
+   - 16:9 -> 4:3 -> Apply, with no restart;
+   - confirm immediate centered 4:3 content;
+   - 4:3 -> 16:9 -> Apply;
+   - confirm immediate full 2560x1440 content.
+4. Enter gameplay and return to main menu:
+   - mouse must move, hover and click normally.
+5. If an XInput-compatible controller is available, leave it connected and move:
+   - left stick;
+   - right stick;
+   - triggers;
+   - several face/shoulder buttons.
+   Retail gameplay controls are still authoritative in this passive phase; modern state is only logged.
+6. During ordinary gameplay, move the mouse enough to generate camera-intent telemetry. Camera must NOT respond yet.
+7. Exercise a representative mix of:
+   - floor movement;
+   - wall/ceiling traversal if convenient;
+   - swing/fall;
+   - pause/menu transitions;
+   - any lookaround/special camera encountered naturally.
+8. After all normal checks pass, optionally press F9 once in steady gameplay:
+   - play/move/pause for a short period;
+   - watch for missing geometry/effects or behavioral changes;
+   - F10 must still provide complete D3D7 reference behavior;
+   - press F9 again to disable suppression if anything looks wrong.
+9. Exit normally and provide the complete generated log set.
+
+New expected evidence:
+- `spidey-input11.log`;
+- `spidey-decomp-camera.log`;
+- `input11_bridge loaded ... passive=1`;
+- `input11_state ... move=... camera=... triggers=... legacy_analog=...`;
+- 11 `retail_action_map ...` rows containing the game's own action labels;
+- `camera_state ... mode=... mode_name=... input_camera=... input_mouse=... passive=1`;
+- `retail_input event=frontend_bounds_sync ...`;
+- `logical_render_resolution ... selected=... content=... aspect=...`;
+- if F9 is used: `d3d7_suppressed` / `d3d7_fallback`.
 
 ### Next renderer-isolation experiment after those checks
 - F9 toggles guarded suppression of already-DX11-accepted main-scene D3D7 draws.
