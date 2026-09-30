@@ -2151,3 +2151,62 @@ NEXT TEST:
 - if image appears, verify splash/title/menu visibility;
 - if still black, let it run at least 10 seconds and provide all logs;
 - key line will be `compat_present ... result=...` in `spidey-decomp-present.log`.
+
+
+## Presentation probe result: scene renders, visible presentation path is broken — 2026-09-30
+
+Latest tested revision:
+`527aa0ba2fea79865d4b06e683defd2e59a169cc`
+
+User result:
+- game remains a black visible window/box;
+- game audio is audible;
+- game continues accepting input and advancing state underneath the black output.
+
+Presentation probe evidence:
+- probe installed successfully at retail `DXPOLY_EndScene -> DXPOLY_Flip` call site `0x00502D41`;
+- retail flip target remains `0x00502990`;
+- windowed mode flag is active;
+- HWND is valid;
+- stored and live client rectangles both remain `0,0,640,480`;
+- no stale-rectangle correction was needed;
+- offscreen scene surface:
+  - valid pointer;
+  - `640x480`;
+  - 32 bpp;
+  - not lost;
+  - GetDC succeeds;
+  - all sampled points are non-black;
+- primary DirectDraw surface:
+  - valid pointer;
+  - desktop-sized `1920x1080`;
+  - 32 bpp;
+  - not lost;
+  - GetDC succeeds;
+  - all sampled points are non-black.
+
+Critical temporal result:
+- scene sample hash is initially `0x7E0B5BDA`;
+- by frames 360/480 it changes to `0x3B302417`, proving rendered scene content changes over time;
+- primary sample hash remains frozen at `0x3565BD06` across frames 1..480;
+- therefore the game renderer is generating changing visible pixels in the offscreen scene surface, but the changing scene is not reaching the user-visible window through the legacy DirectDraw primary-surface path.
+
+Conclusion:
+- rendering generation is working;
+- game logic/input/audio are working;
+- the black-window bug is isolated to presentation/composition after the offscreen scene surface;
+- stale `gRect` is ruled out;
+- surface-loss is ruled out;
+- source scene being black is ruled out;
+- do NOT modify gameplay, texture generation, D3D scene rendering, audio, or input while fixing this.
+
+**NEXT FRONTIER / RECOMMENDED NEXT ACTION:**
+Implement a narrow compatibility presenter that bypasses the legacy DirectDraw primary-surface/DWM path:
+1. keep retail rendering into `g_pDDS_Scene` unchanged;
+2. after retail `DXPOLY_Flip` (or instead of its windowed primary Blt), acquire the scene surface DC or lock/read the 32-bpp scene surface;
+3. present those already-rendered pixels directly to the actual game HWND using a controlled GDI path (`BitBlt`/compatible DC or `StretchDIBits`);
+4. first implement as a diagnostic compatibility probe, not a renderer rewrite;
+5. if the image appears, classify the bug as modern-Windows/DWM incompatibility with legacy DirectDraw primary-surface presentation and retain the direct HWND presenter as the compatibility solution;
+6. once visible rendering is restored, resume the parked Options fix, audio follow-up, and XInput/Xbox controller work one at a time.
+
+Do not spend another cycle on DirectDraw SetDisplayMode, bpp, texture lookup, or scene rendering before trying the direct HWND presentation probe.
