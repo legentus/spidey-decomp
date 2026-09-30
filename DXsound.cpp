@@ -421,27 +421,57 @@ i32 DXINPUT_PollKeyboard(void)
 		return -1;
 	}
 
-	if (g_pKeyboard->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), didod, &dwElements, 0) == DIERR_INPUTLOST)
+	HRESULT hr =
+		g_pKeyboard->GetDeviceData(
+			sizeof(DIDEVICEOBJECTDATA),
+			didod,
+			&dwElements,
+			0);
+
+	if (hr == DIERR_INPUTLOST ||
+		hr == DIERR_NOTACQUIRED)
 	{
-		HRESULT hr = g_pKeyboard->Acquire();
+		memset(gKeyState, 0, sizeof(gKeyState));
+
+		hr = g_pKeyboard->Acquire();
 		if (hr == DIERR_OTHERAPPHASPRIO)
 		{
 			DXERR_printf("Other application has priority when attempting to acquire keyboard\n");
 			return -1;
 		}
 
-		DI_ERROR_LOG_AND_QUIT(hr);
-		if (g_pKeyboard->GetDeviceData(sizeof(DIDEVICEOBJECTDATA), didod, &dwElements, 0) == DIERR_NOTACQUIRED)
+		if (FAILED(hr))
+		{
+			return -1;
+		}
+
+		dwElements = 16;
+		memset(didod, 0, sizeof(didod));
+		hr =
+			g_pKeyboard->GetDeviceData(
+				sizeof(DIDEVICEOBJECTDATA),
+				didod,
+				&dwElements,
+				0);
+
+		if (hr == DIERR_INPUTLOST ||
+			hr == DIERR_NOTACQUIRED)
 		{
 			return -1;
 		}
 	}
+
+	if (FAILED(hr))
+		return -1;
 
 	for (i32 i = 0; i < 256; i++)
 		gKeyState[i] &= ~0x80u;
 
 	for (DWORD k = 0; k < dwElements; k++)
 	{
+		if (didod[k].dwOfs >= 256)
+			continue;
+
 		if (didod[k].dwData & 0x80)
 		{
 			gKeyState[didod[k].dwOfs] = -1;
@@ -452,16 +482,104 @@ i32 DXINPUT_PollKeyboard(void)
 		}
 	}
 
-	return dwElements;
+	return (i32)dwElements;
 #endif
 	return 0;
 }
 
-// @MEDIUMTODO
-i32 DXINPUT_PollMouse(i32 *,i32 *)
+// Buffered DirectInput mouse polling with the same transition semantics used
+// by the keyboard path: 0xFF=new press, 0x7F=held, 0x80=release, 0=idle.
+i32 DXINPUT_PollMouse(i32 *pY, i32 *pX)
 {
-    printf("DXINPUT_PollMouse(i32 *,i32 *)");
-	return 0x23082024;
+#ifdef _WIN32
+	if (!pY || !pX)
+		return 0;
+
+	*pY = 0;
+	*pX = 0;
+
+	if (!g_pMouse)
+		return 0;
+
+	DWORD dwElements = 16;
+	DIDEVICEOBJECTDATA didod[16];
+	memset(didod, 0, sizeof(didod));
+
+	HRESULT hr =
+		g_pMouse->GetDeviceData(
+			sizeof(DIDEVICEOBJECTDATA),
+			didod,
+			&dwElements,
+			0);
+
+	if (hr == DIERR_INPUTLOST ||
+		hr == DIERR_NOTACQUIRED)
+	{
+		memset(gMouseButtonState, 0, sizeof(gMouseButtonState));
+
+		hr = g_pMouse->Acquire();
+		if (hr == DIERR_OTHERAPPHASPRIO)
+			return 0;
+
+		if (FAILED(hr))
+			return 0;
+
+		dwElements = 16;
+		memset(didod, 0, sizeof(didod));
+		hr =
+			g_pMouse->GetDeviceData(
+				sizeof(DIDEVICEOBJECTDATA),
+				didod,
+				&dwElements,
+				0);
+
+		if (hr == DIERR_INPUTLOST ||
+			hr == DIERR_NOTACQUIRED)
+		{
+			return 0;
+		}
+	}
+
+	if (FAILED(hr))
+		return 0;
+
+	for (i32 button = 0; button < 3; button++)
+		gMouseButtonState[button] &= ~0x80u;
+
+	for (DWORD k = 0; k < dwElements; k++)
+	{
+		switch (didod[k].dwOfs)
+		{
+			case DIMOFS_X:
+				*pX += (i32)didod[k].dwData;
+				break;
+			case DIMOFS_Y:
+				*pY += (i32)didod[k].dwData;
+				break;
+			case DIMOFS_BUTTON0:
+			case DIMOFS_BUTTON1:
+			case DIMOFS_BUTTON2:
+			{
+				const i32 button =
+					(i32)didod[k].dwOfs -
+					(i32)DIMOFS_BUTTON0;
+				if (didod[k].dwData & 0x80)
+					gMouseButtonState[button] = 0xFF;
+				else
+					gMouseButtonState[button] = 0x80;
+				break;
+			}
+			default:
+				break;
+		}
+	}
+
+	return 1;
+#else
+	(void)pY;
+	(void)pX;
+	return 0;
+#endif
 }
 
 // @Ok
