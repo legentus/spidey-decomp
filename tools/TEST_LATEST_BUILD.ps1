@@ -352,9 +352,16 @@ if (-not (Test-Path $input11Probe)) {
 }
 
 Write-Host "[..] Running 32-bit modern-input preflight..."
-& $input11Probe
-if ($LASTEXITCODE -ne 0) {
-    Stop-WithPause ("Modern input preflight failed with exit code " + $LASTEXITCODE + ".") $LASTEXITCODE
+$input11ProbeDir = Split-Path -Parent $input11Probe
+Push-Location $input11ProbeDir
+try {
+    & $input11Probe
+    $input11ProbeExit = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+if ($input11ProbeExit -ne 0) {
+    Stop-WithPause ("Modern input preflight failed with exit code " + $input11ProbeExit + ".") $input11ProbeExit
 }
 Write-Host "[OK] Modern input preflight passed."
 
