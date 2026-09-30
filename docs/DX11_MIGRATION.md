@@ -273,3 +273,30 @@ The centralized `renderScene()` loop has also been mapped:
 - per-poly state selects blend mode, address U/V, texture alpha, and point/bilinear filtering.
 
 For Phase 2B the loop only resolves each non-null legacy texture handle against the DX11 sidecar index and logs coverage. D3D7 still draws every polygon. This provides the evidence needed to activate Phase 2C without guessing texture coverage.
+
+
+## Phase 2C0 — live retail primitive interception
+
+Status: pass-through diagnostic hook implemented, awaiting runtime validation.
+
+Phase 2B established reliable DX11 texture ownership, but its reconstructed `renderScene()` coverage logger produced no runtime records. This proves that the live retail EXE still owns the DXPOLY scene queue and primitive loop.
+
+The migration seam therefore moves one layer lower: the live retail `IDirect3DDevice7` COM interface.
+
+Recovered retail globals from the verified CreateDevice machine-code window:
+- `IDirect3D7*`: `0x006B7918`;
+- scene surface: `0x006B7908`;
+- `IDirect3DDevice7*` output slot: `0x006B791C`.
+
+The Phase 2C0 probe:
+- validates `*(IDirect3DDevice7**)0x006B791C` through `GetCaps`;
+- patches only vtable index 25 (`DrawPrimitive`);
+- preserves and always invokes the original D3D7 method;
+- resolves the current stage-0 DirectDraw texture against the Phase 2B DX11 sidecar index;
+- samples FVF 0x144 TL vertices and captures relevant fixed-function state;
+- aggregates per-frame primitive/FVF/texture coverage at the already-verified Flip boundary;
+- reinstalls after display mode changes that may recreate the D3D7 device.
+
+This step deliberately does not render any primitive with DX11 yet. Its output determines the exact fixed-function subset Phase 2C must emulate.
+
+Once coverage/state data is validated, the next renderer should initially shadow the retail primitive stream into an offscreen DX11 target while D3D7 remains the visible source. Only after visual/state parity is established should the original D3D7 `DrawPrimitive` calls be suppressed.
