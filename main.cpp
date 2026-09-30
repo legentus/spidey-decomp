@@ -4348,6 +4348,39 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	const unsigned long frame =
 		++gSpideyPresentFrame;
 
+	int shadowPreviewToggled =
+		0;
+	int shadowPreviewToggledOn =
+		0;
+
+	if (GetAsyncKeyState(VK_F10) & 1)
+	{
+		gSpideyShadowPreviewEnabled =
+			gSpideyShadowPreviewEnabled ? 0 : 1;
+		gSpideyShadowPreviewReady =
+			0;
+		shadowPreviewToggled =
+			1;
+		shadowPreviewToggledOn =
+			gSpideyShadowPreviewEnabled ? 1 : 0;
+
+		SpideyRenderer11ShadowSetContinuous(
+			gSpideyShadowPreviewEnabled);
+
+		FILE* previewLog = fopen(
+			"spidey-decomp-present.log",
+			"a");
+		if (previewLog)
+		{
+			fprintf(
+				previewLog,
+				"shadow_preview_toggle frame=%lu enabled=%d key=F10\n",
+				frame,
+				gSpideyShadowPreviewEnabled);
+			fclose(previewLog);
+		}
+	}
+
 	// DXPOLY_Flip runs after retail EndScene. Transient texture surfaces are
 	// no longer actively bound for drawing here, so this is the safe point
 	// to lock/mirror them and then replay the queued retail primitive stream
@@ -4396,6 +4429,21 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 				frame,
 				shadowWidth,
 				shadowHeight);
+	}
+
+	if (!gSpideyShadowPreviewEnabled)
+	{
+		gSpideyShadowPreviewReady =
+			0;
+	}
+	else if (!shadowPreviewToggledOn &&
+		shadowFrameResult)
+	{
+		// Enabling at this Flip is intentionally a one-frame warmup: the
+		// just-finished frame may have been sampled rather than captured
+		// continuously. The next frame is fully captured before previewing.
+		gSpideyShadowPreviewReady =
+			1;
 	}
 
 	if ((frame <= 5 ||
@@ -4458,7 +4506,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	const int shouldLog =
 		frame <= 5 ||
 		(frame % 120) == 0 ||
-		rectCorrected;
+		rectCorrected ||
+		shadowPreviewToggled;
 
 	if (shouldLog)
 	{
@@ -4524,6 +4573,15 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	{
 		retailFlip();
 	}
+	else if (gSpideyShadowPreviewEnabled &&
+		gSpideyShadowPreviewReady &&
+		SpideyRenderer11PresentShadow(
+			1,
+			0))
+	{
+		compatPresentPath =
+			4;
+	}
 	else
 	{
 		compatPresentPath =
@@ -4543,14 +4601,17 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		{
 			fprintf(
 				f,
-				"present_path frame=%lu windowed=%d retail_flip=%d dx11=%d dx11_pixels=%d dx11_hdc=%d direct_hwnd=%d compat_result=%d\n",
+				"present_path frame=%lu windowed=%d retail_flip=%d dx11=%d dx11_shadow=%d dx11_pixels=%d dx11_hdc=%d direct_hwnd=%d shadow_preview=%d shadow_ready=%d compat_result=%d\n",
 				frame,
 				windowedCompat,
 				windowedCompat ? 0 : 1,
 				compatPresentPath >= 2 ? 1 : 0,
+				compatPresentPath == 4 ? 1 : 0,
 				compatPresentPath == 3 ? 1 : 0,
 				compatPresentPath == 2 ? 1 : 0,
 				compatPresentPath == 1 ? 1 : 0,
+				gSpideyShadowPreviewEnabled,
+				gSpideyShadowPreviewReady,
 				compatPresentPath);
 			fclose(f);
 		}
