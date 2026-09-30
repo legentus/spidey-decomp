@@ -7,7 +7,7 @@ typedef void* HWND;
 typedef void* HDC;
 #endif
 
-#define SPIDEY_RENDERER11_ABI_VERSION 3UL
+#define SPIDEY_RENDERER11_ABI_VERSION 4UL
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,6 +43,21 @@ __declspec(dllexport) int __cdecl SpideyRenderer11_PresentHdc(
     unsigned long sourceHeight,
     int preserveAspect,
     int vsync);
+__declspec(dllexport) int __cdecl SpideyRenderer11_UpdateTexture(
+    unsigned long textureId,
+    const void* pixels,
+    unsigned long width,
+    unsigned long height,
+    long pitch,
+    unsigned long bitsPerPixel,
+    unsigned long redMask,
+    unsigned long greenMask,
+    unsigned long blueMask,
+    unsigned long alphaMask);
+__declspec(dllexport) void __cdecl SpideyRenderer11_ReleaseTexture(
+    unsigned long textureId);
+__declspec(dllexport) void __cdecl SpideyRenderer11_ReleaseAllTextures(void);
+__declspec(dllexport) unsigned long __cdecl SpideyRenderer11_GetResidentTextureCount(void);
 __declspec(dllexport) void __cdecl SpideyRenderer11_Shutdown(void);
 
 #ifdef __cplusplus
