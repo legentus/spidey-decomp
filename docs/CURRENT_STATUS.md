@@ -3410,3 +3410,32 @@ After Phase 0 passes:
   - latest 1440p two-session evidence;
   - previous Sep-30 full handoff as historical baseline;
   - disconnect/live-documentation protocol.
+
+
+## First DX11 Phase 0 test: renderer11 export linker failure — 2026-09-30
+
+User ran `UPDATE_AND_TEST_LATEST_BUILD.bat` against runtime revision
+`0fbc7b6a90c630ff8070fd6a9ed9ba14f0c101f0`.
+
+Observed:
+- legacy matching proxy force-cleaned, compiled, and linked successfully;
+- CMake configured `renderer11` as VS 2022 Win32/x86 successfully;
+- `spidey_renderer11.cpp` compiled successfully;
+- final renderer11 DLL link failed before installation/launch;
+- all eight exports named by `renderer11/spidey_renderer11.def` were reported unresolved;
+- therefore no DX11 runtime probe occurred and this is NOT a game/runtime-rendering failure.
+
+Root cause:
+- the .def currently aliases each public export to an explicitly underscore-prefixed x86 C symbol, e.g.
+  `SpideyRenderer11_Probe=_SpideyRenderer11_Probe`;
+- module-definition export resolution already performs the x86 C-name decoration lookup for an undecorated export entry;
+- explicitly supplying the underscore-prefixed alias causes an additional decoration lookup / wrong internal name on the modern linker path;
+- a local MSVC-ABI-compatible i686 COFF reproduction with clang-cl + lld-link confirms the behavior:
+  explicit `Foo=_Foo` fails looking for `__Foo`, while plain `Foo` resolves the object symbol `_Foo` and links.
+
+ACTIVE FIX:
+- change the .def EXPORTS list to plain undecorated public names with no `=_Name` aliases;
+- keep the C ABI and `extern "C" __cdecl` source definitions unchanged;
+- rerun the same Phase 0 one-click test after this build-only correction.
+
+Do not advance to DX11 Phase 1 until the helper builds, installs, loads, ABI-checks, and probes successfully.
