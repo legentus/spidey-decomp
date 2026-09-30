@@ -3305,3 +3305,92 @@ Widescreen note:
 - menus remaining 640x480/4:3 are separate from gameplay render resolution;
 - do not stretch the 4:3 frontend;
 - once a live 16:9 gameplay target is working, validate retail projection/FOV and then patch UI safe-area mapping independently.
+
+
+## DX11 migration started — Phase 0 bridge scaffold — 2026-09-30
+
+Decision:
+- stop investing heavily in making DirectDraw7/Direct3D7 the long-term modern renderer;
+- migrate to Direct3D 11 incrementally;
+- keep the current D3D7 path as a temporary reference/fallback until DX11 reaches parity;
+- do NOT pursue DX12 for this project: it adds explicit synchronization/descriptor/command-list complexity without meaningful benefit for Spider-Man 2000.
+
+Architecture:
+- legacy retail-compatible proxy stays `binkw32.dll` / rebuilt `spider.dll`, compiled by the preserved VC6-era matching toolchain;
+- new modern x86 renderer is `spidey_renderer11.dll`, compiled with VS 2022 / current Windows SDK;
+- the two communicate through a versioned C ABI resolved dynamically with `LoadLibraryA` / `GetProcAddress`;
+- modern D3D11/DXGI headers never enter the matching proxy build.
+
+Implemented Phase 0 files:
+- `renderer11/include/spidey_renderer11_api.h`
+  - ABI version 1;
+  - GetAbiVersion / GetBackendName / Probe;
+  - Initialize / Resize / BeginFrame / Present / Shutdown.
+- `renderer11/src/spidey_renderer11.cpp`
+  - hardware D3D11 device probe;
+  - D3D11 device + immediate context;
+  - DXGI swap chain;
+  - RGBA8 backbuffer RTV;
+  - D24S8 depth buffer;
+  - viewport setup;
+  - resize;
+  - clear + present;
+  - adapter/feature-level logging to `spidey-renderer11.log`.
+- `renderer11/CMakeLists.txt`
+  - modern x86 DLL target linked to d3d11 + dxgi.
+- `renderer11/spidey_renderer11.def`
+  - stable undecorated export names for the x86 C ABI.
+- `scripts/build_renderer11.ps1`
+  - configures/builds with Visual Studio 17 2022, Win32;
+  - copies output to `out/renderer11/spidey_renderer11.dll`.
+- `docs/DX11_MIGRATION.md`
+  - full staged migration plan.
+
+Legacy bridge:
+- proxy loads `spidey_renderer11.dll` during the existing DX initialization wrapper;
+- verifies ABI=1;
+- calls `SpideyRenderer11_Probe`;
+- records backend/probe state in `spidey-decomp-compat.log`;
+- does NOT switch visible rendering yet.
+
+One-click workflow:
+- still builds the matching proxy first;
+- now builds the DX11 helper second;
+- installs `spidey_renderer11.dll` next to `SpideyPC.exe`;
+- records its SHA-256 in the session metadata;
+- clears/captures `spidey-renderer11.log`.
+
+D3D7 safety during migration:
+- exact 2560x1440 is again quarantined from the legacy D3D7 mode table regardless of DPI awareness;
+- a persisted 2560x1440 D3D7 setting is recovered to the last verified safe 1440x1080x32 mode;
+- this avoids another pre-splash D3D7 CreateDevice crash while DX11 is only in probe/scaffold mode;
+- 2560x1440 will return through DXGI once DX11 owns rendering/presentation.
+
+Relevant commits:
+- `09db45a1bd6cd09ed429078b3bbcaa641573c1ed` — stable C bridge API;
+- `ab4c7f5461c8814ab06d233e2199c8d4febc3a72` — CMake target;
+- `343de8e6f50b9448444b461f69a08c6e2a0f3f03` — D3D11 device/swap-chain implementation;
+- `b1fd7e3d3e93268db95c68dfd7015dbb72be66ce` — modern build script;
+- `e754aca6117048555db0fb2bf2a43bfd7bed812a` — legacy probe + D3D7 safety;
+- `168d4d3f215dcd8c51e60b47b81f6b691e834ee7` — one-click build/install/log integration;
+- `1496e2c29f6e1c35a49be9e93bd55bc3b51decbd` — migration documentation;
+- `453146284b3c6bedfe06277da93d45d0fef5c44f` / `b745a89c5170edef9008289044b4b4ad42273e63` — undecorated x86 exports;
+- `550f0af1f897201430ac94770bd35b455d774fc6` — CMake-path fallback correction.
+
+Phase 0 next test:
+- run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+- this is a plumbing/probe test, NOT a visible DX11-rendering test yet;
+- expected:
+  - old game still renders through the known-good D3D7 path;
+  - Alt+Tab fix remains working;
+  - `spidey-decomp-compat.log` contains:
+    `renderer11_bridge loaded ... abi=1 expected=1 backend=Direct3D 11 probe=1`;
+  - new `spidey-renderer11.log` contains a successful hardware probe and D3D feature level.
+
+After Phase 0 passes:
+1. Phase 1: DX11 takes over final presentation while D3D7 still renders the scene;
+2. Phase 2: migrate texture ownership;
+3. Phase 3: migrate 2D/frontend primitives;
+4. Phase 4: emulate D3D7 fixed-function 3D states/shaders and triangle fans;
+5. Phase 5: true 16:9 projection/FOV + UI safe-area work;
+6. Phase 6: DX11 becomes the default renderer and D3D7 becomes diagnostic/reference only.
