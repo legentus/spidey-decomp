@@ -918,6 +918,83 @@ static void SpideyInjectModernVideoModes()
 }
 
 
+static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
+{
+	if (!hwnd)
+		return;
+
+	HMONITOR monitor =
+		MonitorFromWindow(
+			hwnd,
+			MONITOR_DEFAULTTONEAREST);
+
+	MONITORINFO info;
+	memset(&info, 0, sizeof(info));
+	info.cbSize =
+		sizeof(info);
+
+	if (!monitor ||
+		!GetMonitorInfoA(monitor, &info))
+	{
+		return;
+	}
+
+	LONG style =
+		GetWindowLongA(
+			hwnd,
+			GWL_STYLE);
+
+	style &= ~(
+		WS_CAPTION |
+		WS_THICKFRAME |
+		WS_MINIMIZEBOX |
+		WS_MAXIMIZEBOX |
+		WS_SYSMENU);
+	style |=
+		WS_POPUP | WS_VISIBLE;
+
+	SetWindowLongA(
+		hwnd,
+		GWL_STYLE,
+		style);
+
+	const int width =
+		info.rcMonitor.right -
+		info.rcMonitor.left;
+	const int height =
+		info.rcMonitor.bottom -
+		info.rcMonitor.top;
+
+	SetWindowPos(
+		hwnd,
+		HWND_TOP,
+		info.rcMonitor.left,
+		info.rcMonitor.top,
+		width,
+		height,
+		SWP_NOACTIVATE |
+		SWP_FRAMECHANGED |
+		SWP_SHOWWINDOW);
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"borderless_monitor_window rect=%ld,%ld,%ld,%ld size=%dx%d\n",
+			(long)info.rcMonitor.left,
+			(long)info.rcMonitor.top,
+			(long)info.rcMonitor.right,
+			(long)info.rcMonitor.bottom,
+			width,
+			height);
+		fclose(f);
+	}
+}
+
 typedef void (__cdecl *SpideyRetailInitDirectDrawFn)(HWND);
 
 static void __cdecl SpideyCompatInitDirectDraw7(
@@ -928,6 +1005,7 @@ static void __cdecl SpideyCompatInitDirectDraw7(
 
 	retail(hwnd);
 	SpideyInjectModernVideoModes();
+	SpideyKeepBorderlessMonitorWindow(hwnd);
 }
 
 static void SpideyInstallModernModeReinitCompat()
@@ -1071,6 +1149,7 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 		options | 1);
 
 	SpideyInjectModernVideoModes();
+	SpideyKeepBorderlessMonitorWindow(hwnd);
 }
 
 static void SpideyInstallWindowedDirectDrawCompat()
@@ -1483,18 +1562,77 @@ static int SpideyCompatPresentSceneToWindow(
 	int usedStretch =
 		0;
 
+	int presentX =
+		0;
+	int presentY =
+		0;
+	int presentWidth =
+		dstWidth;
+	int presentHeight =
+		dstHeight;
+	int aspectFit =
+		0;
+
 	if (windowDC)
 	{
-		if (dstWidth == (int)desc.dwWidth &&
-			dstHeight == (int)desc.dwHeight)
+		const unsigned long long srcWide =
+			(unsigned long long)desc.dwWidth *
+			(unsigned long long)dstHeight;
+		const unsigned long long dstWide =
+			(unsigned long long)dstWidth *
+			(unsigned long long)desc.dwHeight;
+
+		if (srcWide != dstWide)
+		{
+			aspectFit =
+				1;
+
+			if (srcWide > dstWide)
+			{
+				presentWidth =
+					dstWidth;
+				presentHeight =
+					(int)(
+						(unsigned long long)dstWidth *
+						(unsigned long long)desc.dwHeight /
+						(unsigned long long)desc.dwWidth);
+				presentY =
+					(dstHeight - presentHeight) / 2;
+			}
+			else
+			{
+				presentHeight =
+					dstHeight;
+				presentWidth =
+					(int)(
+						(unsigned long long)dstHeight *
+						(unsigned long long)desc.dwWidth /
+						(unsigned long long)desc.dwHeight);
+				presentX =
+					(dstWidth - presentWidth) / 2;
+			}
+
+			RECT clearRect;
+			clearRect.left = 0;
+			clearRect.top = 0;
+			clearRect.right = dstWidth;
+			clearRect.bottom = dstHeight;
+			FillRect(
+				windowDC,
+				&clearRect,
+				(HBRUSH)GetStockObject(BLACK_BRUSH));
+		}
+
+		if (presentWidth == (int)desc.dwWidth &&
+			presentHeight == (int)desc.dwHeight)
 		{
 			copyOk =
 				BitBlt(
 					windowDC,
-					0,
-					0,
-					dstWidth,
-					dstHeight,
+					presentX,
+					presentY,
+					presentWidth,
+					presentHeight,
 					sceneDC,
 					0,
 					0,
@@ -1512,10 +1650,10 @@ static int SpideyCompatPresentSceneToWindow(
 			copyOk =
 				StretchBlt(
 					windowDC,
-					0,
-					0,
-					dstWidth,
-					dstHeight,
+					presentX,
+					presentY,
+					presentWidth,
+					presentHeight,
 					sceneDC,
 					0,
 					0,
@@ -1552,7 +1690,7 @@ static int SpideyCompatPresentSceneToWindow(
 		{
 			fprintf(
 				f,
-				"compat_present frame=%lu result=%d error=%lu src=%lux%lu dst=%dx%d stretch=%d\n",
+				"compat_present frame=%lu result=%d error=%lu src=%lux%lu dst=%dx%d present=%d,%d,%dx%d stretch=%d aspect_fit=%d\n",
 				frame,
 				copyOk ? 1 : 0,
 				(unsigned long)copyError,
@@ -1560,7 +1698,12 @@ static int SpideyCompatPresentSceneToWindow(
 				(unsigned long)desc.dwHeight,
 				dstWidth,
 				dstHeight,
-				usedStretch);
+				presentX,
+				presentY,
+				presentWidth,
+				presentHeight,
+				usedStretch,
+				aspectFit);
 			fclose(f);
 		}
 	}
