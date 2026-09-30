@@ -249,3 +249,27 @@ The reconstructed source exposes a clean migration seam:
 - `PCGfx_BeginScene` / `PCGfx_EndScene`: high-level scene bracketing.
 
 Phase 2B should introduce a sidecar DX11 texture table keyed by the existing 0..1023 game texture IDs, populate it from the same converted pixel data used by `PCTex_CreateTexturePVRInId`, release it in the same lifetime paths, and initially use it for migrated 2D/textured primitives while D3D7 remains available for non-migrated draws.
+
+
+## Phase 2B — per-texture DX11 sidecar ownership
+
+Status: implemented, awaiting runtime validation.
+
+Renderer ABI 4 introduces per-game-texture DX11 ownership while retaining the legacy D3D7 draw path for parity testing. The existing PCTex ID (0..1023) is the canonical identity.
+
+Creation path:
+1. PCTex performs all original PVR/palette/pixel-format conversion into its system-memory staging DirectDraw surface.
+2. The finished staging surface is locked and its real pitch/BPP/channel masks are passed to renderer11.
+3. Renderer11 converts the surface into BGRA8 and creates a D3D11 texture + SRV under the same PCTex ID.
+4. The final managed DirectDraw texture pointer is associated with that sidecar ID.
+
+Destruction follows the existing PCTex release lifecycle and removes the corresponding DX11 texture/SRV and legacy-handle mapping.
+
+The centralized `renderScene()` loop has also been mapped:
+- sorted slots: 4096 down to 0;
+- each `DXPOLY` contains a legacy texture-surface pointer, blend mode, texture flags, vertex count, and up to four `SDXPolyField` vertices;
+- each vertex is 0x1C bytes: X, Y, Z-like value, RHW-like value, packed diffuse color, U, V;
+- D3D7 submission is `DrawPrimitive(D3DPT_TRIANGLEFAN, D3DFVF_TLVERTEX, vertices, count, 0)`;
+- per-poly state selects blend mode, address U/V, texture alpha, and point/bilinear filtering.
+
+For Phase 2B the loop only resolves each non-null legacy texture handle against the DX11 sidecar index and logs coverage. D3D7 still draws every polygon. This provides the evidence needed to activate Phase 2C without guessing texture coverage.
