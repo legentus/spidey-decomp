@@ -3097,3 +3097,47 @@ NEXT TEST:
 Key expected logs:
 - `spidey-decomp-present.log`: `present_path ... windowed=1 retail_flip=0 direct_hwnd=1`;
 - `spidey-decomp-input.log`: installer line with nonzero keyboard/mouse call counts, then `foreground_acquire` / `background_unacquire` transitions around Alt+Tab.
+
+
+## Runtime result: 2560x1440 saved mode fails D3D7 CreateDevice before splash — 2026-09-30
+
+Tested revision:
+`e7f678156efbcca850cca86d94c38d52b50dddec`
+
+Observed:
+- clean matching build succeeded;
+- game crashed before the first splash/movie frame;
+- retail-input compatibility installer DID run:
+  - keyboard direct-call sites patched = 2;
+  - mouse direct-call sites patched = 1;
+- no retail input poll/foreground-transition entry was logged before the crash;
+- no presentation frame was reached.
+
+Critical difference from the preceding successful menu run:
+- previous successful runtime restored `1440x1080x32`;
+- this failed runtime restored saved `2560x1440x32`.
+
+D3D failure:
+- retail call site `0x004FEA30` invokes `IDirect3D7::CreateDevice(pGUID, g_pDDS_Scene, &g_D3DDevice7)`;
+- it returned `0x88760082 = DDERR_INVALIDOBJECT`;
+- the scene DirectDraw surface had already been created, but Direct3D7 rejected it as a valid render target/device surface at this mode;
+- source windowed scene creation uses `DDSCAPS_3DDEVICE | DDSCAPS_OFFSCREENPLAIN`.
+
+Secondary crash:
+- after CreateDevice failure, retail cleanup calls function `0x00503AF0`;
+- at `0x00503AF7` it dereferences global `0x006BBF1C`;
+- that global is NULL in this failure state, producing the observed C0000005 read from address 0;
+- this cleanup AV is secondary; the root failure is the 2560x1440 CreateDevice rejection.
+
+Interpretation:
+- the new retail input hooks did not cause this startup crash;
+- the single-presenter path also did not execute before the crash;
+- native 2560x1440 is NOT runtime-safe on the current DirectDraw7/D3D7 render-target path and must not remain selectable/persisted as if verified;
+- 1440x1080x32 is the latest verified working saved internal mode on the same machine/runtime.
+
+Immediate recovery plan:
+1. quarantine exact `2560x1440x32` from the selectable modern-mode list until a valid D3D7 render-target path is implemented;
+2. if the persisted saved mode is exactly 2560x1440, recover to the last verified `1440x1080x32` mode before retail DX initialization and update the in-memory saved setting so restart is not bricked;
+3. add a guarded wrapper for retail cleanup function `0x00503AF0` so a future DirectX init failure cannot turn into a null-deref crash;
+4. retain the new retail input polling hooks and sole windowed direct-HWND presenter for the next test;
+5. continue 2560x1440 support as a separate renderer-compatibility task rather than claiming it is already supported.
