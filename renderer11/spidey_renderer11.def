@@ -11,6 +11,7 @@ EXPORTS
     SpideyRenderer11_PresentPixels
     SpideyRenderer11_PresentHdc
     SpideyRenderer11_UpdateTexture
+    SpideyRenderer11_AssociateTextureHandle
     SpideyRenderer11_ReleaseTexture
     SpideyRenderer11_ReleaseAllTextures
     SpideyRenderer11_GetResidentTextureCount
