@@ -1925,3 +1925,42 @@ NEXT TEST:
 - run latest test;
 - no feature validation needed;
 - report only whether splash/title returns or remains black, plus all logs as usual.
+
+
+## Pure baseline runs with audio/input but renders black — 2026-09-30
+
+Latest tested revision:
+`f24a5d1b734a33e60d476ddcc43c34b8cb7d7643`
+
+This revision is mechanically identical to the last user-confirmed playable runtime `35e73ed3c4ca8c06b581df83f0f0913f0c915982` except for documentation.
+
+User result:
+- game boots;
+- audio is audible again;
+- Start input works;
+- user can enter the main menu after pressing Start;
+- screen remains completely black throughout;
+- no crash reported.
+
+Uploaded evidence:
+- retail EXE fingerprint remains unchanged:
+  SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`;
+- windowed DirectDraw compatibility patch installs at the expected retail caller:
+  - push `0x00515BA9`
+  - call `0x00515BAD`
+  - target `DXINIT_DirectX8 = 0x004FDE90`
+  - argument `2 -> 3`;
+- no crash evidence.
+
+Conclusion:
+- source regression is ruled out by the pure-baseline control;
+- game logic, input, audio, and shell progression are functioning;
+- active failure is specifically visible presentation/render output;
+- investigate the existing retail windowed DirectDraw path:
+  1. primary/front surface creation;
+  2. offscreen/back/scene surface creation;
+  3. clipper/window association;
+  4. final Blt/Flip/present call and its HRESULT;
+  5. source/destination rectangles and surface-loss state.
+
+Do not resume Options/audio/controller feature work until visible rendering is restored.
