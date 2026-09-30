@@ -2661,3 +2661,37 @@ Next implementation:
 3. make keyboard polling reacquire on both `DIERR_INPUTLOST` and `DIERR_NOTACQUIRED`;
 4. implement buffered DirectInput mouse polling with the same press/held/release state semantics as keyboard;
 5. instrument and preserve saved resolution when the retail frontend issues its hardcoded 640x480x16 display reset, without blocking genuine non-640x480 display-option changes.
+
+
+## Recovered after input-stream interruption: frontend corruption root cause proven — 2026-09-29
+
+Recovered from the interrupted investigation and re-verified against live `dev`:
+- current HEAD before recovery: `8783b22198653ca0b310f55e1ed4f84efeef2916`;
+- prior movie/input/texture hardening commits are present;
+- the newly discovered D3D caps correction had NOT yet been committed when the stream failed.
+
+Last verified runtime result:
+- game now reaches and runs the main menu;
+- splash movies are visible;
+- frontend presentation remains borderless at 2560x1440;
+- at the movie -> frontend transition, live internal mode changes from saved 1280x1024x32 to 640x480x16;
+- menu screenshot shows white/missing background composition and broken frontend rendering;
+- Alt+Tab out/in causes controls to stop responding.
+
+Texture evidence:
+- the same ordinary 64x64 and 128x128 textures create successfully before the frontend renderer reinit;
+- after the renderer reinit, those calls begin calculating impossible conversion sizes such as -679215104 and 1578106880 bytes;
+- failed texture creation explains the missing/white frontend art rather than bad retail assets.
+
+Retail disassembly breakthrough:
+- original retail `initDirect3D7` performs `IDirect3DDevice7::GetCaps` using destination address `0x006B5780`;
+- reconstructed `PCTex.cpp` currently defines `G_D3DDEV_CAPS` at `0x006B5788`;
+- this is an 8-byte offset error;
+- therefore PCTex reads shifted/wrong `D3DDEVICEDESC7` fields after renderer reinit, including `dwMaxTextureWidth`, `dwMaxTextureHeight`, `dwMaxTextureAspectRatio`, and texture-cap flags;
+- this directly explains the impossible rounded texture dimensions/conversion byte counts after frontend reinit.
+
+Immediate next actions:
+1. correct `G_D3DDEV_CAPS` to retail-proven `0x006B5780`;
+2. retain diagnostic logging for one test to prove post-reinit texture sizes normalize;
+3. instrument/redirect direct callers of retail `DXINIT_SetDisplayOptions(0x00500250)` so the exact source/arguments of the 640x480x16 frontend switch are known before changing semantics;
+4. inspect DirectInput foreground-device poll/reacquire behavior on focus loss and restore.
