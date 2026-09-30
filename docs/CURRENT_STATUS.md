@@ -3719,3 +3719,51 @@ Phase 2A is CLOSED.
 
 NEXT FRONTIER — Phase 2B:
 Introduce DX11 sidecar texture ownership keyed by the game's existing PCTex IDs. Mirror legacy texture creation/destruction into the renderer11 DLL while leaving D3D7 draws intact. This creates a verified DX11 texture inventory before any primitive class is switched over.
+
+
+## DX11 Phase 2B implementation ready for runtime test — 2026-09-30
+
+Objective:
+Establish DX11 ownership of the game's individual texture resources before migrating primitive submission.
+
+Architecture:
+- renderer ABI is now version 4;
+- renderer11 owns a 1024-entry sidecar texture table keyed by the existing PCTex texture ID;
+- each mirrored texture is normalized to `DXGI_FORMAT_B8G8R8A8_UNORM` and receives a DX11 SRV;
+- 16-bit, 24-bit, and 32-bit legacy RGB mask formats are accepted and converted using the actual DirectDraw surface masks;
+- each sidecar stores the final legacy DirectDraw texture-surface handle;
+- renderer11 maintains a fast legacy-handle -> texture-ID index;
+- PCTex creation mirrors from the final converted system-memory staging surface, so DX11 receives the exact pixel result D3D7 receives after legacy palette/PVR conversion;
+- PCTex release/release-all destroys the matching DX11 sidecar resource;
+- DX11 is explicitly initialized after retail D3D7 init, with a lazy texture-init fallback if boot order ever creates a texture earlier.
+
+DXPOLY coverage instrumentation:
+- the existing D3D7 render path remains unchanged;
+- `renderScene()` counts total polygons, textured polygons, mirrored texture hits, missing texture hits, and resident DX11 texture count;
+- coverage is logged for the first five scenes and every 120th scene;
+- no DX11 primitive draw is active yet.
+
+Key implementation commits:
+- `e7ca821bfff4745401b85d746a0e6d1d0f0f4e00` — DX11 game texture sidecar;
+- `3452fa305e263df85c7ba616690ed7edc4f5c350` — correct resident counting on replacement;
+- `779cdc4d1e58eb7b1b025997a71759b1efc020b3` — legacy bridge declarations;
+- `22195d7063fd9547102ad1976dcf0cb46481fa87` — legacy->DX11 texture bridge and early initialization;
+- `69ed6607724e88804dfdd884bf44de5f10a00b42` — PCTex creation/release lifetime mirroring;
+- `522c81a3f0eac472647795b18dc5c92462f8dc20` — lazy texture initialization fallback;
+- `d2c5566fbd906de64f041e14026d84714df576bb` / `5126e963741ca6fa37999d0f106d700a181d35eb` / `830c56dd3c89818941ce2db893bf82009d03f77c` — legacy surface-handle association;
+- `e875b685f470a424465f32dfeb310da13bb659f7` / `a95f2c3f241d3d0665fc341454292216a0018962` — fast handle resolver;
+- `cf9074a3e506c18bcd329d8e301518b376c9a173` — DXPOLY migration-coverage instrumentation.
+
+NEXT TEST:
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected:
+- renderer bridge log: `abi=4 expected=4 ... phase2b_exports=1`;
+- compat log: `renderer11_phase2b early_initialize ... result=1` (or, if boot ordering differs, a successful `lazy_texture_initialize`);
+- renderer log should contain many `texture_update id=... resident=...` and `texture_handle id=... handle=...` entries;
+- legacy texture log should contain matching `dx11_mirror ... result=1` and `dx11_associate ... result=1`;
+- `dx11_draw_coverage` lines should show how many real textured polygons resolve to mirrored DX11 textures;
+- Phase 2A presentation should remain `dx11_pixels=1 dx11_hdc=0 direct_hwnd=0 compat_result=3`.
+
+Important:
+A successful 2B test still renders polygons with D3D7. It proves resource parity and handle coverage. Phase 2C will use these SRVs and the already-decoded `SDXPolyField` layout to replace the centralized D3D7 `DrawPrimitive(D3DPT_TRIANGLEFAN,...)` path incrementally.
