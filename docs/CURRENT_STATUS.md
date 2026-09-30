@@ -5306,3 +5306,20 @@ Before runtime handoff:
 - the 32-bit preflight, helper install, helper log capture and camera log capture are all wired into the standard test harness.
 
 No gameplay input or camera ownership is changed by any of these passive additions.
+
+
+### Combined passive runtime boundary prepared
+
+Static work is intentionally stopping before action injection or camera mutation.
+
+Reason:
+- modern input helper/build/preflight is wired;
+- retail semantic action table will self-report at runtime;
+- legacy analogue fields will be observed beside true modern stick magnitude;
+- raw relative mouse and right-stick intent are now correlated with passive camera mode/transform state;
+- live Apply and frontend mouse-return fixes are still awaiting runtime confirmation;
+- Phase 3E F9 suppression is ready but remains opt-in/default-off.
+
+The retained `CCamera::AI` binary was checked for the mode-dispatch tables referenced at `0x0041866C` and `0x0041868C`. The archived function blob ends exactly at `0x0041866C`; the table data is not present elsewhere found in the repo. No table contents were inferred or fabricated.
+
+Next authoritative step is the combined runtime test documented at the top of `docs/NEW_CHAT_HANDOFF.md`. Do not enable modern controller action injection or camera ownership until the passive logs validate these boundaries.
