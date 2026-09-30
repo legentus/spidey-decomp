@@ -2695,3 +2695,25 @@ Immediate next actions:
 2. retain diagnostic logging for one test to prove post-reinit texture sizes normalize;
 3. instrument/redirect direct callers of retail `DXINIT_SetDisplayOptions(0x00500250)` so the exact source/arguments of the 640x480x16 frontend switch are known before changing semantics;
 4. inspect DirectInput foreground-device poll/reacquire behavior on focus loss and restore.
+
+
+## Post-interruption recovery audit: more source work survived — 2026-09-29
+
+Live `dev` audit after the user's pasted interruption transcript:
+- current HEAD at audit: `8675a76b7109c18e77f0d56295f060fefc2ddb26`;
+- no important source progress was lost;
+- two implementation commits survived beyond what was visible in the interrupted transcript:
+  - `99bcb6fc62be5398ea177c986975d408d2e390c0` — fixes `G_D3DDEV_CAPS` from `0x006B5788` to retail-proven `0x006B5780` and logs post-reinit caps;
+  - `8675a76b7109c18e77f0d56295f060fefc2ddb26` — DirectInput focus recovery and buffered mouse polling.
+
+Verified input work in `8675a76b...`:
+- keyboard reacquires on both `DIERR_INPUTLOST` and `DIERR_NOTACQUIRED`;
+- keyboard state is cleared before reacquire to avoid stuck transitions;
+- mouse polling is no longer the old magic-value stub;
+- mouse now uses buffered `GetDeviceData`, zeroes deltas, reacquires on focus restoration, and tracks button press/held/release transitions.
+
+True remaining frontier:
+1. test the D3D-cap fix against the broken white frontend art;
+2. identify the exact caller/arguments responsible for the movie->frontend `640x480x16` reset;
+3. preserve the saved/native render resolution for that automatic frontend reset while still allowing genuine user-selected resolution changes;
+4. runtime-test Alt+Tab input recovery from `8675a76b...`.
