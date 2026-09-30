@@ -3003,6 +3003,117 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 	SpideyResetRetailD3D7DrawProbeFrame();
 }
 
+static int SpideyPatchRetailD3D7VtableMethod(
+		void** vtable,
+		int index,
+		void* wrapper,
+		void** original,
+		const char* name)
+{
+	if (!vtable ||
+		!wrapper ||
+		!original)
+	{
+		return 0;
+	}
+
+	void* current =
+		0;
+
+	__try
+		{
+			current =
+				vtable[index];
+		}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			current =
+				0;
+		}
+
+	if (current == wrapper)
+		return *original ? 1 : 0;
+
+	if (!SpideyIsExecutablePointer(
+			current))
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"state_hook NOT installed method=%s index=%d current=0x%08lX reason=non_executable\n",
+				name ? name : "unknown",
+				index,
+				(unsigned long)current);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	DWORD oldProtect =
+		0;
+
+	if (!VirtualProtect(
+			&vtable[index],
+			sizeof(void*),
+			PAGE_EXECUTE_READWRITE,
+			&oldProtect))
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"state_hook NOT installed method=%s index=%d reason=virtual_protect error=%lu\n",
+				name ? name : "unknown",
+				index,
+				(unsigned long)GetLastError());
+			fclose(f);
+		}
+		return 0;
+	}
+
+	*original =
+		current;
+	vtable[index] =
+		wrapper;
+
+	DWORD ignoredProtect =
+		0;
+	VirtualProtect(
+		&vtable[index],
+		sizeof(void*),
+		oldProtect,
+		&ignoredProtect);
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		&vtable[index],
+		sizeof(void*));
+
+	FILE* f = fopen(
+		"spidey-decomp-draw.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"state_hook installed method=%s index=%d original=0x%08lX wrapper=0x%08lX\n",
+			name ? name : "unknown",
+			index,
+			(unsigned long)current,
+			(unsigned long)wrapper);
+		fclose(f);
+	}
+
+	return 1;
+}
+
 static void SpideyInstallRetailD3D7DrawProbe(void)
 {
 	LPDIRECT3DDEVICE7 device =
@@ -3077,38 +3188,80 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	if (!vtable)
 		return;
 
-	// IDirect3DDevice7 vtable:
-	// IUnknown 0..2, GetCaps=3, EnumTextureFormats=4,
-	// BeginScene=5, EndScene=6, ... PreLoad=24, DrawPrimitive=25.
-	const int drawPrimitiveIndex =
-		25;
+	const int clearIndex = 10;
+	const int setViewportIndex = 13;
+	const int setRenderStateIndex = 20;
+	const int drawPrimitiveIndex = 25;
+	const int setTextureIndex = 35;
+	const int setTextureStageStateIndex = 37;
 
-	void* current =
-		0;
+	const int alreadyInstalled =
+		device == gSpideyRetailD3D7DrawProbeDevice &&
+		vtable == gSpideyRetailD3D7DrawProbeVtable &&
+		vtable[clearIndex] == (void*)&SpideyShadowD3D7Clear &&
+		vtable[setViewportIndex] == (void*)&SpideyShadowD3D7SetViewport &&
+		vtable[setRenderStateIndex] == (void*)&SpideyShadowD3D7SetRenderState &&
+		vtable[drawPrimitiveIndex] == (void*)&SpideyProbeD3D7DrawPrimitive &&
+		vtable[setTextureIndex] == (void*)&SpideyShadowD3D7SetTexture &&
+		vtable[setTextureStageStateIndex] == (void*)&SpideyShadowD3D7SetTextureStageState;
 
-	__try
-		{
-			current =
-				vtable[drawPrimitiveIndex];
-		}
-	__except(EXCEPTION_EXECUTE_HANDLER)
-		{
-			current =
-				0;
-		}
-
-	if (current ==
-		(void*)&SpideyProbeD3D7DrawPrimitive)
-	{
-		gSpideyRetailD3D7DrawProbeDevice =
-			device;
-		gSpideyRetailD3D7DrawProbeVtable =
-			vtable;
+	if (alreadyInstalled)
 		return;
-	}
 
-	if (!SpideyIsExecutablePointer(
-			current))
+	const int clearOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			clearIndex,
+			(void*)&SpideyShadowD3D7Clear,
+			(void**)&gSpideyRetailD3D7ClearOriginal,
+			"Clear");
+
+	const int viewportOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			setViewportIndex,
+			(void*)&SpideyShadowD3D7SetViewport,
+			(void**)&gSpideyRetailD3D7SetViewportOriginal,
+			"SetViewport");
+
+	const int renderStateOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			setRenderStateIndex,
+			(void*)&SpideyShadowD3D7SetRenderState,
+			(void**)&gSpideyRetailD3D7SetRenderStateOriginal,
+			"SetRenderState");
+
+	const int drawOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			drawPrimitiveIndex,
+			(void*)&SpideyProbeD3D7DrawPrimitive,
+			(void**)&gSpideyRetailD3D7DrawPrimitiveOriginal,
+			"DrawPrimitive");
+
+	const int textureOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			setTextureIndex,
+			(void*)&SpideyShadowD3D7SetTexture,
+			(void**)&gSpideyRetailD3D7SetTextureOriginal,
+			"SetTexture");
+
+	const int textureStateOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			setTextureStageStateIndex,
+			(void*)&SpideyShadowD3D7SetTextureStageState,
+			(void**)&gSpideyRetailD3D7SetTextureStageStateOriginal,
+			"SetTextureStageState");
+
+	if (!clearOk ||
+		!viewportOk ||
+		!renderStateOk ||
+		!drawOk ||
+		!textureOk ||
+		!textureStateOk)
 	{
 		FILE* f = fopen(
 			"spidey-decomp-draw.log",
@@ -3117,82 +3270,43 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 		{
 			fprintf(
 				f,
-				"draw_probe NOT installed device=0x%08lX vtable=0x%08lX draw=0x%08lX reason=non_executable\n",
+				"draw_probe partial device=0x%08lX vtable=0x%08lX clear=%d viewport=%d renderstate=%d draw=%d texture=%d texstate=%d\n",
 				(unsigned long)device,
 				(unsigned long)vtable,
-				(unsigned long)current);
+				clearOk,
+				viewportOk,
+				renderStateOk,
+				drawOk,
+				textureOk,
+				textureStateOk);
 			fclose(f);
 		}
 		return;
 	}
-
-	DWORD oldProtect =
-		0;
-
-	if (!VirtualProtect(
-			&vtable[drawPrimitiveIndex],
-			sizeof(void*),
-			PAGE_EXECUTE_READWRITE,
-			&oldProtect))
-	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
-		if (f)
-		{
-			fprintf(
-				f,
-				"draw_probe NOT installed device=0x%08lX vtable=0x%08lX draw=0x%08lX reason=virtual_protect error=%lu\n",
-				(unsigned long)device,
-				(unsigned long)vtable,
-				(unsigned long)current,
-				(unsigned long)GetLastError());
-			fclose(f);
-		}
-		return;
-	}
-
-	gSpideyRetailD3D7DrawPrimitiveOriginal =
-		(SpideyRetailD3D7DrawPrimitiveFn)current;
-
-	vtable[drawPrimitiveIndex] =
-		(void*)&SpideyProbeD3D7DrawPrimitive;
-
-	DWORD ignoredProtect =
-		0;
-	VirtualProtect(
-		&vtable[drawPrimitiveIndex],
-		sizeof(void*),
-		oldProtect,
-		&ignoredProtect);
-
-	FlushInstructionCache(
-		GetCurrentProcess(),
-		&vtable[drawPrimitiveIndex],
-		sizeof(void*));
 
 	gSpideyRetailD3D7DrawProbeDevice =
 		device;
 	gSpideyRetailD3D7DrawProbeVtable =
 		vtable;
 
+	SpideyInitializeRetailShadowState(
+		device);
+
 	FILE* f = fopen(
 		"spidey-decomp-draw.log",
 		"a");
-
 	if (f)
 	{
 		fprintf(
 			f,
-			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX index=%d original=0x%08lX wrapper=0x%08lX getcaps_hr=0x%08lX max_tex=%lux%lu\n",
+			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX draw_index=%d getcaps_hr=0x%08lX max_tex=%lux%lu state_hooks=6 shadow_state_valid=%d\n",
 			(unsigned long)device,
 			(unsigned long)vtable,
 			drawPrimitiveIndex,
-			(unsigned long)gSpideyRetailD3D7DrawPrimitiveOriginal,
-			(unsigned long)&SpideyProbeD3D7DrawPrimitive,
 			(unsigned long)capsHr,
 			(unsigned long)caps.dwMaxTextureWidth,
-			(unsigned long)caps.dwMaxTextureHeight);
+			(unsigned long)caps.dwMaxTextureHeight,
+			gSpideyRetailShadowStateValid);
 		fclose(f);
 	}
 
