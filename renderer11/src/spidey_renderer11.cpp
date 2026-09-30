@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
+#include <vector>
 
 namespace
 {
@@ -29,6 +30,19 @@ namespace
     ID3D11RasterizerState* gBlitRasterizer = nullptr;
     unsigned long gUploadWidth = 0;
     unsigned long gUploadHeight = 0;
+
+    struct GameTexture
+    {
+        ID3D11Texture2D* texture;
+        ID3D11ShaderResourceView* srv;
+        unsigned long width;
+        unsigned long height;
+        unsigned long sourceBitsPerPixel;
+    };
+
+    static const unsigned long kGameTextureCapacity = 1024;
+    GameTexture gGameTextures[kGameTextureCapacity] = {};
+    unsigned long gResidentTextureCount = 0;
 
     void Log(const char* format, ...)
     {
@@ -53,6 +67,68 @@ namespace
             object->Release();
             object = nullptr;
         }
+    }
+
+    unsigned int CountTrailingZeroBits(unsigned long mask)
+    {
+        if (!mask)
+            return 0;
+
+        unsigned int shift = 0;
+        while ((mask & 1UL) == 0)
+        {
+            ++shift;
+            mask >>= 1;
+        }
+        return shift;
+    }
+
+    unsigned char ExpandMaskedComponent(
+        unsigned long pixel,
+        unsigned long mask,
+        unsigned char defaultValue)
+    {
+        if (!mask)
+            return defaultValue;
+
+        const unsigned int shift = CountTrailingZeroBits(mask);
+        const unsigned long maximum = mask >> shift;
+        if (!maximum)
+            return defaultValue;
+
+        const unsigned long value = (pixel & mask) >> shift;
+        return static_cast<unsigned char>(
+            (value * 255UL + maximum / 2UL) / maximum);
+    }
+
+    void ReleaseGameTexture(unsigned long textureId)
+    {
+        if (textureId >= kGameTextureCapacity)
+            return;
+
+        GameTexture& entry = gGameTextures[textureId];
+        const bool wasResident = entry.texture != nullptr || entry.srv != nullptr;
+
+        SafeRelease(entry.srv);
+        SafeRelease(entry.texture);
+        entry.width = 0;
+        entry.height = 0;
+        entry.sourceBitsPerPixel = 0;
+
+        if (wasResident && gResidentTextureCount)
+            --gResidentTextureCount;
+    }
+
+    void ReleaseAllGameTexturesInternal()
+    {
+        for (unsigned long textureId = 0;
+             textureId < kGameTextureCapacity;
+             ++textureId)
+        {
+            ReleaseGameTexture(textureId);
+        }
+
+        gResidentTextureCount = 0;
     }
 
     void ReleaseTargets()
@@ -86,6 +162,7 @@ namespace
     {
         ReleaseTargets();
         ReleaseBlitPipeline();
+        ReleaseAllGameTexturesInternal();
         SafeRelease(gSwapChain);
         SafeRelease(gContext);
         SafeRelease(gDevice);
@@ -1026,6 +1103,248 @@ int __cdecl SpideyRenderer11_PresentHdc(
     }
 
     return 1;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_UpdateTexture(
+    unsigned long textureId,
+    const void* pixels,
+    unsigned long width,
+    unsigned long height,
+    long pitch,
+    unsigned long bitsPerPixel,
+    unsigned long redMask,
+    unsigned long greenMask,
+    unsigned long blueMask,
+    unsigned long alphaMask)
+{
+    if (!gDevice ||
+        textureId >= kGameTextureCapacity ||
+        !pixels ||
+        width == 0 ||
+        height == 0 ||
+        pitch == 0 ||
+        (bitsPerPixel != 16 && bitsPerPixel != 24 && bitsPerPixel != 32))
+    {
+        Log(
+            "texture_update rejected id=%lu pixels=0x%p size=%lux%lu pitch=%ld bpp=%lu device=0x%p",
+            textureId,
+            pixels,
+            width,
+            height,
+            pitch,
+            bitsPerPixel,
+            gDevice);
+        return 0;
+    }
+
+    const unsigned long bytesPerPixel = bitsPerPixel / 8UL;
+    if (bytesPerPixel == 0)
+        return 0;
+
+    const unsigned long absolutePitch =
+        pitch < 0 ? static_cast<unsigned long>(-pitch) : static_cast<unsigned long>(pitch);
+
+    if (absolutePitch < width * bytesPerPixel)
+    {
+        Log(
+            "texture_update bad_pitch id=%lu pitch=%ld minimum=%lu",
+            textureId,
+            pitch,
+            width * bytesPerPixel);
+        return 0;
+    }
+
+    std::vector<unsigned char> converted;
+    try
+    {
+        converted.resize(
+            static_cast<size_t>(width) *
+            static_cast<size_t>(height) *
+            4U);
+    }
+    catch (...)
+    {
+        Log("texture_update allocation_failed id=%lu size=%lux%lu", textureId, width, height);
+        return 0;
+    }
+
+    const unsigned char* sourceBase =
+        static_cast<const unsigned char*>(pixels);
+
+    for (unsigned long y = 0; y < height; ++y)
+    {
+        const long sourceOffset =
+            static_cast<long>(y) * pitch;
+        const unsigned char* sourceRow =
+            sourceBase + sourceOffset;
+        unsigned char* destinationRow =
+            converted.data() +
+            static_cast<size_t>(y) *
+            static_cast<size_t>(width) *
+            4U;
+
+        for (unsigned long x = 0; x < width; ++x)
+        {
+            const unsigned char* sourcePixel =
+                sourceRow +
+                static_cast<size_t>(x) *
+                bytesPerPixel;
+
+            unsigned long raw = 0;
+            if (bitsPerPixel == 16)
+            {
+                raw =
+                    static_cast<unsigned long>(sourcePixel[0]) |
+                    (static_cast<unsigned long>(sourcePixel[1]) << 8);
+            }
+            else if (bitsPerPixel == 24)
+            {
+                raw =
+                    static_cast<unsigned long>(sourcePixel[0]) |
+                    (static_cast<unsigned long>(sourcePixel[1]) << 8) |
+                    (static_cast<unsigned long>(sourcePixel[2]) << 16);
+            }
+            else
+            {
+                raw =
+                    static_cast<unsigned long>(sourcePixel[0]) |
+                    (static_cast<unsigned long>(sourcePixel[1]) << 8) |
+                    (static_cast<unsigned long>(sourcePixel[2]) << 16) |
+                    (static_cast<unsigned long>(sourcePixel[3]) << 24);
+            }
+
+            const size_t destinationOffset =
+                static_cast<size_t>(x) * 4U;
+
+            destinationRow[destinationOffset + 0] =
+                ExpandMaskedComponent(raw, blueMask, 0);
+            destinationRow[destinationOffset + 1] =
+                ExpandMaskedComponent(raw, greenMask, 0);
+            destinationRow[destinationOffset + 2] =
+                ExpandMaskedComponent(raw, redMask, 0);
+            destinationRow[destinationOffset + 3] =
+                ExpandMaskedComponent(raw, alphaMask, 255);
+        }
+    }
+
+    D3D11_TEXTURE2D_DESC textureDesc = {};
+    textureDesc.Width = width;
+    textureDesc.Height = height;
+    textureDesc.MipLevels = 1;
+    textureDesc.ArraySize = 1;
+    textureDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    textureDesc.SampleDesc.Count = 1;
+    textureDesc.Usage = D3D11_USAGE_DEFAULT;
+    textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA initialData = {};
+    initialData.pSysMem = converted.data();
+    initialData.SysMemPitch = width * 4UL;
+
+    ID3D11Texture2D* texture = nullptr;
+    HRESULT hr = gDevice->CreateTexture2D(
+        &textureDesc,
+        &initialData,
+        &texture);
+
+    if (FAILED(hr) || !texture)
+    {
+        Log(
+            "texture_update create_texture_failed id=%lu hr=0x%08lX size=%lux%lu bpp=%lu",
+            textureId,
+            static_cast<unsigned long>(hr),
+            width,
+            height,
+            bitsPerPixel);
+        SafeRelease(texture);
+        return 0;
+    }
+
+    ID3D11ShaderResourceView* srv = nullptr;
+    hr = gDevice->CreateShaderResourceView(
+        texture,
+        nullptr,
+        &srv);
+
+    if (FAILED(hr) || !srv)
+    {
+        Log(
+            "texture_update create_srv_failed id=%lu hr=0x%08lX",
+            textureId,
+            static_cast<unsigned long>(hr));
+        SafeRelease(srv);
+        SafeRelease(texture);
+        return 0;
+    }
+
+    const bool wasResident =
+        gGameTextures[textureId].texture != nullptr ||
+        gGameTextures[textureId].srv != nullptr;
+
+    ReleaseGameTexture(textureId);
+
+    GameTexture& entry = gGameTextures[textureId];
+    entry.texture = texture;
+    entry.srv = srv;
+    entry.width = width;
+    entry.height = height;
+    entry.sourceBitsPerPixel = bitsPerPixel;
+
+    if (!wasResident)
+        ++gResidentTextureCount;
+    else if (gResidentTextureCount == 0)
+        gResidentTextureCount = 1;
+
+    Log(
+        "texture_update id=%lu size=%lux%lu src_bpp=%lu masks=%08lX,%08lX,%08lX,%08lX resident=%lu",
+        textureId,
+        width,
+        height,
+        bitsPerPixel,
+        redMask,
+        greenMask,
+        blueMask,
+        alphaMask,
+        gResidentTextureCount);
+
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
+void __cdecl SpideyRenderer11_ReleaseTexture(
+    unsigned long textureId)
+{
+    if (textureId >= kGameTextureCapacity)
+        return;
+
+    const bool wasResident =
+        gGameTextures[textureId].texture != nullptr ||
+        gGameTextures[textureId].srv != nullptr;
+
+    ReleaseGameTexture(textureId);
+
+    if (wasResident)
+    {
+        Log(
+            "texture_release id=%lu resident=%lu",
+            textureId,
+            gResidentTextureCount);
+    }
+}
+
+extern "C" __declspec(dllexport)
+void __cdecl SpideyRenderer11_ReleaseAllTextures(void)
+{
+    const unsigned long before = gResidentTextureCount;
+    ReleaseAllGameTexturesInternal();
+    Log("texture_release_all before=%lu resident=0", before);
+}
+
+extern "C" __declspec(dllexport)
+unsigned long __cdecl SpideyRenderer11_GetResidentTextureCount(void)
+{
+    return gResidentTextureCount;
 }
 
 extern "C" __declspec(dllexport)
