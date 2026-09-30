@@ -197,3 +197,14 @@ DX11 output:
 - Migrate one rendering responsibility at a time.
 - Maintain a known-good D3D7 reference path until DX11 reaches parity.
 - Do not call a resolution "supported" until a live DX11 render target, camera projection, UI, and presentation have all been runtime-validated.
+
+
+## Phase 1 runtime bridge (implemented)
+
+The first post-Phase-0 presentation bridge is implemented with ABI version 2.
+
+For this transitional phase, D3D7 still renders the game scene. The legacy proxy retrieves the D3D7 scene HDC and passes it across the C ABI to `SpideyRenderer11_PresentHdc`. Renderer11 owns a GDI-compatible B8G8R8A8 DXGI swap chain, copies/aspect-fits the scene into its backbuffer, and performs the visible DXGI Present.
+
+This is intentionally a migration bridge, not the final renderer architecture. It proves ownership of final presentation without yet porting textures, 2D primitives, or fixed-function 3D rendering. A runtime failure automatically falls back to the known-good direct-HWND presenter.
+
+Native 2560x1440 remains quarantined from D3D7 during this phase. True 16:9 / 2560x1440 rendering follows after DX11 presentation is proven stable.
