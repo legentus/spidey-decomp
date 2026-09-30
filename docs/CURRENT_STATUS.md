@@ -2614,3 +2614,50 @@ NEXT TEST:
 - confirm whether the game reaches the start menu;
 - move the mouse at the start menu if it reaches it;
 - upload the whole new test-session output, including the automatically captured `spidey-decomp-texture.log`.
+
+
+## Runtime result: menu reached; frontend textures/caps wrong; Alt+Tab loses input — 2026-09-29
+
+Tested revision:
+`8783b22198653ca0b310f55e1ed4f84efeef2916`
+
+User-visible:
+- game now boots through the splash movies and reaches the main menu;
+- main menu renders with a white/missing background and visibly broken composition;
+- frontend/start menu is unstable visually;
+- Alt+Tab out and back causes controls to stop responding.
+
+Confirmed presentation:
+- borderless HWND stays 2560x1440;
+- startup scene is 1280x1024x32 and aspect-fit to 1800x1440;
+- at frontend takeover (present frame ~195), retail live mode changes to 640x480x16 while the actual offscreen scene is 640x480x32;
+- presenter correctly keeps the 2560x1440 window and aspect-fits the 640x480 scene to 1920x1440 at x=320.
+
+Texture diagnostics:
+- CreateTexture256 calls 1-25 create normally.
+- During frontend texture reload, ordinary 64x64 / 128x128 / 512x512 assets begin calculating impossible conversion buffer sizes:
+  - 64x64 -> -679215104 bytes;
+  - 128x128 -> 1578106880 bytes;
+  - 512x512 -> -520093696 bytes.
+- those conversions are rejected by the new guard rather than crashing, which explains why the game now survives but menu art is missing.
+
+Verified root cause:
+- retail initDirect3D7 function blob `tools/functions/5235120.bin` contains:
+  - load device from `0x006B791C`;
+  - push `0x006B5780`;
+  - call the device vtable GetCaps method.
+- therefore the real retail `D3DDEVICEDESC7` base is `0x006B5780`.
+- reconstructed `PCTex.cpp` currently defines `G_D3DDEV_CAPS` at `0x006B5788`, eight bytes too far into the structure.
+- `PCTex_UpdateForSoftwareRenderer` copies `dwMaxTextureWidth`, `dwMaxTextureHeight`, and `dwMaxTextureAspectRatio` from this misbased struct during frontend renderer reload.
+- bad high-bit cap values make the signed aspect-ratio comparison succeed and then multiply normal texture dimensions by garbage, producing the huge/negative conversion sizes above.
+
+Input diagnostics:
+- `DXINPUT_PollKeyboard` only reacquires on `DIERR_INPUTLOST`; after Alt+Tab DirectInput may instead return `DIERR_NOTACQUIRED`, leaving keyboard input permanently unacquired.
+- `DXINPUT_PollMouse` is still a MEDIUMTODO stub returning a magic nonzero value without writing either output delta; `PCINPUT_UpdateMouse` then consumes uninitialized deltas. This can directly explain frontend mouse/control instability.
+
+Next implementation:
+1. correct `G_D3DDEV_CAPS` from `0x006B5788` to verified retail `0x006B5780`;
+2. add a narrow caps sanity log around frontend texture reload;
+3. make keyboard polling reacquire on both `DIERR_INPUTLOST` and `DIERR_NOTACQUIRED`;
+4. implement buffered DirectInput mouse polling with the same press/held/release state semantics as keyboard;
+5. instrument and preserve saved resolution when the retail frontend issues its hardcoded 640x480x16 display reset, without blocking genuine non-640x480 display-option changes.
