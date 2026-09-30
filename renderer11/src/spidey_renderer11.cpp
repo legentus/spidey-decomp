@@ -26,6 +26,7 @@ namespace
     ID3D11VertexShader* gBlitVertexShader = nullptr;
     ID3D11PixelShader* gBlitPixelShader = nullptr;
     ID3D11SamplerState* gBlitSampler = nullptr;
+    ID3D11RasterizerState* gBlitRasterizer = nullptr;
     unsigned long gUploadWidth = 0;
     unsigned long gUploadHeight = 0;
 
@@ -75,6 +76,7 @@ namespace
     void ReleaseBlitPipeline()
     {
         ReleaseUploadTexture();
+        SafeRelease(gBlitRasterizer);
         SafeRelease(gBlitSampler);
         SafeRelease(gBlitPixelShader);
         SafeRelease(gBlitVertexShader);
@@ -97,7 +99,7 @@ namespace
         if (!gDevice)
             return false;
 
-        if (gBlitVertexShader && gBlitPixelShader && gBlitSampler)
+        if (gBlitVertexShader && gBlitPixelShader && gBlitSampler && gBlitRasterizer)
             return true;
 
         static const char* kShaderSource =
@@ -217,7 +219,23 @@ namespace
             return false;
         }
 
-        Log("blit_pipeline ready shader_model=4_0 filter=point");
+        D3D11_RASTERIZER_DESC rasterizerDesc = {};
+        rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+        rasterizerDesc.CullMode = D3D11_CULL_NONE;
+        rasterizerDesc.DepthClipEnable = TRUE;
+
+        hr = gDevice->CreateRasterizerState(
+            &rasterizerDesc,
+            &gBlitRasterizer);
+
+        if (FAILED(hr) || !gBlitRasterizer)
+        {
+            Log("blit_pipeline create_rasterizer failed hr=0x%08lX", static_cast<unsigned long>(hr));
+            ReleaseBlitPipeline();
+            return false;
+        }
+
+        Log("blit_pipeline ready shader_model=4_0 filter=point cull=none");
         return true;
     }
 
@@ -793,6 +811,7 @@ int __cdecl SpideyRenderer11_PresentPixels(
     viewport.MinDepth = 0.0f;
     viewport.MaxDepth = 1.0f;
     gContext->RSSetViewports(1, &viewport);
+    gContext->RSSetState(gBlitRasterizer);
 
     gContext->IASetInputLayout(nullptr);
     gContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
