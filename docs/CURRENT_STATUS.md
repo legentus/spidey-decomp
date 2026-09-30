@@ -2041,3 +2041,62 @@ Next user action:
 - launch normally;
 - if still black, let it run through splash/start/menu for at least ~10 seconds;
 - send all logs, especially `spidey-decomp-present.log`.
+
+
+## PRESENTATION ROOT CAUSE ISOLATED — scene renders, primary never updates — 2026-09-30
+
+Latest test revision:
+`527aa0ba2fea79865d4b06e683defd2e59a169cc`
+
+User result:
+- game remains visually a black box;
+- audio/game state continue to run underneath.
+
+Presentation probe evidence:
+- probe installed successfully at retail `DXPOLY_EndScene -> DXPOLY_Flip` call site `0x00502D41`;
+- retail windowed state:
+  - option=1
+  - lowgfx=0;
+- stored destination rect and live client rect agree exactly:
+  `0,0,640,480`;
+- therefore stale rectangle is ruled out;
+- scene surface:
+  - ptr non-null;
+  - not lost;
+  - 640x480;
+  - 32bpp;
+  - GetDC succeeds;
+  - 3x3 sample reports 9/9 non-black pixels;
+- primary surface:
+  - ptr non-null;
+  - not lost;
+  - 1920x1080;
+  - 32bpp;
+  - GetDC succeeds;
+  - 3x3 sample reports 9/9 non-black pixels.
+
+CRITICAL TEMPORAL EVIDENCE:
+- scene sample hash changes from
+  `0x7E0B5BDA`
+  to
+  `0x3B302417`
+  by frame 360, proving the game is continuing to render changing frames;
+- primary sample hash remains
+  `0x3565BD06`
+  on every sampled frame through frame 480;
+- therefore the retail windowed presentation path is not propagating the rendered scene to the visible primary/display output.
+
+Conclusion:
+- game rendering itself is working;
+- game loop/audio/input are working;
+- stale gRect is ruled out;
+- active compatibility defect is specifically the retail DirectDraw primary-surface windowed Blt/presentation behavior on this system.
+
+NEXT IMPLEMENTATION:
+- preserve retail renderer and offscreen scene surface;
+- preserve retail DXPOLY_Flip call for state/error behavior;
+- add a windowed compatibility presenter that copies the already-rendered scene surface directly into the HWND client DC after retail flip;
+- use scene-surface GetDC + window GetDC + StretchBlt/BitBlt;
+- only activate when gDxOptionRelated indicates windowed mode;
+- log copy dimensions and Win32 result;
+- leave fullscreen retail path untouched.
