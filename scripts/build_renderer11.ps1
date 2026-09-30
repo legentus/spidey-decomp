@@ -10,15 +10,19 @@ $BuildDir = Join-Path $RepoRoot "out\renderer11\build"
 $ArtifactDir = Join-Path $RepoRoot "out\renderer11"
 $Artifact = Join-Path $ArtifactDir "spidey_renderer11.dll"
 
-$cmake = Get-Command cmake.exe -ErrorAction SilentlyContinue
-if (-not $cmake) {
+$cmakeCommand = Get-Command cmake.exe -ErrorAction SilentlyContinue
+$cmakePath = $null
+
+if ($cmakeCommand) {
+    $cmakePath = $cmakeCommand.Source
+} else {
     $known = "C:\Program Files\CMake\bin\cmake.exe"
     if (Test-Path $known) {
-        $cmake = Get-Item $known
+        $cmakePath = $known
     }
 }
 
-if (-not $cmake) {
+if (-not $cmakePath) {
     throw "CMake was not found. Install CMake or add cmake.exe to PATH."
 }
 
@@ -30,7 +34,7 @@ Write-Host "  Spider-Man 2000 - Direct3D 11 Renderer Build"
 Write-Host "============================================================"
 Write-Host "Source: $SourceDir"
 Write-Host "Build:  $BuildDir"
-Write-Host "CMake:  $($cmake.Source)"
+Write-Host "CMake:  $cmakePath"
 Write-Host ""
 
 $configureArgs = @(
@@ -40,7 +44,7 @@ $configureArgs = @(
     "-A", "Win32"
 )
 
-& $cmake.Source @configureArgs
+& $cmakePath @configureArgs
 if ($LASTEXITCODE -ne 0) {
     throw "DX11 renderer CMake configure failed with exit code $LASTEXITCODE."
 }
@@ -51,7 +55,7 @@ $buildArgs = @(
     "--parallel"
 )
 
-& $cmake.Source @buildArgs
+& $cmakePath @buildArgs
 if ($LASTEXITCODE -ne 0) {
     throw "DX11 renderer build failed with exit code $LASTEXITCODE."
 }
