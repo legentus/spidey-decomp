@@ -5036,3 +5036,49 @@ Key compatibility seam:
 - right-stick/mouse camera intent must stay separate from the legacy digital mask.
 
 The document explicitly preserves the option to replace ordinary legacy camera ownership with a dedicated modern gameplay camera after evaluating the first free-look prototype.
+
+
+## Modern Input Phase 0 implementation begins — passive helper foundation — 2026-09-30
+
+New source:
+- `input11/CMakeLists.txt`;
+- `input11/include/spidey_input11_api.h`;
+- `input11/spidey_input11.def`;
+- `input11/src/spidey_input11.cpp`;
+- `scripts/build_input11.ps1`.
+
+Initial commits:
+- `22bc97d441a12cf4fd9a7d1f51e7142fc6e410d7`;
+- `21cffdd9262d176ca8e7eef493d4d7a2f9553554`;
+- `254349907ce351ed05b1cf4e886d9aee34f52065`;
+- `9686366d3fd65369918d84c8d422b60ab45e7806`;
+- `e50cb442fdda4a006fe79a6e28c9dafcd76867f3`.
+
+Architecture:
+- modern input lives in a separate VS2022 Win32 helper DLL, matching the successful renderer11 split;
+- proxy compatibility layer will communicate through a versioned C ABI;
+- ABI v1 exposes one normalized controller snapshot:
+  - connected/device family/user index/packet number;
+  - semantic button bitset;
+  - normalized `moveX/moveY`;
+  - normalized `cameraX/cameraY`;
+  - normalized left/right triggers;
+- rumble API is included from the start.
+
+First provider:
+- dynamic XInput loader;
+- probes `xinput1_4.dll`, `xinput1_3.dll`, `xinput9_1_0.dll`, `xinput1_2.dll`, `xinput1_1.dll` in order;
+- no XInput import library dependency is added to the matching proxy;
+- standard radial left/right-stick deadzones and trigger threshold are normalized in the helper;
+- up to four XInput users are scanned, preserving the current active user while connected.
+
+Important scope:
+- this first provider proves the modern input ABI with Xbox/XInput-compatible pads;
+- PlayStation/native HID/generic-pad support is intentionally **not** encoded as XInput assumptions in the ABI and can be added as later providers;
+- modern input is still passive and does not replace retail gameplay controls yet.
+
+Next implementation steps:
+1. add helper build/install/log collection to `TEST_LATEST_BUILD.ps1`;
+2. load/probe/poll `spidey_input11.dll` from the proxy without injecting actions yet;
+3. validate helper telemetry with and without a controller connected;
+4. only after passive validation, merge semantic controller actions into `PCINPUT_GetMappedStates @ 0x0050A190`.
