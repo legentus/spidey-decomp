@@ -2668,7 +2668,11 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
     unsigned long sampleHash = 0;
     unsigned long sampleNonBlack = 0;
     unsigned long samplePixels[9] = {};
+    const int shouldSamplePixels =
+        frame <= 5 ||
+        (frame % 120) == 0;
     const int sampled =
+        shouldSamplePixels &&
         SampleShadowTarget(
             sampleHash,
             sampleNonBlack,
