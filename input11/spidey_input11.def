@@ -1,0 +1,9 @@
+LIBRARY spidey_input11
+
+EXPORTS
+    SpideyInput11_GetAbiVersion
+    SpideyInput11_GetBackendName
+    SpideyInput11_Probe
+    SpideyInput11_Poll
+    SpideyInput11_SetVibration
+    SpideyInput11_Shutdown
