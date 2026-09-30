@@ -4586,6 +4586,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		0;
 	int shadowPreviewToggledOn =
 		0;
+	int shadowReferenceDelay =
+		0;
 
 	if (!gSpideyShadowPreviewModeSynced)
 	{
@@ -4619,8 +4621,25 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		shadowPreviewToggledOn =
 			gSpideyShadowPreviewEnabled ? 1 : 0;
 
-		SpideyRenderer11ShadowSetContinuous(
-			gSpideyShadowPreviewEnabled);
+		if (gSpideyShadowPreviewEnabled)
+		{
+			SpideyRenderer11ShadowSetContinuous(1);
+			SpideyApplyLogicalRenderResolution(
+				1,
+				"f10_dx11");
+		}
+		else
+		{
+			// The frame that just finished drawing still used the modern
+			// logical viewport. Keep that completed DX11 frame visible once,
+			// switch game projection back to the physical D3D7 aspect for
+			// the next frame, then enter reference mode cleanly.
+			shadowReferenceDelay =
+				1;
+			SpideyApplyLogicalRenderResolution(
+				0,
+				"f10_d3d7_reference");
+		}
 
 		FILE* previewLog = fopen(
 			"spidey-decomp-present.log",
@@ -4673,6 +4692,14 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		}
 	}
 
+	if (SpideyUseModernGameplayAspect())
+	{
+		shadowWidth =
+			gSpideyModernLogicalWidth;
+		shadowHeight =
+			gSpideyModernLogicalHeight;
+	}
+
 	int shadowFrameResult =
 		0;
 
@@ -4684,6 +4711,13 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 				frame,
 				shadowWidth,
 				shadowHeight);
+	}
+
+	if (shadowReferenceDelay)
+	{
+		// EndFrame replayed the just-completed modern frame while continuous
+		// capture was still enabled. Disable it only after that safe replay.
+		SpideyRenderer11ShadowSetContinuous(0);
 	}
 
 	if (!gSpideyShadowPreviewEnabled)
@@ -4828,8 +4862,9 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	{
 		retailFlip();
 	}
-	else if (gSpideyShadowPreviewEnabled &&
-		gSpideyShadowPreviewReady &&
+	else if (((gSpideyShadowPreviewEnabled &&
+			   gSpideyShadowPreviewReady) ||
+			  shadowReferenceDelay) &&
 		SpideyRenderer11PresentShadow(
 			1,
 			0))
