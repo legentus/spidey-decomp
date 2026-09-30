@@ -1141,52 +1141,25 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	const u32 requestedBpp =
 		bpp;
 
-	u32 savedWidth =
-		*(DWORD*)0x02E096F8;
-	u32 savedHeight =
-		*(DWORD*)0x02E0970C;
-	u32 savedBpp =
-		*(DWORD*)0x02E098E4;
-
-	const int savedValid =
-		savedWidth >= 512 &&
-		savedWidth <= 8192 &&
-		savedHeight >= 384 &&
-		savedHeight <= 8192;
-
-	if (savedBpp != 16 &&
-		savedBpp != 24 &&
-		savedBpp != 32)
-	{
-		savedBpp =
-			32;
-	}
-
-	int preservedSaved =
-		0;
-
-	// The retail frontend resets the display to its legacy 640x480x16
-	// baseline after the startup movies. In the windowed compatibility path,
-	// preserve the user's saved render mode for that one legacy reset while
-	// leaving genuine non-640x480 display-option requests untouched.
-	if (*(DWORD*)0x006B78F4 &&
+	// Retail deliberately moves the frontend to a 640x480x16 internal
+	// canvas after the startup movies. Forcing that legacy frontend canvas
+	// to the saved gameplay resolution causes frontend-only rendering
+	// corruption (rapidly flashing unrelated scene/building imagery).
+	//
+	// Keep the internal frontend request intact and let the compatibility
+	// presenter scale it into the borderless desktop-sized HWND. Native
+	// frontend/widescreen support should be implemented separately instead
+	// of changing the renderer assumptions underneath the legacy menu.
+	const int frontendLegacy =
+		*(DWORD*)0x006B78F4 &&
 		width == 640 &&
 		height == 480 &&
 		bpp == 16 &&
-		savedValid &&
-		(savedWidth != 640 ||
-		 savedHeight != 480 ||
-		 savedBpp != 16))
-	{
-		width =
-			savedWidth;
-		height =
-			savedHeight;
-		bpp =
-			savedBpp;
-		preservedSaved =
-			1;
-	}
+		option4 == 0 &&
+		option5 == 4;
+
+	int preservedSaved =
+		0;
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
@@ -1196,7 +1169,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	{
 		fprintf(
 			f,
-			"display_options request=%lux%lux%lu apply=%lux%lux%lu option4=%d option5=%d preserve_saved=%d\n",
+			"display_options request=%lux%lux%lu apply=%lux%lux%lu option4=%d option5=%d preserve_saved=%d frontend_legacy=%d\n",
 			(unsigned long)requestedWidth,
 			(unsigned long)requestedHeight,
 			(unsigned long)requestedBpp,
@@ -1205,7 +1178,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			(unsigned long)bpp,
 			option4,
 			option5,
-			preservedSaved);
+			preservedSaved,
+			frontendLegacy);
 		fclose(f);
 	}
 
