@@ -11,6 +11,9 @@ int SpideyRenderer11AssociateLegacyTexture(
     unsigned long textureId,
     void* legacySurface);
 
+long SpideyRenderer11ResolveLegacyTexture(
+    void* legacySurface);
+
 void SpideyRenderer11ReleaseMirroredTexture(
     unsigned long textureId);
 
