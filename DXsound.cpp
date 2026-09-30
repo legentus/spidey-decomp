@@ -77,23 +77,6 @@ EXPORT u8 gControllerButtonState[0x20];
 // @Ok
 EXPORT u8 gMouseButtonState[3];
 
-#ifdef _WIN32
-static i32 gSpideyForegroundInputState = -1;
-
-static void SpideySyncInputForegroundState(void)
-{
-	const i32 active =
-		gDxInputHwnd &&
-		GetForegroundWindow() == gDxInputHwnd;
-
-	if (active == gSpideyForegroundInputState)
-		return;
-
-	DXINPUT_HandleActivation(
-		active);
-}
-#endif
-
 EXPORT char* gDxKeyNames[0x100] = 
 {
 	"NULL",
@@ -360,6 +343,23 @@ EXPORT LPDIRECTINPUT8 g_pDI;
 
 // @Ok
 EXPORT HWND gDxInputHwnd;
+
+#ifdef _WIN32
+static i32 gSpideyForegroundInputState = -1;
+
+static void SpideySyncInputForegroundState(void)
+{
+	const i32 active =
+		gDxInputHwnd &&
+		GetForegroundWindow() == gDxInputHwnd;
+
+	if (active == gSpideyForegroundInputState)
+		return;
+
+	DXINPUT_HandleActivation(
+		active);
+}
+#endif
 
 EXPORT u8 gDxInputRelated;
 
