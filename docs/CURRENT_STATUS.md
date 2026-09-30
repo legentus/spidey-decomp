@@ -2819,3 +2819,44 @@ Expected useful log changes:
 - `display_options_compat patched_calls=...`;
 - legacy reset should log `request=640x480x16 apply=<saved mode> preserve_saved=1`;
 - present log should remain at the saved live render resolution through frontend takeover.
+
+
+## Runtime result: texture/resolution fixes work; frontend flicker + focus input remain — 2026-09-29
+
+Tested revision:
+`ba5cff2c4e5a6271900923534eb13f7771d7162a`
+
+User-visible:
+- game boots through startup and reaches the start/main menus;
+- the proper main-menu background is restored;
+- unrelated-looking building/city images rapidly appear/disappear over both the start and main menus;
+- Alt+Tab out and back still causes controls to stop responding.
+
+Confirmed fixes from logs:
+- display-options wrapper installed across 4 retail call sites;
+- frontend request `640x480x16 option4=0 option5=4` was intercepted and changed to `1280x1024x32` with `preserve_saved=1`;
+- live scene remains 1280x1024x32 through frontend presentation;
+- borderless target remains 2560x1440;
+- texture hash table resolves to retail-proven `0x006AB934`;
+- all previously failing CreateTexture256 assets now create at sane sizes:
+  - 64x64 -> 64x64;
+  - 128x128 -> 128x128;
+  - 512x512 -> 512x512;
+- no absurd negative/GB-scale conversion sizes remain.
+
+Interpretation:
+- white/missing frontend art was fixed by the D3D caps correction;
+- the new flicker is not an allocation/texture-creation failure;
+- strongest current regression candidate is forcing the retail frontend's intentional 640x480x16 internal canvas to 1280x1024x32;
+- prior test at the retail 640x480 frontend mode did not report these building/city flashes, while this artifact appeared immediately after saved-mode preservation was introduced.
+
+Next implementation:
+1. stop substituting the exact frontend `640x480x16 option4=0 option5=4` request;
+2. keep the outer HWND borderless/desktop-sized and continue aspect-fit presentation, so the window will not shrink;
+3. retain the fixed D3D caps address and texture hash table;
+4. later handle native frontend/widescreen as a separate UI/rendering project instead of forcing legacy frontend assumptions into a larger canvas;
+5. add explicit DirectInput focus-transition handling:
+   - unacquire/clear on deactivation;
+   - reacquire keyboard/mouse/controller on activation;
+   - log WM_ACTIVATE state plus Acquire/GetDeviceData results to a dedicated input log;
+6. capture that input log in the one-click test workflow.
