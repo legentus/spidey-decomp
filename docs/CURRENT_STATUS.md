@@ -2717,3 +2717,37 @@ True remaining frontier:
 2. identify the exact caller/arguments responsible for the movie->frontend `640x480x16` reset;
 3. preserve the saved/native render resolution for that automatic frontend reset while still allowing genuine user-selected resolution changes;
 4. runtime-test Alt+Tab input recovery from `8675a76b...`.
+
+
+## Current true frontier after recovery audit — 2026-09-29
+
+Additional surviving commits discovered during live branch audit:
+- `d88c160afe1474645a5d69ce0f89e76d578b1738`
+  - adds `SpideyCompatSetDisplayOptions`;
+  - intercepts the retail frontend's exact `640x480x16` compatibility reset only when the windowed compatibility path is active;
+  - substitutes the validated saved width/height/bpp for that legacy reset;
+  - leaves non-640x480 display-option requests unchanged;
+  - logs requested vs applied mode and whether the saved mode was preserved;
+  - re-injects modern modes and restores the borderless desktop-sized window after the retail mode change.
+- `88b5d1775c04d3386ef99336e7f54402579207bb`
+  - installs the display-options compatibility wrapper from `game_patches()`.
+
+Static verification at HEAD after recovery:
+- D3D caps base is retail-proven `0x006B5780`;
+- caps reload diagnostic is present;
+- keyboard reacquires on both `DIERR_INPUTLOST` and `DIERR_NOTACQUIRED`;
+- mouse now has buffered DirectInput polling and reacquire logic;
+- frontend 640x480x16 reset wrapper exists and is installed;
+- only exact legacy 640x480x16 requests are substituted, so normal user resolution choices remain available;
+- modern mode reinjection and borderless restore still run after the retail display-options call;
+- texture diagnostic capture remains enabled.
+
+No further source change is needed before the next runtime test. The next test is specifically intended to validate all three recovered fixes together:
+1. white/missing frontend art should be corrected by the caps-base fix;
+2. movie->frontend should remain at saved 1280x1024x32 rather than dropping to 640x480x16;
+3. Alt+Tab out/in should reacquire keyboard and mouse input.
+
+Expected diagnostic evidence:
+- `spidey-decomp-texture.log`: sane `caps_reload` values and no absurd negative/GB-scale conversion sizes for ordinary 64x64/128x128 assets;
+- `spidey-decomp-compat.log`: `display_options request=640x480x16 apply=1280x1024x32 ... preserve_saved=1`;
+- `spidey-decomp-present.log`: live scene remains at saved resolution through frontend takeover instead of switching to 640x480x16.
