@@ -3694,3 +3694,28 @@ Texture/render migration map discovered while implementing Phase 2A:
 - `PCGfx_BeginScene` / `PCGfx_EndScene` bracket `DXPOLY_BeginScene` / `DXPOLY_EndScene`.
 
 That map is the basis for Phase 2B: mirror legacy texture handles into DX11 SRVs and migrate 2D/textured draw submission away from D3D7 incrementally.
+
+
+## DX11 Phase 2A PASSED — 2026-09-30
+
+Tested revision:
+`93c667546ee25ca567e01e5a0bc36daf0c4428cb`
+
+User-visible result:
+- game loaded normally with the Phase 2A shader-upload path active.
+
+Runtime proof:
+- ABI 3 bridge loaded with `phase2_exports=1`;
+- DX11 initialized at 2560x1440;
+- the fullscreen shader pipeline compiled/created successfully;
+- a 1920x1440 BGRA8 upload texture was created for the gameplay/boot source;
+- the D3D7 scene surface locked successfully on the first attempt (`lock_retry=0`);
+- visible presentation used `dx11=1 dx11_pixels=1 dx11_hdc=0 direct_hwnd=0 compat_result=3`;
+- frontend transition rebuilt the DX11 upload texture at 640x480 and continued on the same shader path;
+- full uploaded logs contain no `failed`, `fallback`, `dx11_hdc=1`, or `direct_hwnd=1` marker;
+- shader presentation continued through at least frame 3240.
+
+Phase 2A is CLOSED.
+
+NEXT FRONTIER — Phase 2B:
+Introduce DX11 sidecar texture ownership keyed by the game's existing PCTex IDs. Mirror legacy texture creation/destruction into the renderer11 DLL while leaving D3D7 draws intact. This creates a verified DX11 texture inventory before any primitive class is switched over.
