@@ -1949,6 +1949,103 @@ static unsigned long gSpideyModernLogicalHeight = 0;
 static unsigned long gSpideyLegacyPhysicalWidth = 640;
 static unsigned long gSpideyLegacyPhysicalHeight = 480;
 
+typedef void (__cdecl *SpideyRetailSetMouseBoundsFn)(
+		i32,
+		i32,
+		i32,
+		i32);
+typedef void (__cdecl *SpideyRetailSetMousePositionFn)(
+		i32,
+		i32);
+typedef void (__cdecl *SpideyRetailGetMousePositionFn)(
+		i32*,
+		i32*);
+
+static void SpideySyncFrontendMouseBounds(
+		const char* reason)
+{
+	if (!gSpideyFrontendLegacyMode)
+		return;
+
+	unsigned long width =
+		gSpideyLegacyPhysicalWidth;
+	unsigned long height =
+		gSpideyLegacyPhysicalHeight;
+
+	if (width < 64 || height < 64)
+		return;
+
+	i32 maxX =
+		(i32)width - 32;
+	i32 maxY =
+		(i32)height - 32;
+
+	if (maxX < 0)
+		maxX = 0;
+	if (maxY < 0)
+		maxY = 0;
+
+	SpideyRetailGetMousePositionFn retailGetPosition =
+		(SpideyRetailGetMousePositionFn)0x0050A750;
+	SpideyRetailSetMouseBoundsFn retailSetBounds =
+		(SpideyRetailSetMouseBoundsFn)0x0050A6B0;
+	SpideyRetailSetMousePositionFn retailSetPosition =
+		(SpideyRetailSetMousePositionFn)0x0050A700;
+
+	i32 mouseX = 0;
+	i32 mouseY = 0;
+	retailGetPosition(
+		&mouseX,
+		&mouseY);
+
+	retailSetBounds(
+		0,
+		0,
+		maxX,
+		maxY);
+
+	int recentered =
+		0;
+
+	if (mouseX < 0 ||
+		mouseX > maxX ||
+		mouseY < 0 ||
+		mouseY > maxY)
+	{
+		mouseX =
+			maxX / 2;
+		mouseY =
+			maxY / 2;
+		recentered =
+			1;
+	}
+
+	retailSetPosition(
+		mouseX,
+		mouseY);
+
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"retail_input event=frontend_bounds_sync reason=%s physical=%lux%lu bounds=0,0,%d,%d position=%d,%d recentered=%d logical=%lux%lu\n",
+			reason ? reason : "unknown",
+			width,
+			height,
+			maxX,
+			maxY,
+			mouseX,
+			mouseY,
+			recentered,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight);
+		fclose(f);
+	}
+}
+
 static void SpideyRefreshModernLogicalResolution()
 {
 	unsigned long width =
@@ -2175,6 +2272,13 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		gSpideyFrontendLegacyMode ?
 			"display_options_frontend" :
 			"display_options_gameplay");
+
+	// Retail PCSHELL_Initialize only establishes mouse bounds while its
+	// cursor sprite is first created. A gameplay -> frontend device switch
+	// can therefore leave the mouse clamped to the old gameplay backing.
+	// Rebind the retail mouse domain to the active frontend D3D7 canvas.
+	SpideySyncFrontendMouseBounds(
+		"display_options_transition");
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
