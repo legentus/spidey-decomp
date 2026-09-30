@@ -412,6 +412,7 @@ $dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
 $compatLog = Join-Path $gameDir "spidey-decomp-compat.log"
 $presentLog = Join-Path $gameDir "spidey-decomp-present.log"
 $textureLog = Join-Path $gameDir "spidey-decomp-texture.log"
+$drawLog = Join-Path $gameDir "spidey-decomp-draw.log"
 $inputLog = Join-Path $gameDir "spidey-decomp-input.log"
 $renderer11Log = Join-Path $gameDir "spidey-renderer11.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
@@ -430,6 +431,9 @@ if (Test-Path $presentLog) {
 }
 if (Test-Path $textureLog) {
     Remove-Item -LiteralPath $textureLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $drawLog) {
+    Remove-Item -LiteralPath $drawLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $inputLog) {
     Remove-Item -LiteralPath $inputLog -Force -ErrorAction SilentlyContinue
@@ -483,6 +487,12 @@ if (Test-Path $textureLog) {
     Copy-Item -LiteralPath $textureLog -Destination (Join-Path $sessionDir "spidey-decomp-texture.log") -Force
     Write-Host "[TEXTURE] Texture conversion log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-texture.log"))
+}
+
+if (Test-Path $drawLog) {
+    Copy-Item -LiteralPath $drawLog -Destination (Join-Path $sessionDir "spidey-decomp-draw.log") -Force
+    Write-Host "[DRAW] Retail D3D7 draw probe log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-draw.log"))
 }
 
 if (Test-Path $inputLog) {
