@@ -300,3 +300,31 @@ The Phase 2C0 probe:
 This step deliberately does not render any primitive with DX11 yet. Its output determines the exact fixed-function subset Phase 2C must emulate.
 
 Once coverage/state data is validated, the next renderer should initially shadow the retail primitive stream into an offscreen DX11 target while D3D7 remains the visible source. Only after visual/state parity is established should the original D3D7 `DrawPrimitive` calls be suppressed.
+
+
+## Checkpoint: retail stream is narrow enough for direct DX11 emulation
+
+Runtime probing of the live retail `IDirect3DDevice7::DrawPrimitive` stream is complete enough to begin parallel DX11 geometry work safely.
+
+Observed over a gameplay run:
+- 2,423,890 draws;
+- 100% `D3DPT_TRIANGLEFAN`;
+- 100% FVF `0x144`;
+- 2,384,258 textured draws;
+- 2,383,026 already resolve to mirrored renderer11 textures;
+- 1,232 misses across only 9 DirectDraw surface handles;
+- 99.9483% texture coverage.
+
+This narrows Phase 2C considerably. Rather than implementing a generic D3D7 compatibility layer, renderer11 can initially target the exact retail TL-vertex path:
+- XYZRHW + diffuse + UV;
+- triangle fan expansion;
+- fixed-function texture modulation;
+- observed DXPOLY blend modes;
+- depth test/write;
+- wrap/clamp;
+- point/linear sampling;
+- retail viewport mapping.
+
+The next implementation must be a **shadow renderer** first. Retail D3D7 remains authoritative and visible while the same live DrawPrimitive calls are submitted to a separate DX11 color/depth target. Only after shadow coverage and state parity are proven should DX11 geometry become visible or original D3D7 draws be suppressed.
+
+The remaining 9 unresolved legacy surface handles should be mirrored on-demand at the DrawPrimitive boundary rather than blocking the shadow-rendering work.
