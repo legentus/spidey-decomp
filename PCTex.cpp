@@ -16,7 +16,8 @@
 #define G_MOVIE_DD7 (*reinterpret_cast<LPDIRECTDRAW7*>(0x006B7900))
 
 //#define G_D3DDEV_CAPS (gD3DDevCaps)
-#define G_D3DDEV_CAPS (*reinterpret_cast<D3DDEVICEDESC7*>(0x006B5788))
+// Verified against retail initDirect3D7: the device GetCaps call passes 0x006B5780.
+#define G_D3DDEV_CAPS (*reinterpret_cast<D3DDEVICEDESC7*>(0x006B5780))
 
 EXPORT i32 gPvrCountRelated;
 
@@ -2180,6 +2181,26 @@ void PCTex_UnloadTextures(void)
 // PCTex_ReloadTextures call shows up inlined because it is still a printf stub
 void PCTex_UpdateForSoftwareRenderer(void)
 {
+#ifdef _WIN32
+	{
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"caps_reload base=0x006B5780 max_w=%lu max_h=%lu max_aspect=%lu tex_caps=0x%08lX lowgfx=%d\n",
+				(unsigned long)G_D3DDEV_CAPS.dwMaxTextureWidth,
+				(unsigned long)G_D3DDEV_CAPS.dwMaxTextureHeight,
+				(unsigned long)G_D3DDEV_CAPS.dwMaxTextureAspectRatio,
+				(unsigned long)G_D3DDEV_CAPS.dpcTriCaps.dwTextureCaps,
+				G_LOWGRAPHICS ? 1 : 0);
+			fclose(f);
+		}
+	}
+#endif
+
 	if (G_LOWGRAPHICS)
 	{
 		G_MAX_TEXTURE_ASPECT_RATIO = 0;
