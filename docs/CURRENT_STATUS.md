@@ -5154,3 +5154,77 @@ Passive telemetry commit:
 - `8de9028d3ba6cba8db164956c813948396a365bb` logs the legacy raw/processed analogue fields beside modern helper state so the next runtime can verify whether they remain zero/unused in actual PC play.
 
 This materially reduces risk for the modern camera plan: right-stick camera is not replacing a hidden working PC right-stick system; it is adding one that the retail PC path does not provide.
+
+
+### Passive camera ownership telemetry + gameplay-camera RE — 2026-09-30
+
+Implementation:
+- `2d5dc86b59e4a738e831fe88e8efdf1dba9937e4` — passive active-camera/mode/transform telemetry;
+- `4cd7bf549696c76d8ad7176c6e3682c4ce9f4516` — automatic camera-log collection in the standard test session.
+
+Telemetry is observation-only:
+- retail active-camera pointer is read from `0x0056F3B8`, the same pointer used by retail `CPlayer::PutCameraBehind`;
+- no camera fields/functions are modified or called by the telemetry path;
+- `spidey-decomp-camera.log` records:
+  - active camera pointer;
+  - camera mode number + enum name;
+  - pushed/previous mode;
+  - `field_236` heading and `field_23A` transform-derived heading;
+  - camera position;
+  - focus/tripod target;
+  - XZ/Y camera distances;
+  - zoom;
+  - collision-ray IDs;
+  - modern-input connection state and normalized right-stick `cameraX/cameraY`;
+- logs on camera-pointer changes, camera-mode changes, and periodically;
+- with a modern controller connected periodic sampling increases to every 60 completed frames so right-stick intent can be correlated with unchanged retail camera behavior.
+
+#### Important retail camera naming correction
+
+Static disassembly proves `CAMERAMODE_DEMO == 3` is not merely a demo/cutscene camera in this PC build. It is the baseline mode used by ordinary player gameplay camera presets.
+
+Evidence:
+- `CPlayer::SetFallingCamera @ 0x004BF5D0`;
+- `CPlayer::SetSwingCamera @ 0x004BF690`;
+- `CPlayer::SetFloorCamera @ 0x004BF720`;
+- `CPlayer::SetWallCamera @ 0x004BF7A0`;
+- `CPlayer::SetCeilingCamera @ 0x004BF820`.
+
+Every one:
+1. loads active camera from `0x0056F3B8`;
+2. only applies its normal movement-state camera preset when `camera->mCameraMode == 3`;
+3. drives existing camera offset/distance setters;
+4. writes a player camera-preset/state ID at player + `0x540`:
+   - floor = 0;
+   - wall = 1;
+   - ceiling = 2;
+   - swing = 4;
+   - falling = 5.
+
+Therefore mode 3 should be treated as the leading **ordinary gameplay ownership** candidate for a future modern-camera controller, despite the legacy enum name `DEMO`.
+
+#### PutCameraBehind — confirmed recenter mechanism
+
+Retail `CPlayer::PutCameraBehind @ 0x004C64A0`:
+- reads the same active camera pointer at `0x0056F3B8`;
+- in ordinary non-crawl flow computes the player's effective heading and calls `CCamera::SetCamAngle`;
+- in crawl/oriented-surface flow derives an angle from the current surface/orientation and calls `SetCamAngle`;
+- when the camera is mode 3 it also adjusts Y-distance/angle behavior for certain crawl/surface states.
+
+This is the concrete forced-recenter path the first modern free-look prototype will need to gate/suppress during modern ordinary-gameplay ownership.
+
+#### CCamera::AI / CM_Normal static notes
+
+Original `CCamera::AI @ 0x00417CB0` bytes were independently disassembled:
+- updates global angle/distance/offset interpolation;
+- updates tripod/focus state;
+- dispatches mode-specific camera behavior;
+- applies collision/orientation/shake processing;
+- ends by loading the result into the engine camera through `CCamera::LoadIntoMikeCamera`.
+
+The dispatch for modes 3..17 uses a compact lookup table immediately after the function body; the retained per-function binary archive does not include those adjacent table bytes. The exact lookup table has **not** been guessed. Runtime mode telemetry plus known explicit mode functions will be used to ground ownership before modifying dispatch.
+
+Current safe architectural conclusion:
+- modern ordinary gameplay camera can initially claim mode 3;
+- other modes remain retail-owned until runtime telemetry or specific RE proves they are safe to absorb;
+- this keeps scripted/boss/special cameras intact while allowing a later full modern camera for normal play.
