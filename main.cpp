@@ -1069,6 +1069,175 @@ static void SpideyLogSurfaceState(
 	fputc('\n', f);
 }
 
+static int SpideyCompatPresentSceneToWindow(
+		HWND hwnd,
+		LPDIRECTDRAWSURFACE7 scene,
+		unsigned long frame,
+		int shouldLog)
+{
+	if (!hwnd || !scene)
+		return 0;
+
+	RECT clientRect;
+	if (!GetClientRect(hwnd, &clientRect))
+		return 0;
+
+	const int dstWidth =
+		clientRect.right - clientRect.left;
+	const int dstHeight =
+		clientRect.bottom - clientRect.top;
+
+	if (dstWidth <= 0 || dstHeight <= 0)
+		return 0;
+
+	DDSURFACEDESC2 desc;
+	memset(&desc, 0, sizeof(desc));
+	desc.dwSize = sizeof(desc);
+
+	HRESULT descHr =
+		scene->GetSurfaceDesc(&desc);
+
+	if (FAILED(descHr) ||
+		desc.dwWidth == 0 ||
+		desc.dwHeight == 0)
+	{
+		if (shouldLog)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-present.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"compat_present frame=%lu skipped scene_desc_hr=0x%08lX\n",
+					frame,
+					(unsigned long)descHr);
+				fclose(f);
+			}
+		}
+		return 0;
+	}
+
+	HDC sceneDC = 0;
+	HRESULT sceneDCHr =
+		scene->GetDC(&sceneDC);
+
+	if (FAILED(sceneDCHr) || !sceneDC)
+	{
+		if (shouldLog)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-present.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"compat_present frame=%lu skipped scene_getdc_hr=0x%08lX\n",
+					frame,
+					(unsigned long)sceneDCHr);
+				fclose(f);
+			}
+		}
+		return 0;
+	}
+
+	HDC windowDC =
+		::GetDC(hwnd);
+
+	BOOL copyOk =
+		FALSE;
+	DWORD copyError =
+		0;
+	int usedStretch =
+		0;
+
+	if (windowDC)
+	{
+		if (dstWidth == (int)desc.dwWidth &&
+			dstHeight == (int)desc.dwHeight)
+		{
+			copyOk =
+				BitBlt(
+					windowDC,
+					0,
+					0,
+					dstWidth,
+					dstHeight,
+					sceneDC,
+					0,
+					0,
+					SRCCOPY);
+		}
+		else
+		{
+			usedStretch =
+				1;
+
+			SetStretchBltMode(
+				windowDC,
+				COLORONCOLOR);
+
+			copyOk =
+				StretchBlt(
+					windowDC,
+					0,
+					0,
+					dstWidth,
+					dstHeight,
+					sceneDC,
+					0,
+					0,
+					(int)desc.dwWidth,
+					(int)desc.dwHeight,
+					SRCCOPY);
+		}
+
+		if (!copyOk)
+			copyError =
+				GetLastError();
+
+		GdiFlush();
+		::ReleaseDC(
+			hwnd,
+			windowDC);
+	}
+	else
+	{
+		copyError =
+			GetLastError();
+	}
+
+	scene->ReleaseDC(
+		sceneDC);
+
+	if (shouldLog)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-present.log",
+			"a");
+
+		if (f)
+		{
+			fprintf(
+				f,
+				"compat_present frame=%lu result=%d error=%lu src=%lux%lu dst=%dx%d stretch=%d\n",
+				frame,
+				copyOk ? 1 : 0,
+				(unsigned long)copyError,
+				(unsigned long)desc.dwWidth,
+				(unsigned long)desc.dwHeight,
+				dstWidth,
+				dstHeight,
+				usedStretch);
+			fclose(f);
+		}
+	}
+
+	return copyOk ? 1 : 0;
+}
+
 typedef void (__cdecl *SpideyRetailFlipFn)(void);
 
 static void __cdecl SpideyDiagDXPOLYFlip(void)
@@ -1156,6 +1325,15 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	SpideyRetailFlipFn retailFlip =
 		(SpideyRetailFlipFn)0x00502990;
 	retailFlip();
+
+	if (*(DWORD*)0x006B78F4)
+	{
+		SpideyCompatPresentSceneToWindow(
+			hwnd,
+			*(LPDIRECTDRAWSURFACE7*)0x006B7908,
+			frame,
+			shouldLog);
+	}
 
 	if (shouldLog)
 	{
