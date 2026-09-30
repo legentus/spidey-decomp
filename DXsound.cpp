@@ -2,8 +2,10 @@
 #include "DXinit.h"
 #include "SpideyDX.h"
 #include "validate.h"
+#include "renderer11_legacy_bridge.h"
 
 #include <cstring>
+#include <cstdio>
 
 EXPORT LPDIRECTDRAWSURFACE7 gDDSurface7;
 EXPORT bool gTexAlpha = false;
@@ -1733,6 +1735,13 @@ void renderScene(void)
 	}
 	else
 	{
+		static unsigned long sDx11CoverageScene = 0;
+		unsigned long dx11TotalPolys = 0;
+		unsigned long dx11TexturedPolys = 0;
+		unsigned long dx11MirroredPolys = 0;
+		unsigned long dx11MissingPolys = 0;
+		++sDx11CoverageScene;
+
 		for (
 				i32 i = 4096;
 				i >= 0;
@@ -1745,6 +1754,21 @@ void renderScene(void)
 
 			while (pPoly)
 			{
+				++dx11TotalPolys;
+				if (pPoly->field_4)
+				{
+					++dx11TexturedPolys;
+					if (SpideyRenderer11ResolveLegacyTexture(
+							pPoly->field_4) >= 0)
+					{
+						++dx11MirroredPolys;
+					}
+					else
+					{
+						++dx11MissingPolys;
+					}
+				}
+
 				DXPOLY_SetTexture(pPoly->field_4);
 				DXPOLY_SetBlendMode(pPoly->mBlendMode);
 
@@ -1768,6 +1792,27 @@ void renderScene(void)
 
 		if (gDxPolyRelated && gHudOffset > 0)
 			g_D3DDevice7->SetRenderState(D3DRENDERSTATE_ZENABLE, 1);
+
+		if (sDx11CoverageScene <= 5 ||
+			(sDx11CoverageScene % 120) == 0)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-texture.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"dx11_draw_coverage scene=%lu polys=%lu textured=%lu mirrored=%lu missing=%lu resident=%lu\n",
+					sDx11CoverageScene,
+					dx11TotalPolys,
+					dx11TexturedPolys,
+					dx11MirroredPolys,
+					dx11MissingPolys,
+					SpideyRenderer11GetMirroredTextureCount());
+				fclose(f);
+			}
+		}
 	}
 #endif
 }
