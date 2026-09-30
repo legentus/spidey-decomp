@@ -1242,6 +1242,10 @@ typedef void (__cdecl *SpideyRetailSetDisplayOptionsFn)(
 		i32,
 		i32);
 
+static void SpideyInstallRetailD3D7DrawProbe(void);
+static void SpideyFlushRetailD3D7DrawProbeFrame(
+		unsigned long frame);
+
 static void __cdecl SpideyCompatSetDisplayOptions(
 		u32 width,
 		u32 height,
@@ -1335,6 +1339,11 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	SpideyInjectModernVideoModes();
 	SpideyKeepBorderlessMonitorWindow(
 		*(HWND*)0x006B58D0);
+
+	// Display-option changes can destroy/recreate the retail D3D7 device.
+	// Re-validate the live device slot and install the pass-through draw
+	// probe on the new vtable before the next scene is rendered.
+	SpideyInstallRetailD3D7DrawProbe();
 }
 
 static void SpideyInstallDisplayOptionsCompat()
@@ -1965,6 +1974,458 @@ unsigned long SpideyRenderer11GetMirroredTextureCount(void)
 	return gSpideyRenderer11GetResidentTextureCount();
 }
 
+typedef HRESULT (WINAPI *SpideyRetailD3D7DrawPrimitiveFn)(
+		LPDIRECT3DDEVICE7,
+		D3DPRIMITIVETYPE,
+		DWORD,
+		LPVOID,
+		DWORD,
+		DWORD);
+
+struct SpideyRetailTLVertexProbe
+{
+	f32 x;
+	f32 y;
+	f32 z;
+	f32 rhw;
+	DWORD diffuse;
+	f32 u;
+	f32 v;
+};
+
+static SpideyRetailD3D7DrawPrimitiveFn gSpideyRetailD3D7DrawPrimitiveOriginal = 0;
+static LPDIRECT3DDEVICE7 gSpideyRetailD3D7DrawProbeDevice = 0;
+static void** gSpideyRetailD3D7DrawProbeVtable = 0;
+
+static unsigned long gSpideyRetailDrawCalls = 0;
+static unsigned long gSpideyRetailDrawTextured = 0;
+static unsigned long gSpideyRetailDrawMirrored = 0;
+static unsigned long gSpideyRetailDrawMissing = 0;
+static unsigned long gSpideyRetailDrawTriangleFan = 0;
+static unsigned long gSpideyRetailDrawFvf144 = 0;
+static unsigned long gSpideyRetailDrawOtherPrimitive = 0;
+static unsigned long gSpideyRetailDrawOtherFvf = 0;
+static unsigned long gSpideyRetailDrawSampleCount = 0;
+
+static int SpideyIsExecutablePointer(
+		void* pointer)
+{
+	if (!pointer)
+		return 0;
+
+	MEMORY_BASIC_INFORMATION mbi;
+	memset(
+		&mbi,
+		0,
+		sizeof(mbi));
+
+	if (!VirtualQuery(
+			pointer,
+			&mbi,
+			sizeof(mbi)))
+	{
+		return 0;
+	}
+
+	DWORD protect =
+		mbi.Protect &
+		0xFF;
+
+	return protect == PAGE_EXECUTE ||
+		protect == PAGE_EXECUTE_READ ||
+		protect == PAGE_EXECUTE_READWRITE ||
+		protect == PAGE_EXECUTE_WRITECOPY;
+}
+
+static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
+		LPDIRECT3DDEVICE7 device,
+		D3DPRIMITIVETYPE primitiveType,
+		DWORD vertexTypeDesc,
+		LPVOID vertices,
+		DWORD vertexCount,
+		DWORD flags)
+{
+	++gSpideyRetailDrawCalls;
+
+	if (primitiveType == D3DPT_TRIANGLEFAN)
+		++gSpideyRetailDrawTriangleFan;
+	else
+		++gSpideyRetailDrawOtherPrimitive;
+
+	if (vertexTypeDesc == 324)
+		++gSpideyRetailDrawFvf144;
+	else
+		++gSpideyRetailDrawOtherFvf;
+
+	LPDIRECTDRAWSURFACE7 texture =
+		0;
+	HRESULT textureHr =
+		E_FAIL;
+	long mirroredTextureId =
+		-1;
+
+	if (device)
+	{
+		textureHr =
+			device->GetTexture(
+				0,
+				&texture);
+	}
+
+	if (SUCCEEDED(textureHr) &&
+		texture)
+	{
+		++gSpideyRetailDrawTextured;
+
+		mirroredTextureId =
+			SpideyRenderer11ResolveLegacyTexture(
+				texture);
+
+		if (mirroredTextureId >= 0)
+			++gSpideyRetailDrawMirrored;
+		else
+			++gSpideyRetailDrawMissing;
+	}
+
+	const int unusual =
+		primitiveType != D3DPT_TRIANGLEFAN ||
+		vertexTypeDesc != 324 ||
+		(texture && mirroredTextureId < 0);
+
+	if (gSpideyRetailDrawSampleCount < 16 ||
+		unusual)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+
+		if (f)
+		{
+			int sampledVertex =
+				0;
+			SpideyRetailTLVertexProbe firstVertex;
+			memset(
+				&firstVertex,
+				0,
+				sizeof(firstVertex));
+
+			if (vertices &&
+				vertexCount &&
+				vertexTypeDesc == 324)
+			{
+				__try
+				{
+					firstVertex =
+						*(SpideyRetailTLVertexProbe*)vertices;
+					sampledVertex =
+						1;
+				}
+				__except(EXCEPTION_EXECUTE_HANDLER)
+				{
+					sampledVertex =
+						0;
+				}
+			}
+
+			fprintf(
+				f,
+				"draw_sample call=%lu device=0x%08lX primitive=%lu fvf=%lu vertices=0x%08lX count=%lu flags=0x%08lX texture_hr=0x%08lX texture=0x%08lX mirrored_id=%ld",
+				gSpideyRetailDrawCalls,
+				(unsigned long)device,
+				(unsigned long)primitiveType,
+				(unsigned long)vertexTypeDesc,
+				(unsigned long)vertices,
+				(unsigned long)vertexCount,
+				(unsigned long)flags,
+				(unsigned long)textureHr,
+				(unsigned long)texture,
+				mirroredTextureId);
+
+			if (sampledVertex)
+			{
+				fprintf(
+					f,
+					" v0=%.3f,%.3f,%.6f,%.6f color=0x%08lX uv=%.6f,%.6f",
+					firstVertex.x,
+					firstVertex.y,
+					firstVertex.z,
+					firstVertex.rhw,
+					(unsigned long)firstVertex.diffuse,
+					firstVertex.u,
+					firstVertex.v);
+			}
+
+			fputc(
+				'\n',
+				f);
+			fclose(f);
+		}
+
+		++gSpideyRetailDrawSampleCount;
+	}
+
+	if (texture)
+		texture->Release();
+
+	if (!gSpideyRetailD3D7DrawPrimitiveOriginal)
+		return E_FAIL;
+
+	return gSpideyRetailD3D7DrawPrimitiveOriginal(
+			device,
+			primitiveType,
+			vertexTypeDesc,
+			vertices,
+			vertexCount,
+			flags);
+}
+
+static void SpideyResetRetailD3D7DrawProbeFrame()
+{
+	gSpideyRetailDrawCalls = 0;
+	gSpideyRetailDrawTextured = 0;
+	gSpideyRetailDrawMirrored = 0;
+	gSpideyRetailDrawMissing = 0;
+	gSpideyRetailDrawTriangleFan = 0;
+	gSpideyRetailDrawFvf144 = 0;
+	gSpideyRetailDrawOtherPrimitive = 0;
+	gSpideyRetailDrawOtherFvf = 0;
+}
+
+static void SpideyFlushRetailD3D7DrawProbeFrame(
+		unsigned long frame)
+{
+	const int shouldLog =
+		frame <= 5 ||
+		(frame % 120) == 0 ||
+		gSpideyRetailDrawMissing != 0 ||
+		gSpideyRetailDrawOtherPrimitive != 0 ||
+		gSpideyRetailDrawOtherFvf != 0;
+
+	if (shouldLog)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+
+		if (f)
+		{
+			fprintf(
+				f,
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu resident=%lu device=0x%08lX\n",
+				frame,
+				gSpideyRetailDrawCalls,
+				gSpideyRetailDrawTextured,
+				gSpideyRetailDrawMirrored,
+				gSpideyRetailDrawMissing,
+				gSpideyRetailDrawTriangleFan,
+				gSpideyRetailDrawFvf144,
+				gSpideyRetailDrawOtherPrimitive,
+				gSpideyRetailDrawOtherFvf,
+				SpideyRenderer11GetMirroredTextureCount(),
+				(unsigned long)gSpideyRetailD3D7DrawProbeDevice);
+			fclose(f);
+		}
+	}
+
+	SpideyResetRetailD3D7DrawProbeFrame();
+}
+
+static void SpideyInstallRetailD3D7DrawProbe(void)
+{
+	LPDIRECT3DDEVICE7 device =
+		0;
+
+	__try
+		{
+			device =
+				*(LPDIRECT3DDEVICE7*)0x006B791C;
+		}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			device =
+				0;
+		}
+
+	if (!device)
+		return;
+
+	D3DDEVICEDESC7 caps;
+	memset(
+		&caps,
+		0,
+		sizeof(caps));
+
+	HRESULT capsHr =
+		E_FAIL;
+
+	__try
+		{
+			capsHr =
+				device->GetCaps(
+					&caps);
+		}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			capsHr =
+				E_FAIL;
+		}
+
+	if (FAILED(capsHr))
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"draw_probe NOT installed device=0x%08lX getcaps_hr=0x%08lX\n",
+				(unsigned long)device,
+				(unsigned long)capsHr);
+			fclose(f);
+		}
+		return;
+	}
+
+	void** vtable =
+		0;
+
+	__try
+		{
+			vtable =
+				*(void***)device;
+		}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			vtable =
+				0;
+		}
+
+	if (!vtable)
+		return;
+
+	// IDirect3DDevice7 vtable:
+	// IUnknown 0..2, GetCaps=3, EnumTextureFormats=4,
+	// BeginScene=5, EndScene=6, ... PreLoad=24, DrawPrimitive=25.
+	const int drawPrimitiveIndex =
+		25;
+
+	void* current =
+		0;
+
+	__try
+		{
+			current =
+				vtable[drawPrimitiveIndex];
+		}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			current =
+				0;
+		}
+
+	if (current ==
+		(void*)&SpideyProbeD3D7DrawPrimitive)
+	{
+		gSpideyRetailD3D7DrawProbeDevice =
+			device;
+		gSpideyRetailD3D7DrawProbeVtable =
+			vtable;
+		return;
+	}
+
+	if (!SpideyIsExecutablePointer(
+			current))
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"draw_probe NOT installed device=0x%08lX vtable=0x%08lX draw=0x%08lX reason=non_executable\n",
+				(unsigned long)device,
+				(unsigned long)vtable,
+				(unsigned long)current);
+			fclose(f);
+		}
+		return;
+	}
+
+	DWORD oldProtect =
+		0;
+
+	if (!VirtualProtect(
+			&vtable[drawPrimitiveIndex],
+			sizeof(void*),
+			PAGE_EXECUTE_READWRITE,
+			&oldProtect))
+	{
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"draw_probe NOT installed device=0x%08lX vtable=0x%08lX draw=0x%08lX reason=virtual_protect error=%lu\n",
+				(unsigned long)device,
+				(unsigned long)vtable,
+				(unsigned long)current,
+				(unsigned long)GetLastError());
+			fclose(f);
+		}
+		return;
+	}
+
+	gSpideyRetailD3D7DrawPrimitiveOriginal =
+		(SpideyRetailD3D7DrawPrimitiveFn)current;
+
+	vtable[drawPrimitiveIndex] =
+		(void*)&SpideyProbeD3D7DrawPrimitive;
+
+	DWORD ignoredProtect =
+		0;
+	VirtualProtect(
+		&vtable[drawPrimitiveIndex],
+		sizeof(void*),
+		oldProtect,
+		&ignoredProtect);
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		&vtable[drawPrimitiveIndex],
+		sizeof(void*));
+
+	gSpideyRetailD3D7DrawProbeDevice =
+		device;
+	gSpideyRetailD3D7DrawProbeVtable =
+		vtable;
+
+	FILE* f = fopen(
+		"spidey-decomp-draw.log",
+		"a");
+
+	if (f)
+	{
+		fprintf(
+			f,
+			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX index=%d original=0x%08lX wrapper=0x%08lX getcaps_hr=0x%08lX max_tex=%lux%lu\n",
+			(unsigned long)device,
+			(unsigned long)vtable,
+			drawPrimitiveIndex,
+			(unsigned long)gSpideyRetailD3D7DrawPrimitiveOriginal,
+			(unsigned long)&SpideyProbeD3D7DrawPrimitive,
+			(unsigned long)capsHr,
+			(unsigned long)caps.dwMaxTextureWidth,
+			(unsigned long)caps.dwMaxTextureHeight);
+		fclose(f);
+	}
+
+	SpideyResetRetailD3D7DrawProbeFrame();
+}
+
 typedef void (__cdecl *SpideyRetailDXINITFn)(
 		HWND,
 		HINSTANCE,
@@ -2028,6 +2489,8 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 			}
 		}
 	}
+
+	SpideyInstallRetailD3D7DrawProbe();
 }
 
 static void SpideyInstallWindowedDirectDrawCompat()
@@ -2823,6 +3286,13 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 {
 	const unsigned long frame =
 		++gSpideyPresentFrame;
+
+	// DXPOLY_Flip is called after the retail EndScene/renderScene work, so
+	// the pass-through DrawPrimitive hook has now observed the complete
+	// primitive stream for this presented frame.
+	SpideyFlushRetailD3D7DrawProbeFrame(
+		frame);
+	SpideyInstallRetailD3D7DrawProbe();
 
 	HWND hwnd =
 		*(HWND*)0x006B58D0;
