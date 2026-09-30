@@ -1516,6 +1516,9 @@ scannedHard:
 			SpideyRenderer11MirrorLegacyTexture(
 					(unsigned long)a1,
 					pTempSurf);
+			SpideyRenderer11AssociateLegacyTexture(
+					(unsigned long)a1,
+					G_GLOBAL_TEXTURES[a1].mD3DTex);
 
 			hr = pTempSurf->Release();
 			D3D_ERROR_LOG_AND_QUIT(hr);
