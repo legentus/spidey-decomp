@@ -2293,3 +2293,72 @@ Immediate implementation order:
 3. trace the Bink/splash presentation path separately from the normal scene presenter so movies become visible too.
 
 Do not regress the now-working direct HWND menu presentation path.
+
+
+## Compatibility fix batch ready: mouse crash + splash movies + native modern resolutions — 2026-09-29
+
+Implementation commits:
+- `0addc001023f61886c34c33c50a7ae314f09a11f`
+  - fixes reconstructed `Font::height(char*)` trampoline;
+  - retail method is now invoked with FASTCALL-compatible `this` in ECX;
+  - directly addresses the latest mouse-move crash at retail `0x0043EB29`.
+- `23a5e77e51313edf52e06d9aa3904cc6c86ade78`
+  - adds movie/splash presentation compatibility;
+  - scans retail `PCMOVIE_NextFrame 0x0050B5A0..0x0050B790`;
+  - verified retail machine code contains exactly one direct `DXPOLY_Flip` call at `0x0050B71A`;
+  - redirects that movie-specific call through the already working direct-HWND presenter;
+  - does NOT globally replace `DXPOLY_Flip`.
+  - adds modern-resolution restoration/injection:
+    - saved settings globals: `0x02E096F8/0x02E0970C/0x02E098E4`;
+    - live DX globals: `0x006B78E4/0x006B78E8/0x006B78EC`;
+    - retail game-resolution mirrors: `0x00568154/0x00568158`;
+    - retail display-mode context:
+      - count `0x006B5998`;
+      - surfaces `0x006B599C`;
+      - flags `0x006B789C`.
+  - startup wrapper restores saved resolution into the actual live render globals before retail DX initialization.
+  - imports modern 32-bit Windows display modes and explicitly guarantees a `2560x1440x32` entry.
+- `562b5a27ba7f21a740a431ea0f73c55a99afdea3`
+  - mode augmentation is now applied after every retail `initDirectDraw7` call, not only first startup;
+  - this is necessary because retail `DXINIT_SetDisplayOptions` rebuilds DirectDraw and would otherwise wipe the augmented modern mode table.
+- `778b60ff68a63be4be1736e04cefb365689d937a`
+  - presentation diagnostics now distinguish:
+    - `saved_res=<w>x<h>x<bpp>`;
+    - `live_res=<w>x<h>x<bpp>`;
+  - scene-surface dimensions remain independently logged.
+
+Static/reverse-engineering checks completed:
+- uploaded crash DLL return `0x100236FC` maps to `Font::height + 0xC`;
+- uploaded secondary return `0x1002CC0F` maps to `Mess_TextHeight + 0xF`;
+- retail `PCMOVIE_NextFrame` contains one direct flip call:
+  `0x0050B71A -> 0x00502990`;
+- retail `DXINIT_SetDisplayOptions` contains a direct reinit call:
+  `0x005006B0 -> initDirectDraw7 0x004FEDD0`;
+- retail `DXINIT_DirectX8` contains two direct `initDirectDraw7` calls:
+  `0x004FDED4` and `0x004FDEFE`;
+- all modern-mode entries use the retail-valid flag plus accelerated-resolution flag (`1 | 4`);
+- 2560x1440 is an actual render-mode entry, not only presenter scaling.
+
+NEXT TEST:
+1. run `UPDATE_SPIDEY_PROJECT.bat`;
+2. run `TEST_LATEST_BUILD.bat`;
+3. verify splash/legal/logo movies are now visible;
+4. at start menu, move the mouse around repeatedly and confirm no crash;
+5. enter Options -> Display/Video;
+6. verify modern resolutions appear, including `2560x1440`;
+7. select/apply 2560x1440;
+8. return to menu/game and verify the image is still visible;
+9. provide all generated logs.
+
+Most important next-log evidence:
+- `spidey-decomp-compat.log`
+  - `restore_saved_resolution ...`
+  - `modern_mode_reinit patched_calls=...`
+  - `modern_modes before=... after=... added=... windows_1440=...`
+- `spidey-decomp-present.log`
+  - `movie_present installed ...`
+  - `saved_res=...`
+  - `live_res=...`
+  - `scene_pre ... width=2560 height=1440 ...` after 1440p is applied.
+
+If 2560x1440 appears in the menu but applying it fails, the next target is the retail `DXINIT_SetDisplayOptions` transition itself; do not regress mode enumeration or fall back to scaled 640x480.
