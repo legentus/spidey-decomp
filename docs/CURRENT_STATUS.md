@@ -2473,3 +2473,37 @@ Most useful new evidence:
 - crash log if any.
 
 Do not revert the native-resolution or modern-mode work unless a later test demonstrates a renderer-level incompatibility; this test already proved the real scene can render at 1280x1024.
+
+
+## Build-only regression fixed: legacy SDK monitor API incompatibility — 2026-09-29
+
+Tested revision:
+`ed7db84793b6c03867baf0ab475919ea7cd120dc`
+
+Result:
+- runtime test did not start because the matching MSVC 6-era toolchain failed compiling `main.cpp`;
+- allocator changes compiled;
+- failure was isolated to the new borderless-window helper using APIs absent from the project's old Windows headers:
+  - `MonitorFromWindow`;
+  - `MONITOR_DEFAULTTONEAREST`;
+  - `MONITORINFO`;
+  - `GetMonitorInfoA`.
+
+Build log errors begin at `main.cpp(927)` and cascade from those missing declarations.
+
+Fix:
+- commit `00e09b932a55f7dea60386b462f1c7f4ced54f36`;
+- replaced multi-monitor API usage with old-SDK-safe `GetSystemMetrics(0)` / `GetSystemMetrics(1)`;
+- this matches the retail game's existing primary-display sizing approach in `RealWinMain`;
+- borderless behavior remains:
+  - popup/no caption frame;
+  - window forced to primary display origin `0,0`;
+  - width/height set to primary desktop dimensions;
+- log now reports:
+  `borderless_monitor_window ... source=GetSystemMetrics`.
+
+NEXT ACTION:
+1. run `UPDATE_SPIDEY_PROJECT.bat`;
+2. run `TEST_LATEST_BUILD.bat`;
+3. first confirm matching build succeeds;
+4. only if it launches, continue the existing runtime checks for borderless sizing, splash playback, allocator fallback, menu reachability, mouse movement, and 2560x1440.
