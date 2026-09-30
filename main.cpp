@@ -2311,6 +2311,7 @@ void game_patches(void)
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
 	SpideyInstallModernModeReinitCompat();
+	SpideyInstallDisplayOptionsCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 
