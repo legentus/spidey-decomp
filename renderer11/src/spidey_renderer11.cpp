@@ -482,6 +482,582 @@ namespace
         return true;
     }
 
+
+    bool ConvertShadowBlend(
+        unsigned long legacyBlend,
+        D3D11_BLEND& blend)
+    {
+        switch (legacyBlend)
+        {
+            case 1: blend = D3D11_BLEND_ZERO; return true;
+            case 2: blend = D3D11_BLEND_ONE; return true;
+            case 3: blend = D3D11_BLEND_SRC_COLOR; return true;
+            case 4: blend = D3D11_BLEND_INV_SRC_COLOR; return true;
+            case 5: blend = D3D11_BLEND_SRC_ALPHA; return true;
+            case 6: blend = D3D11_BLEND_INV_SRC_ALPHA; return true;
+            case 7: blend = D3D11_BLEND_DEST_ALPHA; return true;
+            case 8: blend = D3D11_BLEND_INV_DEST_ALPHA; return true;
+            case 9: blend = D3D11_BLEND_DEST_COLOR; return true;
+            case 10: blend = D3D11_BLEND_INV_DEST_COLOR; return true;
+            case 11: blend = D3D11_BLEND_SRC_ALPHA_SAT; return true;
+            default: return false;
+        }
+    }
+
+    ID3D11DepthStencilState* GetShadowDepthState(
+        const SpideyRenderer11ShadowState& state)
+    {
+        if (!gDevice ||
+            state.zFunc < 1 ||
+            state.zFunc > 8)
+        {
+            return nullptr;
+        }
+
+        const unsigned long long key =
+            (static_cast<unsigned long long>(state.zEnable ? 1UL : 0UL)) |
+            (static_cast<unsigned long long>(state.zWrite ? 1UL : 0UL) << 8) |
+            (static_cast<unsigned long long>(state.zFunc) << 16);
+
+        const auto found = gShadowDepthStates.find(key);
+        if (found != gShadowDepthStates.end())
+            return found->second;
+
+        D3D11_DEPTH_STENCIL_DESC desc = {};
+        desc.DepthEnable = state.zEnable ? TRUE : FALSE;
+        desc.DepthWriteMask =
+            state.zWrite ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
+        desc.DepthFunc = static_cast<D3D11_COMPARISON_FUNC>(state.zFunc);
+        desc.StencilEnable = FALSE;
+
+        ID3D11DepthStencilState* result = nullptr;
+        const HRESULT hr =
+            gDevice->CreateDepthStencilState(&desc, &result);
+
+        if (FAILED(hr) || !result)
+        {
+            Log(
+                "shadow depth_state failed hr=0x%08lX z=%lu zw=%lu zf=%lu",
+                static_cast<unsigned long>(hr),
+                state.zEnable,
+                state.zWrite,
+                state.zFunc);
+            SafeRelease(result);
+            return nullptr;
+        }
+
+        gShadowDepthStates[key] = result;
+        return result;
+    }
+
+    ID3D11BlendState* GetShadowBlendState(
+        const SpideyRenderer11ShadowState& state)
+    {
+        if (!gDevice)
+            return nullptr;
+
+        const unsigned long long key =
+            (static_cast<unsigned long long>(state.alphaBlendEnable ? 1UL : 0UL)) |
+            (static_cast<unsigned long long>(state.srcBlend) << 8) |
+            (static_cast<unsigned long long>(state.dstBlend) << 16);
+
+        const auto found = gShadowBlendStates.find(key);
+        if (found != gShadowBlendStates.end())
+            return found->second;
+
+        D3D11_BLEND src = D3D11_BLEND_ONE;
+        D3D11_BLEND dst = D3D11_BLEND_ZERO;
+
+        if (state.alphaBlendEnable)
+        {
+            if (!ConvertShadowBlend(state.srcBlend, src) ||
+                !ConvertShadowBlend(state.dstBlend, dst))
+            {
+                return nullptr;
+            }
+        }
+
+        D3D11_BLEND_DESC desc = {};
+        desc.AlphaToCoverageEnable = FALSE;
+        desc.IndependentBlendEnable = FALSE;
+        desc.RenderTarget[0].BlendEnable =
+            state.alphaBlendEnable ? TRUE : FALSE;
+        desc.RenderTarget[0].SrcBlend = src;
+        desc.RenderTarget[0].DestBlend = dst;
+        desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+        desc.RenderTarget[0].SrcBlendAlpha = src;
+        desc.RenderTarget[0].DestBlendAlpha = dst;
+        desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        desc.RenderTarget[0].RenderTargetWriteMask =
+            D3D11_COLOR_WRITE_ENABLE_ALL;
+
+        ID3D11BlendState* result = nullptr;
+        const HRESULT hr =
+            gDevice->CreateBlendState(&desc, &result);
+
+        if (FAILED(hr) || !result)
+        {
+            Log(
+                "shadow blend_state failed hr=0x%08lX enable=%lu src=%lu dst=%lu",
+                static_cast<unsigned long>(hr),
+                state.alphaBlendEnable,
+                state.srcBlend,
+                state.dstBlend);
+            SafeRelease(result);
+            return nullptr;
+        }
+
+        gShadowBlendStates[key] = result;
+        return result;
+    }
+
+    ID3D11SamplerState* GetShadowSamplerState(
+        const SpideyRenderer11ShadowState& state)
+    {
+        if (!gDevice ||
+            state.addressU < 1 ||
+            state.addressU > 4 ||
+            state.addressV < 1 ||
+            state.addressV > 4)
+        {
+            return nullptr;
+        }
+
+        const bool linear =
+            state.magFilter == 2 ||
+            state.minFilter == 2;
+
+        const unsigned long long key =
+            (static_cast<unsigned long long>(state.addressU)) |
+            (static_cast<unsigned long long>(state.addressV) << 8) |
+            (static_cast<unsigned long long>(linear ? 1UL : 0UL) << 16);
+
+        const auto found = gShadowSamplerStates.find(key);
+        if (found != gShadowSamplerStates.end())
+            return found->second;
+
+        D3D11_SAMPLER_DESC desc = {};
+        desc.Filter =
+            linear ?
+            D3D11_FILTER_MIN_MAG_MIP_LINEAR :
+            D3D11_FILTER_MIN_MAG_MIP_POINT;
+        desc.AddressU =
+            static_cast<D3D11_TEXTURE_ADDRESS_MODE>(state.addressU);
+        desc.AddressV =
+            static_cast<D3D11_TEXTURE_ADDRESS_MODE>(state.addressV);
+        desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        desc.MinLOD = 0.0f;
+        desc.MaxLOD = D3D11_FLOAT32_MAX;
+
+        ID3D11SamplerState* result = nullptr;
+        const HRESULT hr =
+            gDevice->CreateSamplerState(&desc, &result);
+
+        if (FAILED(hr) || !result)
+        {
+            Log(
+                "shadow sampler_state failed hr=0x%08lX u=%lu v=%lu linear=%d",
+                static_cast<unsigned long>(hr),
+                state.addressU,
+                state.addressV,
+                linear ? 1 : 0);
+            SafeRelease(result);
+            return nullptr;
+        }
+
+        gShadowSamplerStates[key] = result;
+        return result;
+    }
+
+    bool CreateShadowPipeline()
+    {
+        if (!gDevice)
+            return false;
+
+        if (gShadowVertexShader &&
+            gShadowPixelShaderModulateAlpha &&
+            gShadowPixelShaderDiffuseAlpha &&
+            gShadowInputLayout &&
+            gShadowRasterizer &&
+            gShadowWhiteSrv)
+        {
+            return true;
+        }
+
+        static const char* kShaderSource =
+            "Texture2D gameTexture : register(t0);\n"
+            "SamplerState gameSampler : register(s0);\n"
+            "struct VSIn { float4 position : POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
+            "struct VSOut { float4 position : SV_POSITION; float4 color : COLOR0; float2 uv : TEXCOORD0; };\n"
+            "VSOut VSMain(VSIn input) {\n"
+            "    VSOut output;\n"
+            "    output.position = input.position;\n"
+            "    output.color = input.color.bgra;\n"
+            "    output.uv = input.uv;\n"
+            "    return output;\n"
+            "}\n"
+            "float4 PSModulateAlpha(VSOut input) : SV_TARGET {\n"
+            "    return gameTexture.Sample(gameSampler, input.uv) * input.color;\n"
+            "}\n"
+            "float4 PSDiffuseAlpha(VSOut input) : SV_TARGET {\n"
+            "    float4 texel = gameTexture.Sample(gameSampler, input.uv);\n"
+            "    return float4(texel.rgb * input.color.rgb, input.color.a);\n"
+            "}\n";
+
+        ID3DBlob* vsBlob = nullptr;
+        ID3DBlob* psModBlob = nullptr;
+        ID3DBlob* psDiffuseBlob = nullptr;
+        ID3DBlob* errors = nullptr;
+
+        HRESULT hr = D3DCompile(
+            kShaderSource,
+            std::strlen(kShaderSource),
+            "spidey_shadow",
+            nullptr,
+            nullptr,
+            "VSMain",
+            "vs_4_0",
+            D3DCOMPILE_ENABLE_STRICTNESS,
+            0,
+            &vsBlob,
+            &errors);
+
+        if (FAILED(hr))
+        {
+            Log(
+                "shadow compile_vs failed hr=0x%08lX error=%s",
+                static_cast<unsigned long>(hr),
+                errors ? static_cast<const char*>(errors->GetBufferPointer()) : "none");
+            SafeRelease(errors);
+            SafeRelease(vsBlob);
+            return false;
+        }
+        SafeRelease(errors);
+
+        hr = D3DCompile(
+            kShaderSource,
+            std::strlen(kShaderSource),
+            "spidey_shadow",
+            nullptr,
+            nullptr,
+            "PSModulateAlpha",
+            "ps_4_0",
+            D3DCOMPILE_ENABLE_STRICTNESS,
+            0,
+            &psModBlob,
+            &errors);
+
+        if (FAILED(hr))
+        {
+            Log(
+                "shadow compile_ps_modulate failed hr=0x%08lX error=%s",
+                static_cast<unsigned long>(hr),
+                errors ? static_cast<const char*>(errors->GetBufferPointer()) : "none");
+            SafeRelease(errors);
+            SafeRelease(psModBlob);
+            SafeRelease(vsBlob);
+            return false;
+        }
+        SafeRelease(errors);
+
+        hr = D3DCompile(
+            kShaderSource,
+            std::strlen(kShaderSource),
+            "spidey_shadow",
+            nullptr,
+            nullptr,
+            "PSDiffuseAlpha",
+            "ps_4_0",
+            D3DCOMPILE_ENABLE_STRICTNESS,
+            0,
+            &psDiffuseBlob,
+            &errors);
+
+        if (FAILED(hr))
+        {
+            Log(
+                "shadow compile_ps_diffuse failed hr=0x%08lX error=%s",
+                static_cast<unsigned long>(hr),
+                errors ? static_cast<const char*>(errors->GetBufferPointer()) : "none");
+            SafeRelease(errors);
+            SafeRelease(psDiffuseBlob);
+            SafeRelease(psModBlob);
+            SafeRelease(vsBlob);
+            return false;
+        }
+        SafeRelease(errors);
+
+        hr = gDevice->CreateVertexShader(
+            vsBlob->GetBufferPointer(),
+            vsBlob->GetBufferSize(),
+            nullptr,
+            &gShadowVertexShader);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreatePixelShader(
+                psModBlob->GetBufferPointer(),
+                psModBlob->GetBufferSize(),
+                nullptr,
+                &gShadowPixelShaderModulateAlpha);
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreatePixelShader(
+                psDiffuseBlob->GetBufferPointer(),
+                psDiffuseBlob->GetBufferSize(),
+                nullptr,
+                &gShadowPixelShaderDiffuseAlpha);
+        }
+
+        D3D11_INPUT_ELEMENT_DESC elements[] =
+        {
+            { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+            { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+        };
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreateInputLayout(
+                elements,
+                static_cast<UINT>(sizeof(elements) / sizeof(elements[0])),
+                vsBlob->GetBufferPointer(),
+                vsBlob->GetBufferSize(),
+                &gShadowInputLayout);
+        }
+
+        SafeRelease(psDiffuseBlob);
+        SafeRelease(psModBlob);
+        SafeRelease(vsBlob);
+
+        if (FAILED(hr) ||
+            !gShadowVertexShader ||
+            !gShadowPixelShaderModulateAlpha ||
+            !gShadowPixelShaderDiffuseAlpha ||
+            !gShadowInputLayout)
+        {
+            Log("shadow create_shader_pipeline failed hr=0x%08lX", static_cast<unsigned long>(hr));
+            ReleaseShadowPipeline();
+            return false;
+        }
+
+        D3D11_RASTERIZER_DESC rasterizerDesc = {};
+        rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+        rasterizerDesc.CullMode = D3D11_CULL_NONE;
+        rasterizerDesc.DepthClipEnable = TRUE;
+
+        hr = gDevice->CreateRasterizerState(
+            &rasterizerDesc,
+            &gShadowRasterizer);
+
+        if (FAILED(hr) || !gShadowRasterizer)
+        {
+            Log("shadow create_rasterizer failed hr=0x%08lX", static_cast<unsigned long>(hr));
+            ReleaseShadowPipeline();
+            return false;
+        }
+
+        const unsigned long whitePixel = 0xFFFFFFFFUL;
+        D3D11_TEXTURE2D_DESC whiteDesc = {};
+        whiteDesc.Width = 1;
+        whiteDesc.Height = 1;
+        whiteDesc.MipLevels = 1;
+        whiteDesc.ArraySize = 1;
+        whiteDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        whiteDesc.SampleDesc.Count = 1;
+        whiteDesc.Usage = D3D11_USAGE_IMMUTABLE;
+        whiteDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA whiteData = {};
+        whiteData.pSysMem = &whitePixel;
+        whiteData.SysMemPitch = sizeof(whitePixel);
+
+        hr = gDevice->CreateTexture2D(
+            &whiteDesc,
+            &whiteData,
+            &gShadowWhiteTexture);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreateShaderResourceView(
+                gShadowWhiteTexture,
+                nullptr,
+                &gShadowWhiteSrv);
+        }
+
+        if (FAILED(hr) || !gShadowWhiteTexture || !gShadowWhiteSrv)
+        {
+            Log("shadow create_white_texture failed hr=0x%08lX", static_cast<unsigned long>(hr));
+            ReleaseShadowPipeline();
+            return false;
+        }
+
+        gShadowVertices.reserve(65536);
+        gShadowCommands.reserve(16384);
+
+        Log("shadow pipeline ready shader_model=4_0 tl_vertex=1");
+        return true;
+    }
+
+    bool EnsureShadowTargets(
+        unsigned long width,
+        unsigned long height)
+    {
+        if (!gDevice || width == 0 || height == 0)
+            return false;
+
+        if (gShadowColorTexture &&
+            gShadowRenderTargetView &&
+            gShadowDepthTexture &&
+            gShadowDepthStencilView &&
+            gShadowWidth == width &&
+            gShadowHeight == height)
+        {
+            return true;
+        }
+
+        ReleaseShadowTargets();
+
+        D3D11_TEXTURE2D_DESC colorDesc = {};
+        colorDesc.Width = width;
+        colorDesc.Height = height;
+        colorDesc.MipLevels = 1;
+        colorDesc.ArraySize = 1;
+        colorDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        colorDesc.SampleDesc.Count = 1;
+        colorDesc.Usage = D3D11_USAGE_DEFAULT;
+        colorDesc.BindFlags =
+            D3D11_BIND_RENDER_TARGET |
+            D3D11_BIND_SHADER_RESOURCE;
+
+        HRESULT hr = gDevice->CreateTexture2D(
+            &colorDesc,
+            nullptr,
+            &gShadowColorTexture);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreateRenderTargetView(
+                gShadowColorTexture,
+                nullptr,
+                &gShadowRenderTargetView);
+        }
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreateShaderResourceView(
+                gShadowColorTexture,
+                nullptr,
+                &gShadowColorSrv);
+        }
+
+        if (FAILED(hr) ||
+            !gShadowColorTexture ||
+            !gShadowRenderTargetView ||
+            !gShadowColorSrv)
+        {
+            Log(
+                "shadow color_target failed hr=0x%08lX size=%lux%lu",
+                static_cast<unsigned long>(hr),
+                width,
+                height);
+            ReleaseShadowTargets();
+            return false;
+        }
+
+        D3D11_TEXTURE2D_DESC depthDesc = {};
+        depthDesc.Width = width;
+        depthDesc.Height = height;
+        depthDesc.MipLevels = 1;
+        depthDesc.ArraySize = 1;
+        depthDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+        depthDesc.SampleDesc.Count = 1;
+        depthDesc.Usage = D3D11_USAGE_DEFAULT;
+        depthDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+
+        hr = gDevice->CreateTexture2D(
+            &depthDesc,
+            nullptr,
+            &gShadowDepthTexture);
+
+        if (SUCCEEDED(hr))
+        {
+            hr = gDevice->CreateDepthStencilView(
+                gShadowDepthTexture,
+                nullptr,
+                &gShadowDepthStencilView);
+        }
+
+        if (FAILED(hr) ||
+            !gShadowDepthTexture ||
+            !gShadowDepthStencilView)
+        {
+            Log(
+                "shadow depth_target failed hr=0x%08lX size=%lux%lu",
+                static_cast<unsigned long>(hr),
+                width,
+                height);
+            ReleaseShadowTargets();
+            return false;
+        }
+
+        gShadowWidth = width;
+        gShadowHeight = height;
+
+        Log("shadow targets ready width=%lu height=%lu", width, height);
+        return true;
+    }
+
+    bool EnsureShadowVertexBuffer(size_t requiredBytes)
+    {
+        if (!gDevice || requiredBytes == 0)
+            return false;
+
+        if (gShadowVertexBuffer &&
+            gShadowVertexBufferCapacity >= requiredBytes)
+        {
+            return true;
+        }
+
+        SafeRelease(gShadowVertexBuffer);
+        gShadowVertexBufferCapacity = 0;
+
+        size_t capacity = 4096;
+        while (capacity < requiredBytes)
+            capacity *= 2;
+
+        D3D11_BUFFER_DESC desc = {};
+        desc.ByteWidth = static_cast<UINT>(capacity);
+        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+
+        const HRESULT hr =
+            gDevice->CreateBuffer(
+                &desc,
+                nullptr,
+                &gShadowVertexBuffer);
+
+        if (FAILED(hr) || !gShadowVertexBuffer)
+        {
+            Log(
+                "shadow vertex_buffer failed hr=0x%08lX bytes=%llu",
+                static_cast<unsigned long>(hr),
+                static_cast<unsigned long long>(capacity));
+            SafeRelease(gShadowVertexBuffer);
+            return false;
+        }
+
+        gShadowVertexBufferCapacity = capacity;
+
+        Log(
+            "shadow vertex_buffer ready bytes=%llu",
+            static_cast<unsigned long long>(capacity));
+        return true;
+    }
+
     bool CreateTargets(unsigned long width, unsigned long height)
     {
         if (!gDevice || !gContext || !gSwapChain || width == 0 || height == 0)
