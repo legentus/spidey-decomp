@@ -2716,22 +2716,18 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		++gSpideyRetailDrawOtherFvf;
 
 	LPDIRECTDRAWSURFACE7 texture =
+		gSpideyRetailShadowStateValid ?
+		(LPDIRECTDRAWSURFACE7)
+			gSpideyRetailShadowState.textureHandle :
 		0;
 	HRESULT textureHr =
+		gSpideyRetailShadowStateValid ?
+		S_OK :
 		E_FAIL;
 	long mirroredTextureId =
 		-1;
 
-	if (device)
-	{
-		textureHr =
-			device->GetTexture(
-				0,
-				&texture);
-	}
-
-	if (SUCCEEDED(textureHr) &&
-		texture)
+	if (texture)
 	{
 		++gSpideyRetailDrawTextured;
 
@@ -2740,10 +2736,37 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 				texture);
 
 		if (mirroredTextureId >= 0)
+		{
 			++gSpideyRetailDrawMirrored;
+		}
 		else
+		{
 			++gSpideyRetailDrawMissing;
+			SpideyQueueTransientSurface(
+				texture);
+		}
 	}
+
+	int shadowSubmitted =
+		0;
+
+	if (gSpideyRetailShadowStateValid &&
+		primitiveType == D3DPT_TRIANGLEFAN &&
+		vertexTypeDesc == 324 &&
+		vertices &&
+		vertexCount >= 3)
+	{
+		shadowSubmitted =
+			SpideyRenderer11ShadowSubmitTriangleFan(
+				(const SpideyRenderer11LegacyShadowVertex*)vertices,
+				(unsigned long)vertexCount,
+				&gSpideyRetailShadowState);
+	}
+
+	if (shadowSubmitted)
+		++gSpideyShadowSubmitted;
+	else
+		++gSpideyShadowSkipped;
 
 	const int unusual =
 		primitiveType != D3DPT_TRIANGLEFAN ||
@@ -2908,9 +2931,6 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 
 		++gSpideyRetailDrawSampleCount;
 	}
-
-	if (texture)
-		texture->Release();
 
 	if (!gSpideyRetailD3D7DrawPrimitiveOriginal)
 		return E_FAIL;
