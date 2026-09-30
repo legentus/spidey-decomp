@@ -519,6 +519,31 @@ i32 PCTex_CreateTexture16(
 		i32 a7,
 		u32 a8)
 {
+	static unsigned long sCreateTexture256Call = 0;
+	const unsigned long textureCall =
+		++sCreateTexture256Call;
+
+	{
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"create256 call=%lu stage=entry w=%d h=%d src=0x%08lX clut=0x%08lX flags=0x%08lX id=%d type=%d\n",
+				textureCall,
+				a1,
+				a2,
+				(unsigned long)a3,
+				(unsigned long)a4,
+				(unsigned long)a5,
+				a7,
+				a8);
+			fclose(f);
+		}
+	}
+
 	if (a1 <= 0 || a2 <= 0)
 		return 0;
 
@@ -737,7 +762,28 @@ i32 PCTex_CreateTexture16(
 		G_CREATE_TEXTURE_CLUT = pClut;
 	}
 
-	Mem_Delete(pBmpBuf);
+	if (compatConversionBuffer)
+		free(pBmpBuf);
+	else
+		Mem_Delete(pBmpBuf);
+
+	{
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"create256 call=%lu stage=done id=%d rounded=%dx%d compat_buffer=%d\n",
+				textureCall,
+				textureHandleIndex,
+				rounded_width,
+				rounded_height,
+				compatConversionBuffer ? 1 : 0);
+			fclose(f);
+		}
+	}
 
 	return textureHandleIndex;
 }
@@ -864,19 +910,82 @@ i32 PCTex_CreateTexture256(
 		}
 	}
 
+	const i32 conversionBytes =
+		2 * rounded_width * rounded_height;
 	u16* pBmpBuf = static_cast<u16*>(DCMem_New(
-			2 * rounded_width * rounded_height,
+			conversionBytes,
 			0,
 			1,
 			0,
 			1));
-	print_if_false(pBmpBuf != 0, "Out of system memory.");
+	bool compatConversionBuffer =
+		false;
+
+	if (!pBmpBuf)
+	{
+		pBmpBuf = static_cast<u16*>(
+				malloc(conversionBytes));
+		compatConversionBuffer =
+			pBmpBuf != 0;
+
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"create256 call=%lu stage=conversion_fallback bytes=%d buffer=0x%08lX\n",
+				textureCall,
+				conversionBytes,
+				(unsigned long)pBmpBuf);
+			fclose(f);
+		}
+	}
+
+	if (!pBmpBuf)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"create256 call=%lu stage=conversion_alloc_failed bytes=%d\n",
+				textureCall,
+				conversionBytes);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	if (!a3)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-texture.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"create256 call=%lu stage=null_source\n",
+				textureCall);
+			fclose(f);
+		}
+
+		if (compatConversionBuffer)
+			free(pBmpBuf);
+		else
+			Mem_Delete(pBmpBuf);
+		return 0;
+	}
 
 	if (a1 != rounded_width || a2 != rounded_height)
 		memset(
 				pBmpBuf,
 				0,
-				2 * rounded_width * rounded_height);
+				conversionBytes);
 
 
 	ClutPC* pClut;
@@ -884,6 +993,25 @@ i32 PCTex_CreateTexture256(
 	{
 		pClut = G_CLUT_PC_RELATED;
 		print_if_false(pClut != 0, "no palette!");
+		if (!pClut)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-texture.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"create256 call=%lu stage=null_palette\n",
+					textureCall);
+				fclose(f);
+			}
+			if (compatConversionBuffer)
+				free(pBmpBuf);
+			else
+				Mem_Delete(pBmpBuf);
+			return 0;
+		}
 		a4 = pClut->mClut;
 	}
 	else
@@ -955,10 +1083,27 @@ i32 PCTex_CreateTexture256(
 		}
 		else
 		{
-			index = -1;
+			FILE* f = fopen(
+				"spidey-decomp-texture.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"create256 call=%lu stage=pvr_create_failed new_id=%d rounded=%dx%d\n",
+					textureCall,
+					index,
+					rounded_width,
+					rounded_height);
+				fclose(f);
+			}
+			if (compatConversionBuffer)
+				free(pBmpBuf);
+			else
+				Mem_Delete(pBmpBuf);
+			return 0;
 		}
 
-		print_if_false(index != -1, "Ouch %s", a6);
 		textureHandleIndex = index;
 	}
 	else
@@ -977,6 +1122,28 @@ i32 PCTex_CreateTexture256(
 				a8);
 
 		print_if_false(res != 0, "Ouch %s", a6);
+		if (!res)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-texture.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"create256 call=%lu stage=pvr_recreate_failed id=%d rounded=%dx%d\n",
+					textureCall,
+					a7,
+					rounded_width,
+					rounded_height);
+				fclose(f);
+			}
+			if (compatConversionBuffer)
+				free(pBmpBuf);
+			else
+				Mem_Delete(pBmpBuf);
+			return 0;
+		}
 		textureHandleIndex = a7;
 	}
 
