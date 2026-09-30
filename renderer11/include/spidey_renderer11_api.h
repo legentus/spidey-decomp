@@ -7,7 +7,7 @@ typedef void* HWND;
 typedef void* HDC;
 #endif
 
-#define SPIDEY_RENDERER11_ABI_VERSION 5UL
+#define SPIDEY_RENDERER11_ABI_VERSION 6UL
 
 typedef struct SpideyRenderer11ShadowVertex
 {
@@ -126,6 +126,11 @@ __declspec(dllexport) int __cdecl SpideyRenderer11_ShadowEndFrame(
     unsigned long frame,
     unsigned long sceneWidth,
     unsigned long sceneHeight);
+__declspec(dllexport) void __cdecl SpideyRenderer11_ShadowSetContinuous(
+    int enabled);
+__declspec(dllexport) int __cdecl SpideyRenderer11_PresentShadow(
+    int preserveAspect,
+    int vsync);
 __declspec(dllexport) void __cdecl SpideyRenderer11_ReleaseTexture(
     unsigned long textureId);
 __declspec(dllexport) void __cdecl SpideyRenderer11_ReleaseAllTextures(void);
