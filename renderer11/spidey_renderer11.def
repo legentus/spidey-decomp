@@ -13,6 +13,10 @@ EXPORTS
     SpideyRenderer11_UpdateTexture
     SpideyRenderer11_AssociateTextureHandle
     SpideyRenderer11_ResolveTextureHandle
+    SpideyRenderer11_UpdateTransientTexture
+    SpideyRenderer11_ShadowSetClear
+    SpideyRenderer11_ShadowSubmitTriangleFan
+    SpideyRenderer11_ShadowEndFrame
     SpideyRenderer11_ReleaseTexture
     SpideyRenderer11_ReleaseAllTextures
     SpideyRenderer11_GetResidentTextureCount
