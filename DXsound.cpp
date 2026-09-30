@@ -77,6 +77,23 @@ EXPORT u8 gControllerButtonState[0x20];
 // @Ok
 EXPORT u8 gMouseButtonState[3];
 
+#ifdef _WIN32
+static i32 gSpideyForegroundInputState = -1;
+
+static void SpideySyncInputForegroundState(void)
+{
+	const i32 active =
+		gDxInputHwnd &&
+		GetForegroundWindow() == gDxInputHwnd;
+
+	if (active == gSpideyForegroundInputState)
+		return;
+
+	DXINPUT_HandleActivation(
+		active);
+}
+#endif
+
 EXPORT char* gDxKeyNames[0x100] = 
 {
 	"NULL",
@@ -399,6 +416,25 @@ void DXINPUT_Initialize(LPDIRECTINPUT8 a1, HWND a2)
 
 	gDxInputRelated = 0;
 	gNumControllerButtons = 0;
+
+#ifdef _WIN32
+	gSpideyForegroundInputState = -1;
+
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"input_init hwnd=0x%08lX foreground=0x%08lX active_window=0x%08lX focus=0x%08lX\n",
+			(unsigned long)gDxInputHwnd,
+			(unsigned long)GetForegroundWindow(),
+			(unsigned long)GetActiveWindow(),
+			(unsigned long)GetFocus());
+		fclose(f);
+	}
+#endif
 }
 
 // @MEDIUMTODO
@@ -412,6 +448,10 @@ i32 DXINPUT_PollController(i32 *,i32 *,i32 *)
 i32 DXINPUT_PollKeyboard(void)
 {
 #ifdef _WIN32
+	SpideySyncInputForegroundState();
+	if (gSpideyForegroundInputState != 1)
+		return -1;
+
 	DWORD dwElements = 16;
 	DIDEVICEOBJECTDATA didod[16]; 
 	memset(didod, 0, sizeof(didod));
@@ -511,6 +551,10 @@ i32 DXINPUT_PollMouse(i32 *pY, i32 *pX)
 {
 #ifdef _WIN32
 	if (!pY || !pX)
+		return 0;
+
+	SpideySyncInputForegroundState();
+	if (gSpideyForegroundInputState != 1)
 		return 0;
 
 	*pY = 0;
@@ -653,6 +697,9 @@ static void SpideyLogInputActivation(
 void DXINPUT_HandleActivation(i32 active)
 {
 #ifdef _WIN32
+	gSpideyForegroundInputState =
+		active ? 1 : 0;
+
 	memset(gKeyState, 0, sizeof(gKeyState));
 	memset(gMouseButtonState, 0, sizeof(gMouseButtonState));
 	memset(gControllerButtonState, 0, sizeof(gControllerButtonState));
