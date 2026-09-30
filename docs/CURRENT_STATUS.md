@@ -4947,3 +4947,68 @@ NEXT TEST:
 6. verify input log contains `frontend_bounds_sync` after the mode transition;
 7. enter gameplay once more to ensure the mouse fix did not disturb keyboard/gameplay input;
 8. provide the full new log set; screenshots are useful if any aspect mode is stretched or miscentered.
+
+
+### Phase 3E prepared — guarded removal of D3D7 main-scene DrawPrimitive — 2026-09-30
+
+Implementation:
+- `502bd2864c5e6fd8a1e268f18656591a8b709d0c` — opt-in F9 D3D7 main-scene draw suppression trial.
+
+Purpose:
+- distinguish "DX11 can replay everything visibly" from "the retail D3D7 color/depth main-scene draw is still required for hidden side effects";
+- prove the next renderer boundary without deleting the fallback.
+
+Behavior:
+- default OFF, so the existing Apply/mouse regression test is unchanged;
+- F9 toggles only the diagnostic suppression flag;
+- a retail main-scene `DrawPrimitive` is suppressed only when ALL are true:
+  - DX11 geometry mode is enabled;
+  - DX11 has completed its warmup and is the ready visible path;
+  - the draw targets the retail main scene, not an offscreen surface;
+  - the exact draw was accepted by the DX11 triangle-fan replay path;
+  - the draw has no texture or its texture is already mirrored/resident;
+- unsupported state, unresolved transient texture, offscreen draw, warmup frame, and F10 reference mode all fall back to the original D3D7 call;
+- F10 therefore remains a complete D3D7 reference even if F9 suppression is armed.
+
+New telemetry:
+- present log:
+  `d3d7_main_draw_suppression frame=... enabled=... effective=... dx11=... ready=... key=F9`;
+- draw-frame log adds:
+  - `d3d7_suppress=<0|1>`;
+  - `d3d7_suppressed=<count>`;
+  - `d3d7_fallback=<count>`.
+
+Interpretation for a future F9 test:
+- if image/gameplay remains unchanged while `d3d7_suppressed` approaches main-scene draw count and fallback stays near zero in steady state, D3D7 main-scene rasterization is no longer functionally required for the visible path;
+- any missing effects/readback-dependent behavior means those specific dependencies must be identified before permanent suppression;
+- do NOT suppress offscreen D3D7 work yet because transient textures/resource generation may depend on it.
+
+This diagnostic is intentionally layered behind the current Phase 3D user-facing fixes. First validate live Apply + mouse return; then use F9 as the next renderer-isolation experiment.
+
+### Camera modernization note — do not over-commit to legacy camera internals
+
+User explicitly wants the option to modernize the camera beyond the feel/limitations of the original system after trying an initial implementation.
+
+Therefore:
+- existing camera modes/helpers are useful RE anchors and may provide collision/script transition knowledge;
+- they are **not** an architectural requirement for the final modern camera;
+- design the modern input/camera boundary so a later dedicated camera controller can own yaw, pitch, distance, smoothing, collision and recenter policy directly while only yielding to explicit scripted/cinematic camera ownership.
+
+Useful retail camera hook anchors from the original symbol database:
+- `CCamera::PushMode = 0x00416720`;
+- `CCamera::PopMode = 0x00416780`;
+- `CCamera::SetCamAngle = 0x004178E0`;
+- `CCamera::SetCamXZDistance = 0x004179F0`;
+- `CCamera::SetCamYDistance = 0x00417A70`;
+- `CPlayer::SetCamAngleLock = 0x004B9E10`;
+- `CPlayer::EnterLookaroundMode = 0x004C3580`;
+- `CPlayer::ExitLookaroundMode = 0x004C3810`;
+- `CPlayer::SetupLookaroundCamera = 0x004C38A0`;
+- `CPlayer::PutCameraBehind = 0x004C64A0`.
+
+Recommended long-term camera split:
+1. normalized mouse/right-stick input produces camera intent;
+2. modern camera controller owns ordinary gameplay camera transform;
+3. retail scripted/boss/cutscene state can temporarily claim camera ownership;
+4. on return to ordinary gameplay, modern camera resumes without being forced behind Spider-Man;
+5. legacy collision/lookaround code may be reused selectively or replaced entirely based on feel/testing.
