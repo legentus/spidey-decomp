@@ -1154,8 +1154,67 @@ static const char* const gSpideyAspectLabels[] =
 };
 static char gSpideyAspectRatioMenuLabel[] =
 	"Aspect Ratio";
-static const char gSpideyModernVideoIni[] =
-	"spidey-modern-video.ini";
+static char gSpideyModernVideoIniPath[MAX_PATH];
+
+static const char* SpideyGetModernVideoIniPath()
+{
+	if (gSpideyModernVideoIniPath[0])
+		return gSpideyModernVideoIniPath;
+
+	DWORD length =
+		GetModuleFileNameA(
+			0,
+			gSpideyModernVideoIniPath,
+			MAX_PATH);
+
+	if (!length ||
+		length >= MAX_PATH)
+	{
+		strcpy(
+			gSpideyModernVideoIniPath,
+			".\\spidey-modern-video.ini");
+		return gSpideyModernVideoIniPath;
+	}
+
+	char* slash =
+		strrchr(
+			gSpideyModernVideoIniPath,
+			'\\');
+	if (!slash)
+	{
+		slash =
+			strrchr(
+				gSpideyModernVideoIniPath,
+				'/');
+	}
+
+	if (slash)
+	{
+		++slash;
+		*slash =
+			0;
+
+		const char* fileName =
+			"spidey-modern-video.ini";
+
+		if (strlen(gSpideyModernVideoIniPath) +
+			strlen(fileName) <
+			MAX_PATH)
+		{
+			strcat(
+				gSpideyModernVideoIniPath,
+				fileName);
+		}
+	}
+	else
+	{
+		strcpy(
+			gSpideyModernVideoIniPath,
+			".\\spidey-modern-video.ini");
+	}
+
+	return gSpideyModernVideoIniPath;
+}
 
 static float SpideyGetSelectedAspectScalar()
 {
@@ -1251,7 +1310,7 @@ static void SpideySaveModernVideoSettings()
 		"Video",
 		"AspectMode",
 		value,
-		gSpideyModernVideoIni);
+		SpideyGetModernVideoIniPath());
 }
 
 static void SpideyLoadModernVideoSettings()
@@ -1261,7 +1320,7 @@ static void SpideyLoadModernVideoSettings()
 			"Video",
 			"AspectMode",
 			0,
-			gSpideyModernVideoIni);
+			SpideyGetModernVideoIniPath());
 
 	if (gSpideyAspectMode < 0 ||
 		gSpideyAspectMode >=
