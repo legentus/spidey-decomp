@@ -3999,3 +3999,106 @@ Do NOT yet:
 - remove D3D7 DrawPrimitive;
 - replace the visible framebuffer with the new geometry shadow target;
 - discard the Phase 2A framebuffer-upload fallback.
+
+
+## DX11 Phase 2C1 shadow geometry implementation ready for runtime test — 2026-09-30
+
+Goal:
+Render the real retail D3D7 primitive stream into a completely offscreen DX11 scene target while preserving the original D3D7 renderer as the visible/reference path.
+
+Safety model:
+- retail D3D7 DrawPrimitive is ALWAYS called;
+- no D3D7 primitive is suppressed;
+- the DX11 shadow color/depth targets are never copied to the swap chain;
+- the existing Phase 2A D3D7-scene -> DX11 PresentPixels path remains the only visible presentation path;
+- shadow replay is sampled on frames 1-5 and every 120th frame to avoid doubling ~9k draw calls every frame during parity bring-up.
+
+ABI / resource changes:
+- renderer11 ABI bumped to 5;
+- persistent PCTex IDs remain 0..1023;
+- synthetic transient DX11 texture slots use 1024..2047;
+- unresolved DirectDraw texture surfaces are AddRef'd/queued during live draws and locked/mirrored only after retail EndScene at the verified Flip boundary;
+- shadow commands retain unresolved legacy handles, so transient textures mirrored at Flip can still resolve before the same frame is replayed.
+
+Live D3D7 state hooks:
+- IDirect3DDevice7::SetRenderTarget (vtable 8);
+- Clear (10);
+- SetViewport (13);
+- SetRenderState (20);
+- DrawPrimitive (25);
+- SetTexture (35);
+- SetTextureStageState (37).
+
+State-cache behavior:
+- current viewport/render/depth/blend/texture-stage/texture/render-target state is initialized from the live D3D7 device after hook install;
+- setter hooks update the cache only after the original retail call succeeds;
+- sampled/unusual draws still query the live D3D7 state and log `cache_mismatch=0/1` so state-block/bypass behavior cannot silently invalidate the shadow renderer;
+- shadow clears/draws are accepted only when the current retail render target equals the main scene surface at `0x006B7908`.
+
+DX11 shadow renderer:
+- TL vertex input matches retail FVF 0x144: XYZRHW + diffuse + UV;
+- triangle fans are expanded to ordered triangle lists;
+- XYZRHW is converted to clip space while preserving reciprocal-W for perspective interpolation;
+- vertex colors are decoded from packed D3DCOLOR;
+- texture MODULATE + diffuse is implemented;
+- alpha operation MODULATE and SELECTARG2(diffuse alpha) are implemented;
+- untextured draws use a 1x1 white texture;
+- depth enable/write/compare states are cached;
+- D3D7 blend factors are mapped to DX11, including safe alpha-slot normalization for color-derived blend factors;
+- wrap/clamp and point/linear sampler states are cached;
+- offscreen scene target is BGRA8 with D24S8 depth;
+- all expanded vertices for a sampled frame are uploaded in one dynamic-buffer Map, then original draw ordering/state changes are replayed.
+
+Parity diagnostics:
+- renderer11 samples the same 3x3 quarter/center coordinates used by `SpideyLogSurfaceState`;
+- DX11 `shadow_frame` logs include `sample_hash` and `nonblack`;
+- this allows direct frame-number comparison against `scene_pre sample_hash` in `spidey-decomp-present.log`;
+- exact hash equality is not required for the first test, but `nonblack > 0` and stable render counts are mandatory before making the shadow scene visible.
+
+Implementation commits after the user checkpoint:
+- `4524794d0a5da2745f2fffc2108d34d892b18b77` — ABI 5 shadow/transient API;
+- `23c6bfef4f9eac04f8c1cab407d53cd0ee3bf21f` — exports;
+- `2883b8fd0d68d4e20b34b591ae6cadf0e61ce807` — batched shadow storage;
+- `b2d41be98188a229dfd28a7bd5afb38797062924` — offscreen TL-vertex pipeline/state caches;
+- `ad0679b1a0e68f63dcc0ec683d9fa033f4689c83` — transient textures + shadow submission/replay;
+- `da49f46328f6950c7821d562495076dfd4f70196` — late transient resolve before replay;
+- `be2ebc7fb700ba3c434b795bf64fc70cc4bed684` — proxy loads ABI 5;
+- `e38017cd7c06a4df905a55fce374b47c0301e428` / `aff06e2351c1260d8a2d733d9cd8251acff57d15` — legacy bridge structures/functions;
+- `4c713592b8124faafb30b4469bedbaddb5a37d2d` / `927395f5eda8cbacb54f4e809a2bd8fee937af6b` — D3D7 state cache and setter wrappers;
+- `db064b0d3cfb5222510d775db03c37ea9dec4e3a` — live draws enqueue into shadow queue;
+- `e46d6ba656238e81e1b9811307b920f1275e7285` — per-frame shadow/transient coverage;
+- `86a335e337cdcfb3dd747f494217f3f74723e78d` — live vtable state-hook installation;
+- `755bfc8a17b3ba0d8f2e73baa2be78ad4a77105c` — EndScene/Flip shadow replay;
+- `47bf8226116ca134bae8a6ffe1c0bd2b99addaf3` / `b1d49b8afa1db0eda6365ba572a6a41c39114402` / `e8a23ac33e9b0b3bf4faa359943c5707fcb6d38b` — sampled replay/capture and clean accounting;
+- `dca790dedb85049a367f2f5cd3e44763b8cfe058` — cached-vs-live state validation;
+- `21895ce6559193850657cd3e3ac783249aea86e2` / `c6451e4c57eec7936712c5e1c7afba82d7d8e819` / `247dd1de95de04b48f2c36738766a6257538d4e7` — main-scene render-target isolation;
+- `6e94d5649a327ac452e7ac5619be1bb23def5f30` — matching 3x3 DX11 sample hash;
+- `d4de1a0d6f49dc7eee973b26cbd4a089d607c8e1` — D3D7 blend-factor normalization for DX11 alpha slots.
+
+NEXT TEST:
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat`, boot through the frontend, start/enter gameplay, move around for at least a short interval, then exit normally.
+
+Expected build/runtime markers:
+- compat: `renderer11_bridge loaded ... abi=5 expected=5 ... phase2c_exports=1`;
+- draw log: seven `state_hook installed` markers and
+  `draw_probe installed ... state_hooks=7 shadow_state_valid=1`;
+- sampled draw lines should report `cache_mismatch=0`;
+- first unresolved legacy surfaces should produce `transient_mirror ... result=10xx` after EndScene;
+- sampled `draw_frame` lines should show nonzero `shadow_submit`, ideally zero `shadow_skip`, and classify any non-main-target draws under `shadow_offscreen_skip`;
+- renderer log should show:
+  - `shadow pipeline ready shader_model=4_0 tl_vertex=1`;
+  - `shadow targets ready width=...`;
+  - `shadow vertex_buffer ready bytes=...`;
+  - `shadow_frame ... replay=1 ... rendered=... skipped_render=... sampled=1 sample_hash=... nonblack=...`;
+- visible present path must remain:
+  `dx11=1 dx11_pixels=1 dx11_hdc=0 direct_hwnd=0 compat_result=3`.
+
+GO criteria for Phase 2C2:
+- normal boot/gameplay remains stable;
+- no state-hook cache mismatches;
+- transient surface mirroring succeeds or remaining misses are specifically characterized;
+- sampled-frame shadow_submit/queued/rendered counts agree for main-scene draws;
+- skipped_render is zero or fully explained;
+- DX11 shadow sample is nonblack on actual rendered gameplay frames.
+
+If those pass, next step is Phase 2C2: make a diagnostic copy/view of the DX11 shadow scene for visual parity inspection, correct any half-pixel/blend/depth differences, then prepare the first controlled switch where DX11 geometry becomes visible while D3D7 remains a fallback.
