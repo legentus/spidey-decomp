@@ -9,6 +9,8 @@
 #include <cstdarg>
 #include <vector>
 #include <unordered_map>
+#include <cmath>
+#include <cstdint>
 
 namespace
 {
@@ -42,10 +44,62 @@ namespace
         unsigned long legacyHandle;
     };
 
-    static const unsigned long kGameTextureCapacity = 1024;
+    static const unsigned long kPersistentTextureCapacity = 1024;
+    static const unsigned long kGameTextureCapacity = 2048;
     GameTexture gGameTextures[kGameTextureCapacity] = {};
     unsigned long gResidentTextureCount = 0;
     std::unordered_map<unsigned long, unsigned long> gLegacyHandleToTextureId;
+
+    struct ShadowGpuVertex
+    {
+        float x;
+        float y;
+        float z;
+        float w;
+        unsigned long diffuse;
+        float u;
+        float v;
+    };
+
+    struct ShadowCommand
+    {
+        unsigned long firstVertex;
+        unsigned long vertexCount;
+        long textureId;
+        SpideyRenderer11ShadowState state;
+    };
+
+    ID3D11Texture2D* gShadowColorTexture = nullptr;
+    ID3D11RenderTargetView* gShadowRenderTargetView = nullptr;
+    ID3D11ShaderResourceView* gShadowColorSrv = nullptr;
+    ID3D11Texture2D* gShadowDepthTexture = nullptr;
+    ID3D11DepthStencilView* gShadowDepthStencilView = nullptr;
+    unsigned long gShadowWidth = 0;
+    unsigned long gShadowHeight = 0;
+
+    ID3D11VertexShader* gShadowVertexShader = nullptr;
+    ID3D11PixelShader* gShadowPixelShaderModulateAlpha = nullptr;
+    ID3D11PixelShader* gShadowPixelShaderDiffuseAlpha = nullptr;
+    ID3D11InputLayout* gShadowInputLayout = nullptr;
+    ID3D11RasterizerState* gShadowRasterizer = nullptr;
+    ID3D11Texture2D* gShadowWhiteTexture = nullptr;
+    ID3D11ShaderResourceView* gShadowWhiteSrv = nullptr;
+    ID3D11Buffer* gShadowVertexBuffer = nullptr;
+    size_t gShadowVertexBufferCapacity = 0;
+
+    std::unordered_map<unsigned long long, ID3D11DepthStencilState*> gShadowDepthStates;
+    std::unordered_map<unsigned long long, ID3D11BlendState*> gShadowBlendStates;
+    std::unordered_map<unsigned long long, ID3D11SamplerState*> gShadowSamplerStates;
+
+    std::vector<ShadowGpuVertex> gShadowVertices;
+    std::vector<ShadowCommand> gShadowCommands;
+
+    unsigned long gShadowClearFlags = 3;
+    unsigned long gShadowClearColor = 0xFF000000UL;
+    float gShadowClearDepth = 1.0f;
+    unsigned long gShadowClearStencil = 0;
+    unsigned long gShadowSubmittedDraws = 0;
+    unsigned long gShadowSkippedDraws = 0;
 
     void Log(const char* format, ...)
     {
@@ -139,6 +193,46 @@ namespace
         gLegacyHandleToTextureId.clear();
     }
 
+    template <typename T>
+    void ReleaseStateMap(std::unordered_map<unsigned long long, T*>& states)
+    {
+        for (auto& entry : states)
+            SafeRelease(entry.second);
+        states.clear();
+    }
+
+    void ReleaseShadowTargets()
+    {
+        SafeRelease(gShadowColorSrv);
+        SafeRelease(gShadowRenderTargetView);
+        SafeRelease(gShadowColorTexture);
+        SafeRelease(gShadowDepthStencilView);
+        SafeRelease(gShadowDepthTexture);
+        gShadowWidth = 0;
+        gShadowHeight = 0;
+    }
+
+    void ReleaseShadowPipeline()
+    {
+        ReleaseShadowTargets();
+        SafeRelease(gShadowVertexBuffer);
+        gShadowVertexBufferCapacity = 0;
+        SafeRelease(gShadowWhiteSrv);
+        SafeRelease(gShadowWhiteTexture);
+        SafeRelease(gShadowRasterizer);
+        SafeRelease(gShadowInputLayout);
+        SafeRelease(gShadowPixelShaderDiffuseAlpha);
+        SafeRelease(gShadowPixelShaderModulateAlpha);
+        SafeRelease(gShadowVertexShader);
+        ReleaseStateMap(gShadowDepthStates);
+        ReleaseStateMap(gShadowBlendStates);
+        ReleaseStateMap(gShadowSamplerStates);
+        gShadowVertices.clear();
+        gShadowCommands.clear();
+        gShadowSubmittedDraws = 0;
+        gShadowSkippedDraws = 0;
+    }
+
     void ReleaseTargets()
     {
         if (gContext)
@@ -170,6 +264,7 @@ namespace
     {
         ReleaseTargets();
         ReleaseBlitPipeline();
+        ReleaseShadowPipeline();
         ReleaseAllGameTexturesInternal();
         SafeRelease(gSwapChain);
         SafeRelease(gContext);
