@@ -2046,6 +2046,87 @@ static void SpideySyncFrontendMouseBounds(
 	}
 }
 
+static void SpideyFitLogicalCanvasToSelectedAspect(
+		unsigned long* pWidth,
+		unsigned long* pHeight)
+{
+	if (!pWidth ||
+		!pHeight ||
+		!*pWidth ||
+		!*pHeight ||
+		gSpideyAspectMode == 0)
+	{
+		return;
+	}
+
+	unsigned long aspectNumerator =
+		0;
+	unsigned long aspectDenominator =
+		0;
+
+	switch (gSpideyAspectMode)
+	{
+		case 1:
+			aspectNumerator = 4;
+			aspectDenominator = 3;
+			break;
+		case 2:
+			aspectNumerator = 5;
+			aspectDenominator = 4;
+			break;
+		case 3:
+			aspectNumerator = 16;
+			aspectDenominator = 9;
+			break;
+		case 4:
+			aspectNumerator = 16;
+			aspectDenominator = 10;
+			break;
+		case 5:
+			aspectNumerator = 21;
+			aspectDenominator = 9;
+			break;
+		case 6:
+			aspectNumerator = 32;
+			aspectDenominator = 9;
+			break;
+		default:
+			return;
+	}
+
+	const double outputAspect =
+		(double)*pWidth /
+		(double)*pHeight;
+	const double targetAspect =
+		(double)aspectNumerator /
+		(double)aspectDenominator;
+
+	if (outputAspect > targetAspect)
+	{
+		unsigned long fittedWidth =
+			(unsigned long)(
+				(double)*pHeight *
+				targetAspect +
+				0.5);
+
+		if (fittedWidth >= 320)
+			*pWidth =
+				fittedWidth;
+	}
+	else if (outputAspect < targetAspect)
+	{
+		unsigned long fittedHeight =
+			(unsigned long)(
+				(double)*pWidth /
+				targetAspect +
+				0.5);
+
+		if (fittedHeight >= 240)
+			*pHeight =
+				fittedHeight;
+	}
+}
+
 static void SpideyRefreshModernLogicalResolution()
 {
 	unsigned long width =
@@ -2093,6 +2174,14 @@ static void SpideyRefreshModernLogicalResolution()
 		height = 480;
 	}
 
+	// Screen Size is the physical/output selection. Aspect Ratio defines the
+	// largest non-stretched content canvas that fits inside that output.
+	// 16:9 at 2560x1440 remains 2560x1440; 4:3 becomes 1920x1440 and is
+	// pillarboxed by the existing DX11 aspect-preserving presenter.
+	SpideyFitLogicalCanvasToSelectedAspect(
+		&width,
+		&height);
+
 	gSpideyModernLogicalWidth =
 		width;
 	gSpideyModernLogicalHeight =
@@ -2139,7 +2228,7 @@ static void SpideyApplyLogicalRenderResolution(
 	{
 		fprintf(
 			f,
-			"logical_render_resolution reason=%s modern=%d frontend=%d logical=%lux%lu physical=%lux%lu selected=%lux%lu\n",
+			"logical_render_resolution reason=%s modern=%d frontend=%d logical=%lux%lu physical=%lux%lu selected=%lux%lu content=%lux%lu aspect=%s\n",
 			reason ? reason : "unknown",
 			useModern ? 1 : 0,
 			gSpideyFrontendLegacyMode,
@@ -2147,8 +2236,11 @@ static void SpideyApplyLogicalRenderResolution(
 			height,
 			gSpideyLegacyPhysicalWidth,
 			gSpideyLegacyPhysicalHeight,
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight,
 			gSpideyModernLogicalWidth,
-			gSpideyModernLogicalHeight);
+			gSpideyModernLogicalHeight,
+			gSpideyAspectLabels[gSpideyAspectMode]);
 		fclose(f);
 	}
 }
