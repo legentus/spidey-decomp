@@ -1470,6 +1470,11 @@ typedef int (__cdecl *SpideyRenderer11ShadowEndFrameFn)(
 		unsigned long,
 		unsigned long,
 		unsigned long);
+typedef void (__cdecl *SpideyRenderer11ShadowSetContinuousFn)(
+		int);
+typedef int (__cdecl *SpideyRenderer11PresentShadowFn)(
+		int,
+		int);
 typedef void (__cdecl *SpideyRenderer11ReleaseTextureFn)(
 		unsigned long);
 typedef void (__cdecl *SpideyRenderer11ReleaseAllTexturesFn)(void);
@@ -1487,6 +1492,8 @@ static SpideyRenderer11UpdateTransientTextureFn gSpideyRenderer11UpdateTransient
 static SpideyRenderer11ShadowSetClearFn gSpideyRenderer11ShadowSetClear = 0;
 static SpideyRenderer11ShadowSubmitTriangleFanFn gSpideyRenderer11ShadowSubmitTriangleFan = 0;
 static SpideyRenderer11ShadowEndFrameFn gSpideyRenderer11ShadowEndFrame = 0;
+static SpideyRenderer11ShadowSetContinuousFn gSpideyRenderer11ShadowSetContinuous = 0;
+static SpideyRenderer11PresentShadowFn gSpideyRenderer11PresentShadow = 0;
 static SpideyRenderer11ReleaseTextureFn gSpideyRenderer11ReleaseTexture = 0;
 static SpideyRenderer11ReleaseAllTexturesFn gSpideyRenderer11ReleaseAllTextures = 0;
 static SpideyRenderer11GetResidentTextureCountFn gSpideyRenderer11GetResidentTextureCount = 0;
@@ -1595,6 +1602,16 @@ static int SpideyProbeRenderer11Bridge()
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_ShadowEndFrame");
 
+	gSpideyRenderer11ShadowSetContinuous =
+		(SpideyRenderer11ShadowSetContinuousFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_ShadowSetContinuous");
+
+	gSpideyRenderer11PresentShadow =
+		(SpideyRenderer11PresentShadowFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_PresentShadow");
+
 	gSpideyRenderer11ReleaseTexture =
 		(SpideyRenderer11ReleaseTextureFn)GetProcAddress(
 			gSpideyRenderer11Module,
@@ -1629,6 +1646,8 @@ static int SpideyProbeRenderer11Bridge()
 		!gSpideyRenderer11ShadowSetClear ||
 		!gSpideyRenderer11ShadowSubmitTriangleFan ||
 		!gSpideyRenderer11ShadowEndFrame ||
+		!gSpideyRenderer11ShadowSetContinuous ||
+		!gSpideyRenderer11PresentShadow ||
 		!gSpideyRenderer11ReleaseTexture ||
 		!gSpideyRenderer11ReleaseAllTextures ||
 		!gSpideyRenderer11GetResidentTextureCount ||
@@ -1638,7 +1657,7 @@ static int SpideyProbeRenderer11Bridge()
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX resolve_tex=0x%08lX transient_tex=0x%08lX shadow_clear=0x%08lX shadow_submit=0x%08lX shadow_end=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX resolve_tex=0x%08lX transient_tex=0x%08lX shadow_clear=0x%08lX shadow_submit=0x%08lX shadow_end=0x%08lX shadow_continuous=0x%08lX present_shadow=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
 				(unsigned long)probe,
@@ -1653,6 +1672,8 @@ static int SpideyProbeRenderer11Bridge()
 				(unsigned long)gSpideyRenderer11ShadowSetClear,
 				(unsigned long)gSpideyRenderer11ShadowSubmitTriangleFan,
 				(unsigned long)gSpideyRenderer11ShadowEndFrame,
+				(unsigned long)gSpideyRenderer11ShadowSetContinuous,
+				(unsigned long)gSpideyRenderer11PresentShadow,
 				(unsigned long)gSpideyRenderer11ReleaseTexture,
 				(unsigned long)gSpideyRenderer11ReleaseAllTextures,
 				(unsigned long)gSpideyRenderer11GetResidentTextureCount,
@@ -1670,14 +1691,14 @@ static int SpideyProbeRenderer11Bridge()
 		probe();
 
 	gSpideyRenderer11BridgeReady =
-		abi == 5 &&
+		abi == 6 &&
 		probeResult != 0;
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=5 backend=%s probe=%d phase2c_exports=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=6 backend=%s probe=%d phase2c2_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
