@@ -456,3 +456,49 @@ Apply semantics:
 - if Display Options is reached while gameplay is already active, Apply can rebuild the compatibility backing immediately.
 
 This preserves the original menu/input/rendering code while giving the DX11 path modern, explicit configuration semantics.
+
+
+## Phase 3E — guarded D3D7 main-scene raster suppression trial
+
+Implementation frontier:
+- `502bd2864c5e6fd8a1e268f18656591a8b709d0c`.
+
+Goal:
+- test whether retail D3D7 main-scene rasterization has any remaining hidden functional dependency now that DX11 replays the observed visible primitive stream.
+
+Diagnostic control:
+- F9 toggles suppression;
+- default OFF;
+- F10 reference mode always restores full D3D7 main-scene drawing automatically because suppression requires active/ready DX11 geometry mode.
+
+Suppression is per-draw and fail-closed. A D3D7 main-scene draw is skipped only when:
+1. the draw targets the retail main scene;
+2. DX11 geometry mode is enabled and ready;
+3. DX11 accepted that exact primitive/state command;
+4. the texture is already mirrored/resident or the draw is untextured.
+
+Never suppressed:
+- offscreen render targets;
+- unsupported primitive/state combinations;
+- unresolved transient textures;
+- DX11 warmup frames;
+- F10 D3D7 reference mode.
+
+This means the experiment does **not** yet remove the D3D7 device, state calls, resource surfaces, movie blits, or offscreen raster work.
+
+Static dependency notes:
+- retail `PCMovie` writes movie frames to `g_pDDS_Scene` through DirectDraw `Blt`, not through the hooked main-scene `DrawPrimitive`; F9 therefore does not suppress the movie copy itself;
+- retained retail `DXPOLY_SaveScreen @ 0x005033E0` machine code accesses the primary surface at `0x006B7904`, not the main scene surface at `0x006B7908`; it is not a direct consumer of the suppressed main-scene DrawPrimitive path;
+- offscreen draw work remains active specifically because transient/resource generation may depend on it.
+
+Telemetry:
+- `d3d7_main_draw_suppression ... key=F9`;
+- per-frame `d3d7_suppressed`;
+- per-frame `d3d7_fallback`.
+
+Pass condition for later runtime testing:
+- normal visual/game behavior while a large majority of steady-state main-scene draws are suppressed;
+- no transition, readback, pause/menu, HUD, movie, or special-effect regressions;
+- fallback count tends toward zero after transient resources settle.
+
+Only after that runtime proof should suppression become default or further D3D7 state/device responsibilities be removed.
