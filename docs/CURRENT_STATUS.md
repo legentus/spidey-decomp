@@ -3181,3 +3181,74 @@ NEXT TEST:
 6. upload the full session, especially input/present/compat logs.
 
 If this boots, the test finally isolates the intended two fixes because the unrelated persisted-2560 startup failure is removed.
+
+
+## Runtime success: Alt+Tab fixed and building flashes gone; DPI/native 1440p + widescreen frontier — 2026-09-30
+
+Tested revision:
+`8892e08060938d5a9f0e0ff028fb9dfaa7175f4e`
+
+User-visible success:
+- Alt+Tab out/back now preserves menu controls;
+- the previous rapidly flashing building/city imagery is gone;
+- remaining visual issue is an intermittent whole-screen flash;
+- screen is still pillarboxed because current internal render/frontend modes are 4:3;
+- 2560x1440 is absent from Display Settings because the preceding crash-recovery patch deliberately quarantined it.
+
+Runtime proof for input fix:
+- retail input hook installed with keyboard call sites=2 and mouse call sites=1;
+- initial foreground Acquire returned 1 (already acquired / harmless legacy state);
+- background transition explicitly Unacquired devices;
+- foreground return explicitly Acquired keyboard/mouse/controller and all three returned `0x00000000`;
+- user confirmed controls continue working after tabbing back in.
+This closes the Alt+Tab input-loss bug.
+
+Runtime proof for single-presenter fix:
+- every logged compatibility frame uses `retail_flip=0 direct_hwnd=1`;
+- user confirmed the old flashing building/city imagery disappeared.
+This closes the old double-present/foreign-primary-content artifact.
+
+Remaining whole-screen flash diagnosis:
+- aspect-fit presenter still clears the ENTIRE client to black before every StretchBlt;
+- current 1440x1080 -> 2560x1440 presentation uses `present=320,0,1920x1440 aspect_fit=1` every frame;
+- frontend 640x480 -> 2560x1440 uses the same pillarboxed 1920x1440 destination;
+- a GDI-visible FillRect between frames can therefore expose a full black frame before StretchBlt.
+
+Physical-resolution/DPI breakthrough:
+- compatibility HWND/client reports 2560x1440;
+- DirectDraw primary still reports 1920x1080;
+- exact ratio is 4/3 in both dimensions (2560/1920 and 1440/1080), strongly indicating process DPI virtualization/scaling;
+- this explains why a 2560x1440 offscreen scene surface could be created but D3D7 CreateDevice rejected it while DirectDraw considered the primary only 1920x1080.
+
+Widescreen evidence:
+- current presenter is correctly preserving source aspect, not stretching:
+  - 1440x1080 (4:3) -> 1920x1440 with 320px side bars;
+  - frontend 640x480 (4:3) -> 1920x1440 with the same side bars.
+- do NOT remove bars by stretching; true widescreen requires a 16:9 internal render target and then validation/correction of camera projection and UI mapping.
+- source `PCSHELL_CoordsDCtoPC` maps virtual 512x240 shell coordinates independently to live X/Y resolution, so UI behavior at 16:9 must be checked separately.
+- source `M3d_RenderSetup` remains retail (not replaced by patch_ps2m3d), so camera/projection behavior must be runtime-validated once a real 16:9 render target boots before changing FOV math.
+
+Implementation:
+- `543b456f90495cdb8123b5437d8c1e039f832bde`
+  - dynamically resolves `SetProcessDPIAware` / `IsProcessDPIAware` from already-loaded user32 using old-SDK-safe GetProcAddress;
+  - enables process DPI awareness during DLL_PROCESS_ATTACH before retail creates its window/DirectDraw objects;
+  - logs DPI set result, actual awareness state, and physical screen metrics;
+  - re-enables 2560x1440 mode only when process DPI awareness is active;
+  - filters DPI-aware enumerated render modes above the physical screen dimensions;
+  - startup/set-display only quarantine 2560x1440 if DPI awareness could not be established;
+  - removes the full-client black FillRect from aspect-fit presentation and clears only actual side/top/bottom bars;
+  - retains the retail-input fix and sole direct-HWND windowed presenter.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. first inspect `spidey-decomp-compat.log` for:
+   - `dpi_awareness ... process_aware=1 metrics=2560x1440`;
+   - `modern_modes ... native_2560x1440=1 dpi_aware=1`;
+3. verify the intermittent whole-screen black flash is gone/reduced;
+4. verify Alt+Tab remains fixed;
+5. open Display Settings and confirm 2560x1440 has returned;
+6. select/apply 2560x1440:
+   - if it boots/renders, capture screenshot + full logs so widescreen/FOV/UI behavior can be classified;
+   - if D3D7 still rejects it, cleanup guard should prevent the old null-deref and logs will show the remaining renderer limitation cleanly.
+
+Do not implement projection/FOV stretching before this test: first determine whether DPI-aware DirectDraw now exposes a true 2560x1440 primary and whether retail M3d projection naturally handles the 16:9 render target.
