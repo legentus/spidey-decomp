@@ -346,6 +346,18 @@ if (-not (Test-Path $input11Dll)) {
 $input11Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $input11Dll).Hash
 Write-Host "[OK] Input11 SHA-256: $input11Hash"
 
+$input11Probe = Join-Path $RepoRoot "out\input11\spidey_input11_probe.exe"
+if (-not (Test-Path $input11Probe)) {
+    Stop-WithPause "Modern input probe executable was not produced."
+}
+
+Write-Host "[..] Running 32-bit modern-input preflight..."
+& $input11Probe
+if ($LASTEXITCODE -ne 0) {
+    Stop-WithPause ("Modern input preflight failed with exit code " + $LASTEXITCODE + ".") $LASTEXITCODE
+}
+Write-Host "[OK] Modern input preflight passed."
+
 $builtDll = Join-Path $RepoRoot "Release\spider.dll"
 if (-not (Test-Path $builtDll)) {
     Stop-WithPause "Build completed but Release\spider.dll was not produced."
