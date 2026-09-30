@@ -2080,8 +2080,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		requestedWidth == 640 &&
 		requestedHeight == 480 &&
 		requestedBpp == 16 &&
-		option4 == 0 &&
-		option5 == 4;
+		option4 == 0;
 
 	u32 physicalWidth =
 		requestedWidth;
@@ -2194,6 +2193,144 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 
 	// Display-option changes can destroy/recreate the retail D3D7 device.
 	SpideyInstallRetailD3D7DrawProbe();
+}
+
+
+typedef void (__cdecl *SpideyRetailSaveSettingsFn)(void);
+
+static void __cdecl SpideyDisplayConfirmOrApply(
+		u32 liveWidth,
+		u32 liveHeight,
+		u32 liveBpp,
+		i32 option4,
+		i32 option5)
+{
+	const int onApply =
+		gSpideyDisplayMenu &&
+		gSpideyDisplayMenu->mNumLines >= 4 &&
+		gSpideyDisplayMenu->mLine == 3;
+
+	if (!onApply)
+	{
+		FILE* ignored = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (ignored)
+		{
+			fprintf(
+				ignored,
+				"display_apply ignored line=%d pending=%lux%lu aspect=%s committed=%lux%lu aspect=%s\n",
+				gSpideyDisplayMenu ?
+					(int)gSpideyDisplayMenu->mLine :
+					-1,
+				gSpideyPendingOutputWidth,
+				gSpideyPendingOutputHeight,
+				gSpideyAspectLabels[gSpideyPendingAspectMode],
+				gSpideySelectedOutputWidth,
+				gSpideySelectedOutputHeight,
+				gSpideyAspectLabels[gSpideyAspectMode]);
+			fclose(ignored);
+		}
+		return;
+	}
+
+	if (gSpideyPendingOutputWidth < 640 ||
+		gSpideyPendingOutputWidth > 8192 ||
+		gSpideyPendingOutputHeight < 480 ||
+		gSpideyPendingOutputHeight > 8192)
+	{
+		SpideyResetPendingDisplaySettings(
+			"apply_invalid_pending");
+		return;
+	}
+
+	if (gSpideyPendingAspectMode < 0 ||
+		gSpideyPendingAspectMode >=
+			(int)(sizeof(gSpideyAspectLabels) /
+				  sizeof(gSpideyAspectLabels[0])))
+	{
+		gSpideyPendingAspectMode =
+			gSpideyAspectMode;
+	}
+
+	gSpideySelectedOutputWidth =
+		gSpideyPendingOutputWidth;
+	gSpideySelectedOutputHeight =
+		gSpideyPendingOutputHeight;
+	gSpideySelectedOutputBpp =
+		32;
+	gSpideyAspectMode =
+		gSpideyPendingAspectMode;
+
+	*(DWORD*)0x02E096F8 =
+		(DWORD)gSpideySelectedOutputWidth;
+	*(DWORD*)0x02E0970C =
+		(DWORD)gSpideySelectedOutputHeight;
+	*(DWORD*)0x02E098E4 =
+		(DWORD)gSpideySelectedOutputBpp;
+
+	SpideySaveModernVideoSettings();
+	SpideyApplySelectedAspect(
+		"display_menu_apply_commit");
+
+	// While the retail frontend is active, keep its proven 640x480 canvas
+	// alive and commit only the modern output selection. That avoids the old
+	// frontend corruption while still making the new settings authoritative
+	// immediately. If this menu is ever invoked over gameplay, rebuild the
+	// compatibility backing to the newly selected mode right here.
+	const int liveFrontend =
+		*(DWORD*)0x006B78F4 &&
+		liveWidth == 640 &&
+		liveHeight == 480 &&
+		liveBpp == 16;
+
+	if (liveFrontend)
+	{
+		SpideyCompatSetDisplayOptions(
+			liveWidth,
+			liveHeight,
+			liveBpp,
+			option4,
+			option5);
+	}
+	else
+	{
+		SpideyCompatSetDisplayOptions(
+			(u32)gSpideySelectedOutputWidth,
+			(u32)gSpideySelectedOutputHeight,
+			32,
+			option4,
+			option5);
+	}
+
+	// Save immediately; Apply must not depend on exiting the menu or game.
+	SpideyRetailSaveSettingsFn retailSave =
+		(SpideyRetailSaveSettingsFn)0x00515850;
+	retailSave();
+
+	SpideyResetPendingDisplaySettings(
+		"apply_complete");
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_apply committed=1 selected=%lux%lux%lu aspect=%s scalar=%.6f live_before=%lux%lux%lu frontend=%d brightness=%d saved_now=1\n",
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight,
+			gSpideySelectedOutputBpp,
+			gSpideyAspectLabels[gSpideyAspectMode],
+			(double)*(float*)0x00550064,
+			(unsigned long)liveWidth,
+			(unsigned long)liveHeight,
+			(unsigned long)liveBpp,
+			liveFrontend,
+			option5);
+		fclose(f);
+	}
 }
 
 static void SpideyInstallDisplayOptionsCompat()
