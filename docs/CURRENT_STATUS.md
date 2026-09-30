@@ -3467,3 +3467,32 @@ NEXT TEST:
    - known-good D3D7 visible rendering and Alt+Tab behavior unchanged.
 
 If a new failure appears, stop at that exact Phase 0 layer and fix it before Phase 1.
+
+
+## DX11 Phase 0 PASSED — 2026-09-30
+
+Tested revision:
+`da13c63f51a25f6492c8d32a8f0165d28648228a`
+
+User result:
+- game booted normally through splash/start flow and reached the main menu;
+- existing D3D7 visible rendering remained intact;
+- expected 4:3 side bars remain;
+- 2560x1440 remains intentionally absent because the legacy D3D7 2560x1440 mode is still quarantined.
+
+Runtime proof:
+- renderer11 bridge loaded successfully;
+- ABI matched;
+- backend reported `Direct3D 11`;
+- hardware probe returned success;
+- renderer log reported `hr=0x00000000 feature_level=0xB100` (D3D feature level 11.1);
+- saved 2560x1440 was safely recovered to 1440x1080 for the still-active D3D7 path;
+- current presenter remains 1440x1080 -> aspect-fit 1920x1440 inside the 2560x1440 client, hence 320-pixel bars on each side.
+
+Phase 0 is CLOSED.
+
+NEXT FRONTIER — PHASE 1:
+- make DX11 own final presentation while D3D7 temporarily continues rendering the scene;
+- retain a fail-safe fallback to the current direct-HWND GDI presenter;
+- do not re-enable legacy D3D7 2560x1440 yet;
+- only after DX11 presentation is verified should native 16:9 scene ownership / 2560x1440 rendering advance.
