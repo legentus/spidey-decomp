@@ -2,6 +2,7 @@
 #include "main.h"
 #include "PCTimer.h"
 #include "DXinit.h"
+#include "DXsound.h"
 #include "pcdcPad.h"
 
 #include "stdarg.h"
@@ -195,10 +196,16 @@ LRESULT CALLBACK SpideyWndProc(
 		case WM_SIZE:
 			break;
 		case WM_ACTIVATE:
-			// WM_ACTIVATE stores the activation state in LOWORD(wParam);
-			// HIWORD carries the minimized flag. Comparing the entire WPARAM
-			// can incorrectly leave the game marked active across Alt+Tab.
+			// WM_ACTIVATE stores the activation state in LOWORD(wParam).
+			// Keep the legacy active flag accurate, but perform DirectInput
+			// acquire/unacquire from WM_ACTIVATEAPP below so focus changes
+			// are handled once at application scope.
 			gActive = LOWORD(wParam) != WA_INACTIVE;
+			break;
+		case WM_ACTIVATEAPP:
+			gActive = wParam ? 1 : 0;
+			DXINPUT_HandleActivation(
+				gActive);
 			break;
 		case WM_CLOSE:
 			DestroyWindow(hWnd);
