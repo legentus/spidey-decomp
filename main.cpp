@@ -2086,6 +2086,27 @@ static int SpideyCompatPresentSceneToWindow(
 				&lockedDesc,
 				DDLOCK_WAIT | DDLOCK_READONLY,
 				0);
+		int lockRetried =
+			0;
+
+		if (FAILED(lockHr))
+		{
+			memset(
+				&lockedDesc,
+				0,
+				sizeof(lockedDesc));
+			lockedDesc.dwSize =
+				sizeof(lockedDesc);
+
+			lockHr =
+				scene->Lock(
+					0,
+					&lockedDesc,
+					DDLOCK_WAIT,
+					0);
+			lockRetried =
+				SUCCEEDED(lockHr) ? 1 : 0;
+		}
 
 		int pixelFormatOk =
 			SUCCEEDED(lockHr) &&
@@ -2120,13 +2141,14 @@ static int SpideyCompatPresentSceneToWindow(
 					{
 						fprintf(
 							f,
-							"compat_present_dx11_pixels frame=%lu result=1 src=%lux%lu pitch=%ld dst=%dx%d aspect_fit=1\n",
+							"compat_present_dx11_pixels frame=%lu result=1 src=%lux%lu pitch=%ld dst=%dx%d aspect_fit=1 lock_retry=%d\n",
 							frame,
 							(unsigned long)lockedDesc.dwWidth,
 							(unsigned long)lockedDesc.dwHeight,
 							(long)lockedDesc.lPitch,
 							dstWidth,
-							dstHeight);
+							dstHeight,
+							lockRetried);
 						fclose(f);
 					}
 				}
