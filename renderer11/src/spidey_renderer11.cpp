@@ -377,7 +377,7 @@ int __cdecl SpideyRenderer11_Resize(
         width,
         height,
         DXGI_FORMAT_UNKNOWN,
-        DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH);
+        DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE);
 
     if (FAILED(hr))
     {
