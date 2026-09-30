@@ -2408,3 +2408,68 @@ Next implementation:
 5. retain native 2560x1440 scene support and the movie-specific presenter.
 
 Do not revert native scene-resolution restoration: this test proves it is now functioning.
+
+
+## Fix batch ready: borderless monitor window + allocator OOM fallback — 2026-09-29
+
+Implementation commits:
+- `d0adc9dbb511f071d553843b19fbc1069c6c1765`
+  - `DCMem_New` now detects original fixed-heap allocation failure before alignment;
+  - allocates an ABI-compatible fallback block from the process C heap;
+  - preserves the existing 32-byte aligned returned-pointer contract;
+  - marks fallback blocks with signed 4-bit `ParentHeap = -1`;
+  - `Mem_DeleteX` frees fallback blocks with `free()`;
+  - `Mem_ShrinkX` treats fallback blocks safely;
+  - `Mem_MakeHandle` recognizes fallback blocks;
+  - logs each fallback as `mem_fallback alloc=... requested=... block=...`.
+- `bb38a72588bb868aab8a82a829f90e54171b111c`
+  - hardens `Mem_NewTop` against a completely empty free list;
+  - returns NULL instead of dereferencing a null free-block pointer, allowing the DCMem fallback to engage.
+- `5374ca47c1b35d571d5fc1bac72f845b650fdae2`
+  - keeps the game HWND borderless and monitor-sized after every wrapped `initDirectDraw7` and after full `DXINIT_DirectX8`;
+  - stops retail windowed DirectDraw initialization from shrinking the desktop-sized window to the selected internal render resolution;
+  - presenter now aspect-fits the internal scene into the monitor-sized client area;
+  - legacy 4:3/5:4 modes are centered with black bars instead of becoming a small window or being horizontally stretched;
+  - matching-aspect modern modes (for example 2560x1440 on a 16:9 target) fill the window naturally;
+  - presentation log now records `present=x,y,WxH` and `aspect_fit=`.
+- `6a94e9c3bb337e2c9e30bb329410b48931a24c57`
+  - replaces `unsigned long long` aspect math with 32-bit `unsigned long` products because the project explicitly supports pre-MSVC-1300 toolchains;
+  - all supported resolution products are safely below 32-bit overflow.
+
+Static checks:
+- current crash `0x1002C6D1` is `DCMem_New + 0x51` in the proxy linker map;
+- caller return `0x10037993` is inside `PCTex_CreateTexture256`;
+- write target `0x1F` exactly matches NULL base + 32-byte alignment math;
+- native scene rendering was proven at 1280x1024 before this fix;
+- 2560x1440 remains in the augmented mode table;
+- movie-specific presentation remains enabled.
+
+Build validation note:
+- connector-side source checks passed;
+- this environment cannot network-clone the private/current repo into the local compiler container, so no independent local binary compile was possible here;
+- changes were kept compatible with the project's legacy MSVC constraints visible in `my_types.h`.
+
+NEXT TEST:
+1. `UPDATE_SPIDEY_PROJECT.bat`
+2. `TEST_LATEST_BUILD.bat`
+3. Observe startup window:
+   - it should remain monitor-sized instead of collapsing into the legacy small box;
+   - a 1280x1024 internal mode on a 16:9 desktop should be centered/aspect-fit with bars.
+4. Let all splash/movie screens run through.
+5. Confirm whether the game reaches the start menu without crashing.
+6. Move the mouse repeatedly at the start menu.
+7. Open display options and check whether 2560x1440 remains listed.
+8. If possible select/apply 2560x1440 and report the visual result.
+9. Upload all generated logs.
+
+Most useful new evidence:
+- `spidey-decomp-compat.log`
+  - `borderless_monitor_window ...`
+  - any `mem_fallback ... requested=...` lines;
+- `spidey-decomp-present.log`
+  - `dst=<monitor size>`;
+  - `present=x,y,WxH aspect_fit=1` for legacy aspect modes;
+  - `aspect_fit=0` for matching 16:9 modes;
+- crash log if any.
+
+Do not revert the native-resolution or modern-mode work unless a later test demonstrates a renderer-level incompatibility; this test already proved the real scene can render at 1280x1024.
