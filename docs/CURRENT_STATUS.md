@@ -4651,3 +4651,33 @@ Phase 3C install-order correction:
   3. generic display-options compat for all remaining retail call sites;
 - expected `display_options_compat patched_calls` changes from 4 to **3** by design;
 - correction commit: `016b7438fd7008d8e6075105c0b4f2e9201d5703`.
+
+
+## Phase 3C pre-runtime build blocker — MSVC6 __thiscall typedef — 2026-09-30
+
+User test of revision `2f14244f05ad2c1946a6668b89fe60064ca9b409` did not reach runtime.
+
+Build result:
+- forced clean matching build started normally;
+- compile stopped at `main.cpp(1573)`;
+- MSVC6 error: `C4234: nonstandard extension used : '__thiscall' keyword reserved for future use`;
+- therefore no Phase 3C runtime conclusions can be drawn from this attempt.
+
+Root cause:
+- the new Apply-row code declared retail `CMenu::AddEntry @ 0x0043FFF0` through an explicit `__thiscall` function-pointer typedef;
+- this matching compiler does not support spelling `__thiscall` there.
+
+Compatibility fix:
+- declare the raw retail function pointer as `__fastcall(CMenu*, void*, const char*)`;
+- pass an unused dummy second parameter;
+- this is ABI-compatible with the x86 retail member call for this target:
+  - `CMenu* this` remains in ECX;
+  - unused dummy occupies EDX;
+  - the actual label argument remains on the stack;
+  - both conventions use callee stack cleanup for the stacked argument.
+- no retail address or Phase 3C menu logic changed.
+
+Next action:
+1. update/build again with `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. if matching build succeeds, perform the existing four-row Display Options / 2560x1440 + 16:9 + Apply runtime test;
+3. only then evaluate pending/committed settings behavior.
