@@ -245,3 +245,58 @@ Plan for:
 **Do not make the modern camera architecture depend on preserving the original camera behavior.**
 
 Reuse retail systems only when they improve compatibility or feel. The project may replace ordinary gameplay camera ownership entirely while preserving scripted/cinematic behavior.
+
+
+## Retail PC analogue path — confirmed limitation
+
+Static disassembly of the original PC executable changes an important assumption.
+
+### `Pad_Update @ 0x00505720`
+
+Retail behavior:
+- obtains two action masks from `PCINPUT_GetMappedStates`;
+- updates the game's digital `SButton` entries;
+- updates duplicate player-facing digital actions;
+- expires vibration;
+- does not populate `SControl::RawAnalogueMove*`, `RawAnalogueAim*`, `AnalogueMove*` or `AnalogueAim*`.
+
+### `PCINPUT_GetMappedStates @ 0x0050A190`
+
+Retail controller behavior:
+- polls DirectInput controller X, Y and POV;
+- uses approximately +/-250 X/Y thresholds;
+- emits only digital up/down/left/right action bits;
+- maps POV/hat direction to the same bits;
+- evaluates configured controller buttons and ORs their action bits into the mask.
+
+Therefore the old PC port does not preserve stick magnitude through the normal gameplay action path.
+
+### Architectural consequence
+
+Modern controller work should have two outputs:
+
+1. **Compatibility digital actions**
+   - semantic modern buttons / d-pad can be translated into the existing retail action mask for current gameplay and menu code.
+
+2. **Native modern analogue channels**
+   - left-stick magnitude goes to a new movement-intent path;
+   - right-stick magnitude goes to the modern camera-intent path;
+   - mouse relative delta joins the same camera-intent layer.
+
+Do not quantize modern stick axes to the old +/-250 direction bits except when intentionally generating legacy compatibility actions.
+
+The runtime bridge now logs the inherited `SControl` analogue fields beside modern helper state to verify their actual live behavior before any analogue injection.
+
+## Broad controller provider direction
+
+Phase 0 deliberately uses dynamically loaded XInput because it adds no new runtime dependency and cleanly validates the ABI.
+
+For the later broad-provider phase, SDL3 is the leading candidate because its gamepad layer provides:
+- standardized semantic gamepad positions instead of arbitrary button numbers;
+- device mappings and user-provided mapping support;
+- hot-plug handling;
+- face-button label queries suitable for Xbox vs PlayStation prompt UI;
+- rumble and optional sensors;
+- current official Windows x86 builds, which fit this 32-bit game process.
+
+Keep this as a provider choice behind the existing `spidey_input11` ABI. Gameplay, camera and UI code must not depend directly on SDL types.
