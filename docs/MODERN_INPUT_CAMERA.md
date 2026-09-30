@@ -347,3 +347,55 @@ The proxy now creates `spidey-decomp-camera.log`, containing:
 - modern right-stick intent beside retail camera state.
 
 This is the runtime evidence source for classifying every other camera mode before Stage A or Stage B camera control is enabled.
+
+
+## Passive semantic/action discovery
+
+Retail controller configuration uses 11 action records at `0x00568690`, stride `0x1C`:
+
+- `+0x00` action bit;
+- `+0x04` inline 16-byte action label;
+- `+0x14` keyboard binding;
+- `+0x18` controller binding.
+
+The first four joystick rows are movement directions and are not button-remappable in the retail joystick-config UI.
+
+The modernization proxy now logs all 11 records once at runtime. This is the preferred source for assigning semantic action names to the initial compatibility binding layer. Do not invent names from bit values if the retail table supplies a label.
+
+## Mouse camera-intent source
+
+No new mouse API is required for the first free-look prototype.
+
+The existing Alt+Tab compatibility wrapper already intercepts all calls to retail `DXINPUT_PollMouse @ 0x00501CC0`.
+
+Original retail behavior:
+1. buffered DirectInput events yield relative X/Y deltas;
+2. `DXINPUT_PollMouse` accumulates them;
+3. `PCINPUT_UpdateMouse @ 0x0050A8A0` later scales and integrates them into the absolute shell cursor.
+
+The wrapper now passively mirrors the pre-integration relative deltas while preserving the retail return values exactly.
+
+Use this source for mouse `CameraX/CameraY` in Stage A:
+- resolution independent;
+- no screen-edge limitation;
+- already integrated with existing focus/reacquire handling;
+- menu cursor behavior remains separate.
+
+Camera telemetry logs mouse and controller intent side by side and emits throttled `input_intent` samples.
+
+## Legacy recenter rejection in user camera modes
+
+Original `CCamera::SetCamAngle @ 0x004178E0` refuses to apply requested heading changes in:
+
+- LOOSE (15);
+- USER (16);
+- LOOKAROUND (17).
+
+This is relevant because `CPlayer::PutCameraBehind` performs ordinary forced recentering through `SetCamAngle`.
+
+Possible Stage-A experiment after passive runtime classification:
+- keep ordinary mode-3 camera behavior as the baseline;
+- temporarily enter a suitable user-controlled mode, or gate the recenter call, while applying modern yaw/pitch intent;
+- compare feel/collision/script behavior.
+
+This is only a compatibility experiment. Do not make the final modern camera dependent on USER/LOOSE/LOOKAROUND if those modes inherit undesirable legacy constraints.
