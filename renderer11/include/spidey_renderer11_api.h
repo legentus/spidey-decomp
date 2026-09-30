@@ -4,6 +4,7 @@
 #include <windows.h>
 #else
 typedef void* HWND;
+typedef void* HDC;
 #endif
 
 #define SPIDEY_RENDERER11_ABI_VERSION 2UL
