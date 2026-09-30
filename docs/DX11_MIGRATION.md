@@ -424,3 +424,35 @@ Aspect modes:
 AUTO derives the correction from the selected Screen Size. Explicit modes use their corresponding projection scalar. The aspect choice persists in `spidey-modern-video.ini` beside the executable.
 
 This phase intentionally leaves the retail 640x480 frontend canvas intact. The immediate target is native-resolution/widescreen gameplay with a stable original menu; frontend/HUD layout modernization remains a later phase after gameplay projection is validated.
+
+
+## Phase 3C — transactional display settings
+
+Display Options now uses an explicit **Apply** transaction instead of letting the retail menu mutate persisted resolution fields while the user scrolls.
+
+Why this was required:
+- the retail Screen Size row uses the saved width/height globals as its working variables;
+- pressing Enter anywhere in the old menu re-called `DXINIT_SetDisplayOptions`;
+- the former Color Depth row also ran resolution-compatibility searches after each change;
+- after Color Depth became Aspect Ratio, those searches could change Screen Size unexpectedly;
+- this conflicted with the DX11 architecture where selected output resolution and legacy D3D7 backing resolution must remain separate.
+
+New model:
+- committed modern output: `gSpideySelectedOutputWidth/Height`;
+- pending menu output: separate pending width/height;
+- committed aspect mode: `gSpideyAspectMode`;
+- pending menu aspect: separate pending aspect mode;
+- Screen Size and Aspect Ratio formatting read pending state;
+- retail next/previous-resolution algorithms are still reused, but operate on local temporary values and only update pending state;
+- Color Depth's obsolete aspect->resolution compatibility searches are disabled;
+- a fourth retail CMenu entry, **Apply**, is appended after Brightness.
+
+Apply semantics:
+- Enter on rows 0–2 no longer rebuilds/resets display state;
+- Enter on row 3 commits pending output/aspect;
+- the original `SPIDEYDX_SaveSettings @ 0x00515850` is called immediately;
+- frontend 640x480 remains physically unchanged while the modern selection is committed;
+- when gameplay activates, the selected modern output drives logical DX11 dimensions and 2560x1440 continues using the safe 1920x1440 D3D7 backing;
+- if Display Options is reached while gameplay is already active, Apply can rebuild the compatibility backing immediately.
+
+This preserves the original menu/input/rendering code while giving the DX11 path modern, explicit configuration semantics.
