@@ -4,6 +4,7 @@ project(spidey_renderer11 LANGUAGES CXX)
 
 add_library(spidey_renderer11 SHARED
     src/spidey_renderer11.cpp
+    spidey_renderer11.def
 )
 
 target_include_directories(spidey_renderer11
