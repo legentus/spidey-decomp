@@ -2033,6 +2033,453 @@ long __cdecl SpideyRenderer11_ResolveTextureHandle(
 }
 
 extern "C" __declspec(dllexport)
+long __cdecl SpideyRenderer11_UpdateTransientTexture(
+    unsigned long legacyHandle,
+    const void* pixels,
+    unsigned long width,
+    unsigned long height,
+    long pitch,
+    unsigned long bitsPerPixel,
+    unsigned long redMask,
+    unsigned long greenMask,
+    unsigned long blueMask,
+    unsigned long alphaMask)
+{
+    if (!legacyHandle)
+        return -1;
+
+    const long existing =
+        SpideyRenderer11_ResolveTextureHandle(legacyHandle);
+
+    if (existing >= 0)
+        return existing;
+
+    unsigned long slot = kGameTextureCapacity;
+
+    for (unsigned long textureId = kPersistentTextureCapacity;
+         textureId < kGameTextureCapacity;
+         ++textureId)
+    {
+        if (!gGameTextures[textureId].texture &&
+            !gGameTextures[textureId].srv &&
+            !gGameTextures[textureId].legacyHandle)
+        {
+            slot = textureId;
+            break;
+        }
+    }
+
+    if (slot >= kGameTextureCapacity)
+    {
+        Log("transient_texture no_free_slot handle=0x%08lX", legacyHandle);
+        return -1;
+    }
+
+    if (!SpideyRenderer11_UpdateTexture(
+            slot,
+            pixels,
+            width,
+            height,
+            pitch,
+            bitsPerPixel,
+            redMask,
+            greenMask,
+            blueMask,
+            alphaMask))
+    {
+        return -1;
+    }
+
+    if (!SpideyRenderer11_AssociateTextureHandle(
+            slot,
+            legacyHandle))
+    {
+        SpideyRenderer11_ReleaseTexture(slot);
+        return -1;
+    }
+
+    Log(
+        "transient_texture id=%lu handle=0x%08lX size=%lux%lu bpp=%lu",
+        slot,
+        legacyHandle,
+        width,
+        height,
+        bitsPerPixel);
+
+    return static_cast<long>(slot);
+}
+
+extern "C" __declspec(dllexport)
+void __cdecl SpideyRenderer11_ShadowSetClear(
+    unsigned long clearFlags,
+    unsigned long clearColor,
+    float clearDepth,
+    unsigned long clearStencil)
+{
+    gShadowClearFlags = clearFlags;
+    gShadowClearColor = clearColor;
+    gShadowClearDepth = clearDepth;
+    gShadowClearStencil = clearStencil;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_ShadowSubmitTriangleFan(
+    const SpideyRenderer11ShadowVertex* vertices,
+    unsigned long vertexCount,
+    const SpideyRenderer11ShadowState* state)
+{
+    if (!vertices ||
+        !state ||
+        vertexCount < 3 ||
+        state->viewportWidth == 0 ||
+        state->viewportHeight == 0)
+    {
+        ++gShadowSkippedDraws;
+        return 0;
+    }
+
+    // Phase 2C1 intentionally supports exactly the fixed-function subset
+    // observed in the live retail stream. Unsupported states remain on D3D7
+    // and are counted rather than being approximated silently.
+    if (state->fogEnable ||
+        state->alphaTestEnable ||
+        state->colorOp != 4 ||
+        state->colorArg1 != 2 ||
+        state->colorArg2 != 0 ||
+        (state->alphaOp != 3 && state->alphaOp != 4) ||
+        (state->alphaOp == 4 &&
+         (state->alphaArg1 != 2 || state->alphaArg2 != 0)))
+    {
+        ++gShadowSkippedDraws;
+        return 0;
+    }
+
+    long textureId = -1;
+    if (state->textureHandle)
+    {
+        textureId =
+            SpideyRenderer11_ResolveTextureHandle(
+                state->textureHandle);
+
+        if (textureId < 0)
+        {
+            ++gShadowSkippedDraws;
+            return 0;
+        }
+    }
+
+    ShadowCommand command = {};
+    command.firstVertex =
+        static_cast<unsigned long>(gShadowVertices.size());
+    command.vertexCount =
+        (vertexCount - 2UL) * 3UL;
+    command.textureId = textureId;
+    command.state = *state;
+
+    const float viewportX =
+        static_cast<float>(state->viewportX);
+    const float viewportY =
+        static_cast<float>(state->viewportY);
+    const float viewportWidth =
+        static_cast<float>(state->viewportWidth);
+    const float viewportHeight =
+        static_cast<float>(state->viewportHeight);
+
+    auto appendVertex =
+        [&](const SpideyRenderer11ShadowVertex& source)
+        {
+            const float ndcX =
+                ((source.x - viewportX) / viewportWidth) * 2.0f - 1.0f;
+            const float ndcY =
+                1.0f - ((source.y - viewportY) / viewportHeight) * 2.0f;
+
+            const float clipW =
+                std::fabs(source.rhw) > 0.0000001f ?
+                (1.0f / source.rhw) :
+                1.0f;
+
+            ShadowGpuVertex output = {};
+            output.x = ndcX * clipW;
+            output.y = ndcY * clipW;
+            output.z = source.z * clipW;
+            output.w = clipW;
+            output.diffuse = source.diffuse;
+            output.u = source.u;
+            output.v = source.v;
+            gShadowVertices.push_back(output);
+        };
+
+    for (unsigned long i = 1;
+         i + 1 < vertexCount;
+         ++i)
+    {
+        appendVertex(vertices[0]);
+        appendVertex(vertices[i]);
+        appendVertex(vertices[i + 1]);
+    }
+
+    gShadowCommands.push_back(command);
+    ++gShadowSubmittedDraws;
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_ShadowEndFrame(
+    unsigned long frame,
+    unsigned long sceneWidth,
+    unsigned long sceneHeight)
+{
+    const unsigned long submitted =
+        gShadowSubmittedDraws;
+    const unsigned long skippedSubmit =
+        gShadowSkippedDraws;
+    const size_t queuedVertices =
+        gShadowVertices.size();
+    const size_t queuedCommands =
+        gShadowCommands.size();
+
+    auto resetFrame =
+        []()
+        {
+            gShadowVertices.clear();
+            gShadowCommands.clear();
+            gShadowSubmittedDraws = 0;
+            gShadowSkippedDraws = 0;
+        };
+
+    if (queuedCommands == 0)
+    {
+        if (frame <= 5 || (frame % 120) == 0 || skippedSubmit)
+        {
+            Log(
+                "shadow_frame frame=%lu target=%lux%lu queued=0 submitted=%lu skipped_submit=%lu rendered=0 skipped_render=0 vertices=0",
+                frame,
+                sceneWidth,
+                sceneHeight,
+                submitted,
+                skippedSubmit);
+        }
+
+        resetFrame();
+        return 1;
+    }
+
+    const size_t requiredBytes =
+        queuedVertices * sizeof(ShadowGpuVertex);
+
+    if (!CreateShadowPipeline() ||
+        !EnsureShadowTargets(sceneWidth, sceneHeight) ||
+        !EnsureShadowVertexBuffer(requiredBytes))
+    {
+        Log(
+            "shadow_frame frame=%lu setup_failed target=%lux%lu queued=%llu vertices=%llu",
+            frame,
+            sceneWidth,
+            sceneHeight,
+            static_cast<unsigned long long>(queuedCommands),
+            static_cast<unsigned long long>(queuedVertices));
+        resetFrame();
+        return 0;
+    }
+
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    HRESULT hr = gContext->Map(
+        gShadowVertexBuffer,
+        0,
+        D3D11_MAP_WRITE_DISCARD,
+        0,
+        &mapped);
+
+    if (FAILED(hr) || !mapped.pData)
+    {
+        Log(
+            "shadow_frame frame=%lu map_failed hr=0x%08lX bytes=%llu",
+            frame,
+            static_cast<unsigned long>(hr),
+            static_cast<unsigned long long>(requiredBytes));
+        resetFrame();
+        return 0;
+    }
+
+    std::memcpy(
+        mapped.pData,
+        gShadowVertices.data(),
+        requiredBytes);
+    gContext->Unmap(gShadowVertexBuffer, 0);
+
+    gContext->OMSetRenderTargets(
+        1,
+        &gShadowRenderTargetView,
+        gShadowDepthStencilView);
+
+    if (gShadowClearFlags & 1UL)
+    {
+        const float clearColor[4] =
+        {
+            static_cast<float>((gShadowClearColor >> 16) & 0xFFUL) / 255.0f,
+            static_cast<float>((gShadowClearColor >> 8) & 0xFFUL) / 255.0f,
+            static_cast<float>(gShadowClearColor & 0xFFUL) / 255.0f,
+            static_cast<float>((gShadowClearColor >> 24) & 0xFFUL) / 255.0f
+        };
+
+        gContext->ClearRenderTargetView(
+            gShadowRenderTargetView,
+            clearColor);
+    }
+
+    UINT clearDepthFlags = 0;
+    if (gShadowClearFlags & 2UL)
+        clearDepthFlags |= D3D11_CLEAR_DEPTH;
+    if (gShadowClearFlags & 4UL)
+        clearDepthFlags |= D3D11_CLEAR_STENCIL;
+
+    if (clearDepthFlags)
+    {
+        gContext->ClearDepthStencilView(
+            gShadowDepthStencilView,
+            clearDepthFlags,
+            gShadowClearDepth,
+            static_cast<UINT8>(gShadowClearStencil & 0xFFUL));
+    }
+
+    const UINT stride =
+        static_cast<UINT>(sizeof(ShadowGpuVertex));
+    const UINT offset = 0;
+
+    gContext->IASetVertexBuffers(
+        0,
+        1,
+        &gShadowVertexBuffer,
+        &stride,
+        &offset);
+    gContext->IASetInputLayout(gShadowInputLayout);
+    gContext->IASetPrimitiveTopology(
+        D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    gContext->VSSetShader(
+        gShadowVertexShader,
+        nullptr,
+        0);
+    gContext->RSSetState(
+        gShadowRasterizer);
+
+    unsigned long rendered = 0;
+    unsigned long skippedRender = 0;
+
+    for (const ShadowCommand& command : gShadowCommands)
+    {
+        ID3D11DepthStencilState* depthState =
+            GetShadowDepthState(command.state);
+        ID3D11BlendState* blendState =
+            GetShadowBlendState(command.state);
+        ID3D11SamplerState* samplerState =
+            GetShadowSamplerState(command.state);
+
+        if (!depthState ||
+            !blendState ||
+            !samplerState)
+        {
+            ++skippedRender;
+            continue;
+        }
+
+        ID3D11ShaderResourceView* srv =
+            gShadowWhiteSrv;
+
+        if (command.textureId >= 0 &&
+            static_cast<unsigned long>(command.textureId) < kGameTextureCapacity &&
+            gGameTextures[command.textureId].srv)
+        {
+            srv =
+                gGameTextures[command.textureId].srv;
+        }
+
+        D3D11_VIEWPORT viewport = {};
+        viewport.TopLeftX =
+            static_cast<float>(command.state.viewportX);
+        viewport.TopLeftY =
+            static_cast<float>(command.state.viewportY);
+        viewport.Width =
+            static_cast<float>(command.state.viewportWidth);
+        viewport.Height =
+            static_cast<float>(command.state.viewportHeight);
+        viewport.MinDepth =
+            command.state.viewportMinZ;
+        viewport.MaxDepth =
+            command.state.viewportMaxZ;
+
+        gContext->RSSetViewports(
+            1,
+            &viewport);
+        gContext->OMSetDepthStencilState(
+            depthState,
+            0);
+        gContext->OMSetBlendState(
+            blendState,
+            nullptr,
+            0xFFFFFFFFUL);
+        gContext->PSSetShader(
+            command.state.alphaOp == 4 ?
+            gShadowPixelShaderModulateAlpha :
+            gShadowPixelShaderDiffuseAlpha,
+            nullptr,
+            0);
+        gContext->PSSetShaderResources(
+            0,
+            1,
+            &srv);
+        gContext->PSSetSamplers(
+            0,
+            1,
+            &samplerState);
+
+        gContext->Draw(
+            command.vertexCount,
+            command.firstVertex);
+        ++rendered;
+    }
+
+    ID3D11ShaderResourceView* nullSrv = nullptr;
+    gContext->PSSetShaderResources(
+        0,
+        1,
+        &nullSrv);
+    gContext->OMSetRenderTargets(
+        0,
+        nullptr,
+        nullptr);
+    gContext->OMSetBlendState(
+        nullptr,
+        nullptr,
+        0xFFFFFFFFUL);
+    gContext->OMSetDepthStencilState(
+        nullptr,
+        0);
+    gContext->RSSetState(nullptr);
+
+    if (frame <= 5 ||
+        (frame % 120) == 0 ||
+        skippedSubmit ||
+        skippedRender ||
+        rendered != queuedCommands)
+    {
+        Log(
+            "shadow_frame frame=%lu target=%lux%lu queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu",
+            frame,
+            sceneWidth,
+            sceneHeight,
+            static_cast<unsigned long long>(queuedCommands),
+            submitted,
+            skippedSubmit,
+            rendered,
+            skippedRender,
+            static_cast<unsigned long long>(queuedVertices));
+    }
+
+    resetFrame();
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
 void __cdecl SpideyRenderer11_ReleaseTexture(
     unsigned long textureId)
 {
