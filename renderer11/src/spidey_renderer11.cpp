@@ -38,6 +38,7 @@ namespace
         unsigned long width;
         unsigned long height;
         unsigned long sourceBitsPerPixel;
+        unsigned long legacyHandle;
     };
 
     static const unsigned long kGameTextureCapacity = 1024;
@@ -114,6 +115,7 @@ namespace
         entry.width = 0;
         entry.height = 0;
         entry.sourceBitsPerPixel = 0;
+        entry.legacyHandle = 0;
 
         if (wasResident && gResidentTextureCount)
             --gResidentTextureCount;
@@ -1286,6 +1288,7 @@ int __cdecl SpideyRenderer11_UpdateTexture(
     entry.width = width;
     entry.height = height;
     entry.sourceBitsPerPixel = bitsPerPixel;
+    entry.legacyHandle = 0;
     ++gResidentTextureCount;
 
     Log(
@@ -1299,6 +1302,33 @@ int __cdecl SpideyRenderer11_UpdateTexture(
         blueMask,
         alphaMask,
         gResidentTextureCount);
+
+    return 1;
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_AssociateTextureHandle(
+    unsigned long textureId,
+    unsigned long legacyHandle)
+{
+    if (textureId >= kGameTextureCapacity ||
+        !legacyHandle ||
+        !gGameTextures[textureId].srv)
+    {
+        Log(
+            "texture_handle rejected id=%lu handle=0x%08lX resident=%d",
+            textureId,
+            legacyHandle,
+            textureId < kGameTextureCapacity && gGameTextures[textureId].srv ? 1 : 0);
+        return 0;
+    }
+
+    gGameTextures[textureId].legacyHandle = legacyHandle;
+
+    Log(
+        "texture_handle id=%lu handle=0x%08lX",
+        textureId,
+        legacyHandle);
 
     return 1;
 }
