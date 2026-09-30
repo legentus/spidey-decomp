@@ -4447,3 +4447,96 @@ Current action:
 - preserve requested modern resolution separately from the safe D3D7 backing;
 - install the in-game Aspect Ratio row patch;
 - then provide one new runtime frontier for the user to test.
+
+
+## Phase 3B — in-game modern video settings implemented — 2026-09-30
+
+Goal:
+Make modern output resolution and aspect ratio explicit, selectable settings in the retail Display Options screen.
+
+Retail UI reverse engineering:
+- exact function: `PCSHELL_DoDisplayOptions = 0x0050D9B0`, size 1476 bytes;
+- retained historical retail function bytes were used to verify all patch sites;
+- byte-verified direct calls:
+  - `0x0050DBBB -> 0x00529F90` (row-1 value formatter / sprintf);
+  - `0x0050DDAB -> 0x005010C0` (previous color depth);
+  - `0x0050DDCE -> 0x00501060` (next color depth);
+- row-1 label pointer slot: `0x0054BBD4`;
+- retail aspect/projection scalar: runtime VA `0x00550064`.
+
+Resolution changes:
+- 2560x1440 is no longer omitted from the injected retail resolution table;
+- the existing Screen Size row can therefore enumerate it through the original `DXINIT_GetPrevResolution` / `DXINIT_GetNextResolution` logic;
+- selected/output resolution is now separate from the legacy D3D7 physical backing;
+- selecting 2560x1440 preserves/saves **2560x1440x32**;
+- only the hidden legacy D3D7 backing is remapped to known-good **1920x1440x32**;
+- startup restoration also preserves 2560x1440 instead of overwriting the saved config with a fallback;
+- logical DX11 render dimensions now prefer the explicitly selected Screen Size rather than always following the desktop client.
+
+Aspect-ratio menu:
+- the obsolete Color Depth row is repurposed in-place as **Aspect Ratio**;
+- this preserves the retail three-row CMenu layout and all existing input/drawing behavior;
+- selectable values:
+  - AUTO
+  - 4:3
+  - 5:4
+  - 16:9
+  - 16:10
+  - 21:9
+  - 32:9
+- DX11 output is fixed at 32-bit, so removing user-facing color-depth selection does not remove a meaningful modern renderer option;
+- explicit projection scalars:
+  - 4:3 = 1.0
+  - 5:4 = 1.06667
+  - 16:9 = 0.75
+  - 16:10 = 0.83333
+  - 21:9 = 0.57143
+  - 32:9 = 0.375
+- AUTO computes `(4 * height) / (3 * width)` from the selected output resolution;
+- the chosen scalar is written live to `0x00550064`.
+
+Persistence:
+- aspect selection is stored in `spidey-modern-video.ini` beside `SpideyPC.exe`;
+- menu left/right changes save immediately;
+- startup reloads the aspect mode;
+- final display-mode application re-applies the scalar after Screen Size changes.
+
+Safety:
+- each retail call patch verifies opcode `E8` and the exact expected original target before writing;
+- a mismatch is logged and the patch is skipped rather than writing to an unknown executable;
+- the existing frontend 640x480 compatibility canvas remains intact;
+- F10 DX11/reference fallback remains intact.
+
+Implementation commits:
+- `a1b685189f9e614b8fda21968bd4d824cb05877c` — expose 2560x1440 in Screen Size;
+- `15de90532e319e5c161602b837437bc73b8492e7` — preserve selected output across legacy backing remap;
+- `b2cad1aa4e1b833fe1b7751cdac60eb797d7e912` — separate selected output from D3D7 physical resolution at apply time;
+- `99a459e5f3b163011faf17ba00f12c5aec30e76a` — repurpose Color Depth as Aspect Ratio using exact retail call patches;
+- `f9f23c6dc59dfc460c9b17d12eb28d1d6746cc87` — install/persist/apply aspect selection;
+- `6235292cdba5abeff5103d6a8bce9d6ba014fef4` — pin modern-video INI to the game directory.
+
+NEXT TEST:
+1. run `UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. open Options -> Display Options;
+3. verify the second row says **Aspect Ratio**;
+4. cycle it and confirm AUTO / 4:3 / 5:4 / 16:9 / 16:10 / 21:9 / 32:9 are visible;
+5. on Screen Size, cycle until **2560x1440** is visible;
+6. select **2560x1440 + 16:9**;
+7. leave/apply the menu, start gameplay, and inspect framing/HUD;
+8. optionally re-open Display Options and confirm the selected resolution remains 2560x1440;
+9. exit and provide the generated logs.
+
+Expected log markers:
+- `modern_modes ... windows_1440=1 ui_2560x1440_exposed=1 ...`;
+- three `display_menu_patch ... installed=1` lines;
+- `display_menu_mod ... label=1 format=1 prev=1 next=1 modes=7`;
+- `display_aspect ... label=16:9 scalar=0.750000 selected=2560x1440`;
+- `display_options selected=2560x1440x32 physical=1920x1440x32 ... legacy_backing_remap=1 preserve_selected=1`;
+- gameplay: `logical_render_resolution ... logical=2560x1440 physical=1920x1440 selected=2560x1440`;
+- renderer11 shadow target/presentation at 2560x1440.
+
+Pass criteria:
+- settings are actually visible/selectable in the original Display Options screen;
+- 2560x1440 survives menu exit/re-entry and restart;
+- 16:9 visibly affects gameplay projection without stretching;
+- frontend remains stable.
