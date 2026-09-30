@@ -4681,3 +4681,40 @@ Next action:
 1. update/build again with `UPDATE_AND_TEST_LATEST_BUILD.bat`;
 2. if matching build succeeds, perform the existing four-row Display Options / 2560x1440 + 16:9 + Apply runtime test;
 3. only then evaluate pending/committed settings behavior.
+
+
+## Phase 3C runtime result — PASS; Phase 3D begins — 2026-09-30
+
+Tested revision:
+- `9fa0e6ab1027e259052fe0b8486f9e6ade57b0f4`.
+
+User result:
+- selected resolution and aspect ratio now apply in gameplay;
+- requested 2560x1440 + 16:9 survives Apply and menu re-entry;
+- gameplay visibly uses the requested modern output/aspect;
+- new issues observed:
+  1. level backgrounds/backdrops are strongly distorted, especially while the camera moves;
+  2. main menu/frontend remains low-resolution 4:3 instead of following the selected output/aspect.
+
+Runtime proof from `spidey-decomp-compat(20260930-195855).log`:
+- every transactional Display Options patch installed, including `apply_entry=1` and `apply_confirm=1`;
+- `display_apply committed=1 selected=2560x1440x32 aspect=16:9 ... saved_now=1`;
+- reopen resets pending state from committed `2560x1440 + 16:9`;
+- gameplay transition reports:
+  `logical_render_resolution reason=display_options_gameplay modern=1 frontend=0 logical=2560x1440 physical=1920x1440 selected=2560x1440`.
+- frontend transition still reports:
+  `logical_render_resolution reason=display_options_frontend modern=0 frontend=1 logical=640x480 physical=640x480 selected=2560x1440`.
+
+Phase 3C conclusion:
+- transactional Screen Size / Aspect Ratio / Apply behavior is validated;
+- 2560x1440 remains physically quarantined from the legacy D3D7 device as intended;
+- do not reopen the old Apply/persistence issue unless new evidence regresses it.
+
+Phase 3D current goals:
+1. remove the intentional 640x480 frontend logical-resolution lock while preserving retail UI semantics and stability;
+2. diagnose/fix moving gameplay backdrop/background distortion separately from general widescreen output.
+
+Initial backdrop evidence:
+- gameplay DX11 shadow draws are active at logical 2560x1440 with physical D3D7 backing 1920x1440;
+- frame telemetry includes transformed vertices with extreme screen-coordinate ranges (millions), while normal frontend pre-transformed geometry stays around the original 640x480 coordinate space;
+- investigate special transformed/backdrop geometry and RHW/viewport conversion before changing projection globally.
