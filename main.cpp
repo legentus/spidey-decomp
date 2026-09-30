@@ -1255,32 +1255,43 @@ static unsigned long gSpideyLegacyPhysicalHeight = 480;
 
 static void SpideyRefreshModernLogicalResolution()
 {
-	HWND hwnd =
-		*(HWND*)0x006B58D0;
-
 	unsigned long width =
-		0;
+		gSpideySelectedOutputWidth;
 	unsigned long height =
-		0;
+		gSpideySelectedOutputHeight;
 
-	if (hwnd)
+	if (width < 640 ||
+		width > 8192 ||
+		height < 480 ||
+		height > 8192)
 	{
-		RECT client;
-		if (GetClientRect(hwnd, &client))
+		HWND hwnd =
+			*(HWND*)0x006B58D0;
+
+		width =
+			0;
+		height =
+			0;
+
+		if (hwnd)
+		{
+			RECT client;
+			if (GetClientRect(hwnd, &client))
+			{
+				width =
+					(unsigned long)(client.right - client.left);
+				height =
+					(unsigned long)(client.bottom - client.top);
+			}
+		}
+
+		if (!width || !height)
 		{
 			width =
-				(unsigned long)(client.right - client.left);
+				(unsigned long)GetSystemMetrics(0);
 			height =
-				(unsigned long)(client.bottom - client.top);
+				(unsigned long)GetSystemMetrics(1);
 		}
-	}
-
-	if (!width || !height)
-	{
-		width =
-			(unsigned long)GetSystemMetrics(0);
-		height =
-			(unsigned long)GetSystemMetrics(1);
 	}
 
 	if (width < 640 || height < 480)
@@ -1336,7 +1347,7 @@ static void SpideyApplyLogicalRenderResolution(
 	{
 		fprintf(
 			f,
-			"logical_render_resolution reason=%s modern=%d frontend=%d logical=%lux%lu physical=%lux%lu client=%lux%lu\n",
+			"logical_render_resolution reason=%s modern=%d frontend=%d logical=%lux%lu physical=%lux%lu selected=%lux%lu\n",
 			reason ? reason : "unknown",
 			useModern ? 1 : 0,
 			gSpideyFrontendLegacyMode,
@@ -1375,79 +1386,57 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	const u32 requestedBpp =
 		bpp;
 
-	int quarantined2560 =
-		0;
-
-	if (width == 2560 &&
-		height == 1440)
-	{
-		width =
-			1440;
-		height =
-			1080;
-		bpp =
-			32;
-		quarantined2560 =
-			1;
-
-		*(DWORD*)0x02E096F8 =
-			width;
-		*(DWORD*)0x02E0970C =
-			height;
-		*(DWORD*)0x02E098E4 =
-			bpp;
-	}
-
-	// Retail deliberately moves the frontend to a 640x480x16 internal
-	// canvas after the startup movies. Forcing that legacy frontend canvas
-	// to the saved gameplay resolution causes frontend-only rendering
-	// corruption (rapidly flashing unrelated scene/building imagery).
-	//
-	// Keep the internal frontend request intact and let the compatibility
-	// presenter scale it into the borderless desktop-sized HWND. Native
-	// frontend/widescreen support should be implemented separately instead
-	// of changing the renderer assumptions underneath the legacy menu.
 	const int frontendLegacy =
 		*(DWORD*)0x006B78F4 &&
-		width == 640 &&
-		height == 480 &&
-		bpp == 16 &&
+		requestedWidth == 640 &&
+		requestedHeight == 480 &&
+		requestedBpp == 16 &&
 		option4 == 0 &&
 		option5 == 4;
 
-	int preservedSaved =
+	u32 physicalWidth =
+		requestedWidth;
+	u32 physicalHeight =
+		requestedHeight;
+	u32 physicalBpp =
+		requestedBpp;
+
+	int remappedLegacyBacking =
 		0;
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
-
-	if (f)
+	if (!frontendLegacy)
 	{
-		fprintf(
-			f,
-			"display_options request=%lux%lux%lu apply=%lux%lux%lu option4=%d option5=%d preserve_saved=%d frontend_legacy=%d quarantined_2560x1440=%d\n",
-			(unsigned long)requestedWidth,
-			(unsigned long)requestedHeight,
-			(unsigned long)requestedBpp,
-			(unsigned long)width,
-			(unsigned long)height,
-			(unsigned long)bpp,
-			option4,
-			option5,
-			preservedSaved,
-			frontendLegacy,
-			quarantined2560);
-		fclose(f);
+		gSpideySelectedOutputWidth =
+			requestedWidth;
+		gSpideySelectedOutputHeight =
+			requestedHeight;
+		gSpideySelectedOutputBpp =
+			32;
+
+		// Modern DX11 output is always 32-bit. Keep legacy physical D3D7
+		// below the exact 2560x1440 target that is known to fail CreateDevice.
+		physicalBpp =
+			32;
+
+		if (requestedWidth == 2560 &&
+			requestedHeight == 1440)
+		{
+			physicalWidth =
+				1920;
+			physicalHeight =
+				1440;
+			remappedLegacyBacking =
+				1;
+		}
 	}
 
 	SpideyRetailSetDisplayOptionsFn retail =
 		(SpideyRetailSetDisplayOptionsFn)0x00500250;
 
 	retail(
-		width,
-		height,
-		bpp,
+		physicalWidth,
+		physicalHeight,
+		physicalBpp,
 		option4,
 		option5);
 
@@ -1463,10 +1452,19 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		!gSpideyLegacyPhysicalHeight)
 	{
 		gSpideyLegacyPhysicalWidth =
-			(unsigned long)width;
+			(unsigned long)physicalWidth;
 		gSpideyLegacyPhysicalHeight =
-			(unsigned long)height;
+			(unsigned long)physicalHeight;
 	}
+
+	// Retail is free to touch its saved-resolution fields while rebuilding
+	// the D3D7 device. Restore the user-facing output selection afterward.
+	*(DWORD*)0x02E096F8 =
+		(DWORD)gSpideySelectedOutputWidth;
+	*(DWORD*)0x02E0970C =
+		(DWORD)gSpideySelectedOutputHeight;
+	*(DWORD*)0x02E098E4 =
+		(DWORD)gSpideySelectedOutputBpp;
 
 	SpideyInjectModernVideoModes();
 	SpideyKeepBorderlessMonitorWindow(
@@ -1479,9 +1477,28 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			"display_options_frontend" :
 			"display_options_gameplay");
 
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_options selected=%lux%lux%lu physical=%lux%lux%lu option4=%d option5=%d frontend_legacy=%d legacy_backing_remap=%d preserve_selected=1\n",
+			(unsigned long)gSpideySelectedOutputWidth,
+			(unsigned long)gSpideySelectedOutputHeight,
+			(unsigned long)gSpideySelectedOutputBpp,
+			(unsigned long)physicalWidth,
+			(unsigned long)physicalHeight,
+			(unsigned long)physicalBpp,
+			option4,
+			option5,
+			frontendLegacy,
+			remappedLegacyBacking);
+		fclose(f);
+	}
+
 	// Display-option changes can destroy/recreate the retail D3D7 device.
-	// Re-validate the live device slot and install the pass-through draw
-	// probe on the new vtable before the next scene is rendered.
 	SpideyInstallRetailD3D7DrawProbe();
 }
 
