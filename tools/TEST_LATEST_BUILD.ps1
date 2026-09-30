@@ -389,6 +389,7 @@ $dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
 $compatLog = Join-Path $gameDir "spidey-decomp-compat.log"
 $presentLog = Join-Path $gameDir "spidey-decomp-present.log"
 $textureLog = Join-Path $gameDir "spidey-decomp-texture.log"
+$inputLog = Join-Path $gameDir "spidey-decomp-input.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 
 if (Test-Path $crashLog) {
@@ -405,6 +406,9 @@ if (Test-Path $presentLog) {
 }
 if (Test-Path $textureLog) {
     Remove-Item -LiteralPath $textureLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $inputLog) {
+    Remove-Item -LiteralPath $inputLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $runtimeLog) {
     Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
@@ -452,6 +456,12 @@ if (Test-Path $textureLog) {
     Copy-Item -LiteralPath $textureLog -Destination (Join-Path $sessionDir "spidey-decomp-texture.log") -Force
     Write-Host "[TEXTURE] Texture conversion log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-texture.log"))
+}
+
+if (Test-Path $inputLog) {
+    Copy-Item -LiteralPath $inputLog -Destination (Join-Path $sessionDir "spidey-decomp-input.log") -Force
+    Write-Host "[INPUT] DirectInput focus/reacquire log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-input.log"))
 }
 
 if (Test-Path $runtimeLog) {
