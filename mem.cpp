@@ -18,6 +18,34 @@ EXPORT SBlockHeader *FirstFreeBlock[2];
 
 static i32 Scribble = 1;
 
+// Compatibility-only heap id used when the original fixed game heap cannot
+// satisfy a DCMem_New request. ParentHeap is a signed 4-bit field, so -1 is a
+// stable sentinel that cannot collide with retail heaps 0 and 1.
+static const i32 COMPAT_FALLBACK_HEAP = -1;
+
+static u32 gCompatFallbackAllocCount = 0;
+
+static void LogCompatFallbackAlloc(u32 requested, void* block)
+{
+#ifdef _WIN32
+	FILE* f = fopen("spidey-decomp-compat.log", "a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"mem_fallback alloc=%lu requested=%lu block=0x%08lX\n",
+			(unsigned long)++gCompatFallbackAllocCount,
+			(unsigned long)requested,
+			(unsigned long)block);
+		fclose(f);
+	}
+#else
+	(void)requested;
+	(void)block;
+	++gCompatFallbackAllocCount;
+#endif
+}
+
 // Returns a pointer to the first byte after free block p
 // p is a pointer to a block header, not a pointer returned by Mem_New
 #define FREEAFTER(p) (SBlockHeader*)(((char*)((p)+1))+(p)->Size)
@@ -213,6 +241,12 @@ INLINE void Mem_DeleteX(void *p)
 	SBlockHeader *pBlock=GETBLOCKHEADER(p);
 	i32 Heap=pBlock->ParentHeap;
 
+	if (Heap == COMPAT_FALLBACK_HEAP)
+	{
+		free(pBlock);
+		return;
+	}
+
 	if (!(Heap>=0 && Heap<MAXHEAPS))
 	{
 		print_if_false(0, "Invalid pointer sent to Mem_Delete");
@@ -256,6 +290,15 @@ void Mem_ShrinkX(void* p, size_t newsize)
 {
 	SBlockHeader* pBlock = GETBLOCKHEADER(p);
 	i32 Heap = pBlock->ParentHeap;
+
+	if (Heap == COMPAT_FALLBACK_HEAP)
+	{
+		// The process-heap fallback keeps its original allocation size. Retail
+		// shrink callers only require that the logical block remains valid.
+		if (newsize <= pBlock->Size)
+			pBlock->Size = newsize;
+		return;
+	}
 
 	print_if_false(newsize <= pBlock->Size, "Illegal newsize %ld sent to Mem_Shrink", newsize);
 	print_if_false((newsize & 3) == 0, "newsize %ld not lword aligned", newsize);
@@ -505,7 +548,32 @@ void *DCMem_New(u32 a1, i32 a2, i32 a3, void* a4, bool a5)
 	if (a5)
 		dword_54D560 = a5;
 
-	void *v8 = Mem_CoreNew(a1 + sizeof(SBlockHeader), a2, a3, 0);
+	const u32 coreSize = a1 + sizeof(SBlockHeader);
+	void *v8 = Mem_CoreNew(coreSize, a2, a3, 0);
+
+	if (!v8)
+	{
+		// The original allocator is backed by two fixed in-image heaps. Modern
+		// resolution / texture reload paths can temporarily exceed that budget.
+		// Allocate an ABI-compatible block from the process heap rather than
+		// turning the OOM into the historical write-to-0x1F crash.
+		SBlockHeader* fallback = static_cast<SBlockHeader*>(
+				malloc(sizeof(SBlockHeader) + coreSize));
+
+		if (!fallback)
+			return 0;
+
+		fallback->ParentHeap = COMPAT_FALLBACK_HEAP;
+		fallback->Size = coreSize;
+		fallback->Next = 0;
+		fallback->Id = (UniqueIndentifier + 1) & 0x7fffffff;
+		if (!fallback->Id)
+			fallback->Id = 1;
+		UniqueIndentifier = fallback->Id;
+
+		v8 = fallback + 1;
+		LogCompatFallbackAlloc(a1, v8);
+	}
 
 	i32 v9 = sizeof(SBlockHeader) - ((u32)v8 & 0x1F);
 
@@ -541,7 +609,7 @@ SHandle Mem_MakeHandle(void* a1)
 			print_if_false(v2 != 0, "A unique identifier has not been assigned to the memory block");
 			i32 v4 = pBlock->ParentHeap;
 
-			if (v4 >= 0 && v4 <= 1)
+			if ((v4 >= 0 && v4 <= 1) || v4 == COMPAT_FALLBACK_HEAP)
 			{
 				if (pBlock->Size  >= 0x4 && pBlock->Size <= 0x200000)
 				{
