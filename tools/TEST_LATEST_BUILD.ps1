@@ -328,6 +328,24 @@ if (-not (Test-Path $renderer11Dll)) {
 $renderer11Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $renderer11Dll).Hash
 Write-Host "[OK] Renderer11 SHA-256: $renderer11Hash"
 
+Write-Host ""
+Write-Host "[..] Building modern input bridge..."
+try {
+    & (Join-Path $RepoRoot "scripts\build_input11.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        Stop-WithPause "Modern input build failed." $LASTEXITCODE
+    }
+} catch {
+    Stop-WithPause ("Modern input build failed: " + $_.Exception.Message)
+}
+
+$input11Dll = Join-Path $RepoRoot "out\input11\spidey_input11.dll"
+if (-not (Test-Path $input11Dll)) {
+    Stop-WithPause "Modern input build completed but spidey_input11.dll was not produced."
+}
+$input11Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $input11Dll).Hash
+Write-Host "[OK] Input11 SHA-256: $input11Hash"
+
 $builtDll = Join-Path $RepoRoot "Release\spider.dll"
 if (-not (Test-Path $builtDll)) {
     Stop-WithPause "Build completed but Release\spider.dll was not produced."
@@ -377,6 +395,10 @@ $liveRenderer11 = Join-Path $gameDir "spidey_renderer11.dll"
 Copy-Item -LiteralPath $renderer11Dll -Destination $liveRenderer11 -Force
 Write-Host "[OK] Installed Direct3D 11 renderer bridge as spidey_renderer11.dll."
 
+$liveInput11 = Join-Path $gameDir "spidey_input11.dll"
+Copy-Item -LiteralPath $input11Dll -Destination $liveInput11 -Force
+Write-Host "[OK] Installed modern input bridge as spidey_input11.dll."
+
 $logRoot = Join-Path $RepoRoot "logs"
 New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -397,6 +419,7 @@ try {
     "revision=$revision",
     "proxy_sha256=$hash",
     "renderer11_sha256=$renderer11Hash",
+    "input11_sha256=$input11Hash",
     "game=$gameExe",
     "started=$(Get-Date -Format o)"
 ) | Set-Content -Path (Join-Path $sessionDir "test-session.txt") -Encoding UTF8
@@ -415,6 +438,7 @@ $textureLog = Join-Path $gameDir "spidey-decomp-texture.log"
 $drawLog = Join-Path $gameDir "spidey-decomp-draw.log"
 $inputLog = Join-Path $gameDir "spidey-decomp-input.log"
 $renderer11Log = Join-Path $gameDir "spidey-renderer11.log"
+$input11Log = Join-Path $gameDir "spidey-input11.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 
 if (Test-Path $crashLog) {
@@ -440,6 +464,9 @@ if (Test-Path $inputLog) {
 }
 if (Test-Path $renderer11Log) {
     Remove-Item -LiteralPath $renderer11Log -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $input11Log) {
+    Remove-Item -LiteralPath $input11Log -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $runtimeLog) {
     Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
@@ -505,6 +532,12 @@ if (Test-Path $renderer11Log) {
     Copy-Item -LiteralPath $renderer11Log -Destination (Join-Path $sessionDir "spidey-renderer11.log") -Force
     Write-Host "[DX11] Direct3D 11 renderer log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-renderer11.log"))
+}
+
+if (Test-Path $input11Log) {
+    Copy-Item -LiteralPath $input11Log -Destination (Join-Path $sessionDir "spidey-input11.log") -Force
+    Write-Host "[INPUT11] Modern input helper log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-input11.log"))
 }
 
 if (Test-Path $runtimeLog) {
