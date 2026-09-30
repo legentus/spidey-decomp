@@ -1446,6 +1446,30 @@ typedef int (__cdecl *SpideyRenderer11AssociateTextureHandleFn)(
 		unsigned long);
 typedef long (__cdecl *SpideyRenderer11ResolveTextureHandleFn)(
 		unsigned long);
+typedef long (__cdecl *SpideyRenderer11UpdateTransientTextureFn)(
+		unsigned long,
+		const void*,
+		unsigned long,
+		unsigned long,
+		long,
+		unsigned long,
+		unsigned long,
+		unsigned long,
+		unsigned long,
+		unsigned long);
+typedef void (__cdecl *SpideyRenderer11ShadowSetClearFn)(
+		unsigned long,
+		unsigned long,
+		float,
+		unsigned long);
+typedef int (__cdecl *SpideyRenderer11ShadowSubmitTriangleFanFn)(
+		const SpideyRenderer11LegacyShadowVertex*,
+		unsigned long,
+		const SpideyRenderer11LegacyShadowState*);
+typedef int (__cdecl *SpideyRenderer11ShadowEndFrameFn)(
+		unsigned long,
+		unsigned long,
+		unsigned long);
 typedef void (__cdecl *SpideyRenderer11ReleaseTextureFn)(
 		unsigned long);
 typedef void (__cdecl *SpideyRenderer11ReleaseAllTexturesFn)(void);
@@ -1459,6 +1483,10 @@ static SpideyRenderer11PresentHdcFn gSpideyRenderer11PresentHdc = 0;
 static SpideyRenderer11UpdateTextureFn gSpideyRenderer11UpdateTexture = 0;
 static SpideyRenderer11AssociateTextureHandleFn gSpideyRenderer11AssociateTextureHandle = 0;
 static SpideyRenderer11ResolveTextureHandleFn gSpideyRenderer11ResolveTextureHandle = 0;
+static SpideyRenderer11UpdateTransientTextureFn gSpideyRenderer11UpdateTransientTexture = 0;
+static SpideyRenderer11ShadowSetClearFn gSpideyRenderer11ShadowSetClear = 0;
+static SpideyRenderer11ShadowSubmitTriangleFanFn gSpideyRenderer11ShadowSubmitTriangleFan = 0;
+static SpideyRenderer11ShadowEndFrameFn gSpideyRenderer11ShadowEndFrame = 0;
 static SpideyRenderer11ReleaseTextureFn gSpideyRenderer11ReleaseTexture = 0;
 static SpideyRenderer11ReleaseAllTexturesFn gSpideyRenderer11ReleaseAllTextures = 0;
 static SpideyRenderer11GetResidentTextureCountFn gSpideyRenderer11GetResidentTextureCount = 0;
@@ -1547,6 +1575,26 @@ static int SpideyProbeRenderer11Bridge()
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_ResolveTextureHandle");
 
+	gSpideyRenderer11UpdateTransientTexture =
+		(SpideyRenderer11UpdateTransientTextureFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_UpdateTransientTexture");
+
+	gSpideyRenderer11ShadowSetClear =
+		(SpideyRenderer11ShadowSetClearFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_ShadowSetClear");
+
+	gSpideyRenderer11ShadowSubmitTriangleFan =
+		(SpideyRenderer11ShadowSubmitTriangleFanFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_ShadowSubmitTriangleFan");
+
+	gSpideyRenderer11ShadowEndFrame =
+		(SpideyRenderer11ShadowEndFrameFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_ShadowEndFrame");
+
 	gSpideyRenderer11ReleaseTexture =
 		(SpideyRenderer11ReleaseTextureFn)GetProcAddress(
 			gSpideyRenderer11Module,
@@ -1577,6 +1625,10 @@ static int SpideyProbeRenderer11Bridge()
 		!gSpideyRenderer11UpdateTexture ||
 		!gSpideyRenderer11AssociateTextureHandle ||
 		!gSpideyRenderer11ResolveTextureHandle ||
+		!gSpideyRenderer11UpdateTransientTexture ||
+		!gSpideyRenderer11ShadowSetClear ||
+		!gSpideyRenderer11ShadowSubmitTriangleFan ||
+		!gSpideyRenderer11ShadowEndFrame ||
 		!gSpideyRenderer11ReleaseTexture ||
 		!gSpideyRenderer11ReleaseAllTextures ||
 		!gSpideyRenderer11GetResidentTextureCount ||
@@ -1586,7 +1638,7 @@ static int SpideyProbeRenderer11Bridge()
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX resolve_tex=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX resolve_tex=0x%08lX transient_tex=0x%08lX shadow_clear=0x%08lX shadow_submit=0x%08lX shadow_end=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
 				(unsigned long)probe,
@@ -1597,6 +1649,10 @@ static int SpideyProbeRenderer11Bridge()
 				(unsigned long)gSpideyRenderer11UpdateTexture,
 				(unsigned long)gSpideyRenderer11AssociateTextureHandle,
 				(unsigned long)gSpideyRenderer11ResolveTextureHandle,
+				(unsigned long)gSpideyRenderer11UpdateTransientTexture,
+				(unsigned long)gSpideyRenderer11ShadowSetClear,
+				(unsigned long)gSpideyRenderer11ShadowSubmitTriangleFan,
+				(unsigned long)gSpideyRenderer11ShadowEndFrame,
 				(unsigned long)gSpideyRenderer11ReleaseTexture,
 				(unsigned long)gSpideyRenderer11ReleaseAllTextures,
 				(unsigned long)gSpideyRenderer11GetResidentTextureCount,
@@ -1614,14 +1670,14 @@ static int SpideyProbeRenderer11Bridge()
 		probe();
 
 	gSpideyRenderer11BridgeReady =
-		abi == 4 &&
+		abi == 5 &&
 		probeResult != 0;
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=4 backend=%s probe=%d phase2b_exports=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=5 backend=%s probe=%d phase2c_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
