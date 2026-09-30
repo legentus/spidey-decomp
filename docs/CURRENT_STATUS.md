@@ -1964,3 +1964,80 @@ Conclusion:
   5. source/destination rectangles and surface-loss state.
 
 Do not resume Options/audio/controller feature work until visible rendering is restored.
+
+
+## Windowed presentation probe implemented — 2026-09-30
+
+Current observed runtime:
+- pure confirmed-playable source runs;
+- audio is audible;
+- Start input works;
+- main-menu state advances;
+- visible output remains black.
+
+Retail render/present path decoded:
+- `DXPOLY_EndScene = 0x00502A40`;
+- when presentation is requested, retail calls:
+  `DXPOLY_Flip = 0x00502990`;
+- exact call site:
+  `0x00502D41`
+  with original bytes:
+  `E8 4A FC FF FF`;
+- windowed `DXPOLY_Flip` checks `gDxOptionRelated = 0x006B78F4`;
+- windowed path performs:
+  primary surface `0x006B7904`
+  `Blt(gRect, scene surface 0x006B7908, ... DDBLT_WAIT ...)`;
+- stored destination rectangle is `gRect = 0x006B5958`;
+- retail game HWND is `0x006B58D0`;
+- retail resolution globals used for diagnostics:
+  - width `0x02E096F8`
+  - height `0x02E0970C`
+  - bpp `0x02E098E4`;
+- low-graphics flag: `0x006B78F8`.
+
+Implementation commit:
+`6db8ea90d2e6ebe27aa61a5eeaccdc890674915f`
+
+Probe behavior:
+1. exact-byte guard verifies retail call site and target;
+2. replaces ONLY the direct call at `0x00502D41`;
+3. wrapper calls untouched retail `DXPOLY_Flip(0x00502990)`;
+4. before present:
+   - reads current client rect;
+   - converts it to screen coordinates;
+   - compares against stored retail `gRect`;
+   - if stale/different, refreshes `gRect` before the retail Blt;
+   - logs whether correction occurred;
+   - records scene-surface pointer, dimensions, pitch, bpp, caps, loss state;
+   - samples a 3x3 pixel grid from the scene surface and records hash/non-black count;
+5. after retail present:
+   - records primary-surface state;
+   - samples a 3x3 pixel grid over the current destination rectangle;
+6. logs frames 1..5, every 120th frame, and every frame where the destination rectangle is corrected.
+
+Output:
+`spidey-decomp-present.log`
+
+Launcher collection commit:
+`938229983c79c8d91436f54c9d07a13b90bd3ef8`
+
+Static verification passed:
+- exact call-site guard present;
+- retail flip entry itself is not patched;
+- wrapper always returns through untouched retail flip;
+- destination rectangle refresh is bounded to a real current client rectangle;
+- scene/primary samples enabled;
+- log cadence is sparse;
+- launcher clears and captures fresh presentation log.
+
+Interpretation of next run:
+- scene non-black + primary non-black => DirectDraw rendering and Blt work; investigate desktop/window composition/visibility;
+- scene non-black + primary black => final Blt/presentation failure despite no reported HRESULT;
+- scene black => rendering into offscreen scene surface is failing/being cleared;
+- `corrected=1` followed by visible output => stale window destination rectangle was the compatibility bug.
+
+Next user action:
+- update/build;
+- launch normally;
+- if still black, let it run through splash/start/menu for at least ~10 seconds;
+- send all logs, especially `spidey-decomp-present.log`.
