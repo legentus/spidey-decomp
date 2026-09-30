@@ -300,3 +300,50 @@ For the later broad-provider phase, SDL3 is the leading candidate because its ga
 - current official Windows x86 builds, which fit this 32-bit game process.
 
 Keep this as a provider choice behind the existing `spidey_input11` ABI. Gameplay, camera and UI code must not depend directly on SDL types.
+
+
+## Camera ownership RE — baseline gameplay mode identified
+
+The legacy enum name is misleading in this PC build:
+
+**`CAMERAMODE_DEMO (3)` is the baseline mode used by the ordinary Spider-Man gameplay camera presets.**
+
+Grounding from original retail machine code:
+
+- `CPlayer::SetFallingCamera @ 0x004BF5D0`
+- `CPlayer::SetSwingCamera @ 0x004BF690`
+- `CPlayer::SetFloorCamera @ 0x004BF720`
+- `CPlayer::SetWallCamera @ 0x004BF7A0`
+- `CPlayer::SetCeilingCamera @ 0x004BF820`
+
+Each routine applies its camera offset/distance preset only when the active camera's `mCameraMode` at offset `0x2A0` equals 3.
+
+This changes the initial ownership strategy:
+
+### Initial modern-camera ownership candidate
+
+- mode 3 / `DEMO`: modern ordinary-gameplay candidate;
+- all other modes: retail-owned by default until classified by runtime telemetry/RE.
+
+Do not infer ownership from enum names alone.
+
+### Forced recenter
+
+`CPlayer::PutCameraBehind @ 0x004C64A0` is confirmed as a real forced-recenter path:
+- normal player flow computes player heading then calls `CCamera::SetCamAngle`;
+- oriented/crawl flow derives heading from surface orientation;
+- mode-3-specific logic also adjusts vertical distance in certain player states.
+
+The modern camera prototype should gate this path only while modern mode-3 gameplay ownership is active, not globally.
+
+### Passive ownership telemetry
+
+The proxy now creates `spidey-decomp-camera.log`, containing:
+- camera pointer;
+- current and pushed mode;
+- heading values;
+- camera/focus positions;
+- distance/zoom/collision values;
+- modern right-stick intent beside retail camera state.
+
+This is the runtime evidence source for classifying every other camera mode before Stage A or Stage B camera control is enabled.
