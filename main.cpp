@@ -1440,9 +1440,33 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		option4,
 		option5);
 
+	gSpideyFrontendLegacyMode =
+		frontendLegacy ? 1 : 0;
+
+	gSpideyLegacyPhysicalWidth =
+		(unsigned long)*(DWORD*)0x006B78E4;
+	gSpideyLegacyPhysicalHeight =
+		(unsigned long)*(DWORD*)0x006B78E8;
+
+	if (!gSpideyLegacyPhysicalWidth ||
+		!gSpideyLegacyPhysicalHeight)
+	{
+		gSpideyLegacyPhysicalWidth =
+			(unsigned long)width;
+		gSpideyLegacyPhysicalHeight =
+			(unsigned long)height;
+	}
+
 	SpideyInjectModernVideoModes();
 	SpideyKeepBorderlessMonitorWindow(
 		*(HWND*)0x006B58D0);
+
+	SpideyRefreshModernLogicalResolution();
+	SpideyApplyLogicalRenderResolution(
+		!gSpideyFrontendLegacyMode,
+		gSpideyFrontendLegacyMode ?
+			"display_options_frontend" :
+			"display_options_gameplay");
 
 	// Display-option changes can destroy/recreate the retail D3D7 device.
 	// Re-validate the live device slot and install the pass-through draw
