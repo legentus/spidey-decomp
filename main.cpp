@@ -11011,7 +11011,9 @@ static LONG CALLBACK SpideyVectoredExceptionHandler(EXCEPTION_POINTERS* info)
         exceptionCode != 0xC00000FD)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    FILE* f = fopen("spidey-decomp-crash.log", "w");
+    FILE* f =
+        SpideyOpenConsolidatedLog(
+            "CRASH");
     if (!f)
         return EXCEPTION_CONTINUE_SEARCH;
 
