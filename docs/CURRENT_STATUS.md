@@ -6118,3 +6118,61 @@ Before requesting runtime testing:
 3. run one more source/log-format sanity audit.
 
 Do not regress the confirmed post-level mouse fix.
+
+
+### Final frontend/settings batch before runtime test — 2026-10-01
+
+Additional commits after the architecture checkpoint:
+- `e04f9b9e2d677152ebcb0b8448c4c4afde9a3a59` — live-audio rollback safety + pre-retail exclusive-release hardening;
+- `c296af57c6af30c64f2db3f0941b0c68f485ea24` — persisted WindowMode is loaded before early DirectX bootstrap; old forced-borderless startup call removed;
+- `85e45c41841093d4e489eb5dda12d4b107cb8ee9` — separately drawn Stereo/Mono value is shifted with the six-row Audio layout.
+
+Audio screenshot follow-up:
+- retail Stereo/Mono value is a standalone `Mess_DrawText` call at `0x00497A1B -> Mess_DrawText @ 0x00458700`;
+- original Y is 149, matching the original Stereo menu row around Y=150;
+- it is now wrapped and shifted by the same 20 units as the CMenu rows, all three slider graphics, and slider mouse hit regions.
+
+Audio layout therefore has one consistent authored shift:
+- CMenu rows: -20;
+- three DrawSlider calls: -20;
+- slider mouse logic: -20;
+- standalone Stereo/Mono value: -20.
+
+Live audio failure safety:
+- a temporary AddRef keeps the previous working DirectSound object available across retail shutdown;
+- if selected endpoint creation and System Default fallback both fail, the prior DirectSound object and prior selected-device index are restored;
+- Bink stale-pointer retention/rebind remains independent and is still released only at a safe no-active-Bink point.
+
+Display/window startup:
+- `SpideyRestoreSavedRenderResolution` now explicitly loads `AspectMode` and `WindowMode` before early renderer startup;
+- the previous unconditional `SpideyKeepBorderlessMonitorWindow(hwnd)` early-start call is gone;
+- early startup applies the persisted selected WindowMode instead.
+
+Window-mode transitions:
+- leaving Fullscreen Exclusive calls DXGI `SetFullscreenState(FALSE)` before retail rebuilds the hidden graphics producer / before normal Win32 styles are applied;
+- entering Fullscreen Exclusive establishes the popup window first, then DXGI takes exclusive ownership and applies the selected target mode;
+- DX11 release always exits exclusive before swap-chain destruction.
+
+Static final audit:
+- current `main.cpp` brace count balanced;
+- renderer main/header ABI both 8;
+- `SpideyRenderer11_SetFullscreenState` declared, implemented, resolved, and required;
+- Display menu has 5 rows and Apply checks row 4;
+- WindowMode has all three labels and INI persistence;
+- Audio has exact hooks for all three slider draws, slider hit logic, and Stereo/Mono value;
+- no startup call remains that unconditionally forces Borderless;
+- confirmed-good post-level mouse fix remains installed.
+
+The next runtime test should validate this batch before resuming the still-open FPS priorities:
+1. Audio text/sliders/stereo/output vertical alignment;
+2. Output Device switches live without game restart and without Bink/stereo crash;
+3. Stereo -> Mono -> Stereo stability;
+4. frontend/settings are rendered and hit-tested on the selected logical resolution rather than a 640x480 frontend layout;
+5. Display Mode cycles Fullscreen Exclusive / Borderless / Windowed and Apply changes modes correctly;
+6. post-level mouse alignment remains fixed.
+
+After this batch is validated, resume:
+- true Hor+ visual validation / remaining 2D layout work if needed;
+- gameplay Logic Hz vs Present Hz collection;
+- fixed-step/interpolation game-speed correction;
+- uncapped main-menu rendering with shell logic cadence preserved.
