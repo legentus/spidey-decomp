@@ -2231,6 +2231,142 @@ typedef u8 (__cdecl *SpideyRetailShellCheckTriggersFn)(
 		i32,
 		i32);
 
+static void SpideyCompactAudioDeviceName(
+		const char* source,
+		char* destination,
+		int destinationSize)
+{
+	if (!destination ||
+		destinationSize <= 0)
+	{
+		return;
+	}
+
+	destination[0] =
+		0;
+
+	if (!source ||
+		!source[0])
+	{
+		source =
+			"System Default";
+	}
+
+	char normalized[96];
+	normalized[0] =
+		0;
+
+	const char* inner =
+		source;
+	int sourceLength =
+		(int)strlen(source);
+
+	if (sourceLength > 10 &&
+		!strncmp(
+			source,
+			"Speakers (",
+			10) &&
+		source[sourceLength - 1] == ')')
+	{
+		int innerLength =
+			sourceLength - 11;
+		if (innerLength >
+			(int)sizeof(normalized) - 1)
+		{
+			innerLength =
+				(int)sizeof(normalized) - 1;
+		}
+
+		memcpy(
+			normalized,
+			source + 10,
+			innerLength);
+		normalized[innerLength] =
+			0;
+		inner =
+			normalized;
+	}
+	else if (sourceLength > 18 &&
+			 !strncmp(
+				source,
+				"Virtual Speakers (",
+				18) &&
+			 source[sourceLength - 1] == ')')
+	{
+		int innerLength =
+			sourceLength - 19;
+		if (innerLength >
+			(int)sizeof(normalized) - 1)
+		{
+			innerLength =
+				(int)sizeof(normalized) - 1;
+		}
+
+		memcpy(
+			normalized,
+			source + 18,
+			innerLength);
+		normalized[innerLength] =
+			0;
+		inner =
+			normalized;
+	}
+
+	const int maxVisible =
+		20;
+	const int innerLength =
+		(int)strlen(inner);
+
+	if (innerLength <= maxVisible)
+	{
+		strncpy(
+			destination,
+			inner,
+			destinationSize - 1);
+		destination[destinationSize - 1] =
+			0;
+		return;
+	}
+
+	const int headLength =
+		10;
+	const int tailLength =
+		7;
+
+	if (destinationSize <
+		headLength +
+		3 +
+		tailLength +
+		1)
+	{
+		strncpy(
+			destination,
+			inner,
+			destinationSize - 1);
+		destination[destinationSize - 1] =
+			0;
+		return;
+	}
+
+	memcpy(
+		destination,
+		inner,
+		headLength);
+	memcpy(
+		destination + headLength,
+		"...",
+		3);
+	memcpy(
+		destination + headLength + 3,
+		inner + innerLength - tailLength,
+		tailLength);
+	destination[
+		headLength +
+		3 +
+		tailLength] =
+		0;
+}
+
 static void SpideyUpdateAudioOutputMenuLabel()
 {
 	const SpideyAudioDeviceInfo* selected =
@@ -2240,10 +2376,16 @@ static void SpideyUpdateAudioOutputMenuLabel()
 			selected->name :
 			"(System Default)";
 
+	char compactName[48];
+	SpideyCompactAudioDeviceName(
+		name,
+		compactName,
+		sizeof(compactName));
+
 	sprintf(
 		gSpideyAudioOutputMenuLabel,
-		"Output: %.42s",
-		name);
+		"Output: %s",
+		compactName);
 }
 
 static int SpideyCreateSelectedDirectSound(
@@ -2422,6 +2564,17 @@ static void __fastcall SpideyAudioAddOutputDevice(
 		menu,
 		0,
 		gSpideyAudioOutputMenuLabel);
+
+	// Retail authored this screen for five rows at y=90 with a 20-unit
+	// line separation. The sixth row would otherwise sit one row lower than
+	// the original visual composition. Pull the complete menu up by one row
+	// so all six entries remain inside the same authored vertical footprint.
+	if (menu &&
+		menu->mNumLines >= 6)
+	{
+		menu->mY -=
+			menu->mLineSep;
+	}
 }
 
 static void __fastcall SpideyAudioMenuUpdate(
@@ -2489,11 +2642,77 @@ static void __fastcall SpideyAudioMenuUpdate(
 		return;
 	}
 
-	SpideyRestartDirectSoundForShell(
-		next,
-		delta > 0 ?
-			"audio_menu_next" :
-			"audio_menu_prev");
+	gSpideySelectedAudioDevice =
+		next;
+	SpideySaveAudioSettings();
+	SpideyUpdateAudioOutputMenuLabel();
+
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		const SpideyAudioDeviceInfo* selected =
+			SpideyGetSelectedAudioDevice();
+		fprintf(
+			f,
+			"audio_select reason=%s selected_index=%d name=%s apply=next_audio_init runtime_directsound=0x%08lX bink_inited=%u bink_handle=0x%08lX\n",
+			delta > 0 ?
+				"audio_menu_next" :
+				"audio_menu_prev",
+			gSpideySelectedAudioDevice,
+			selected ?
+				selected->name :
+				"(System Default)",
+			(unsigned long)*(LPDIRECTSOUND8*)0x006B7920,
+			(unsigned int)*(unsigned char*)0x00AC0BA0,
+			(unsigned long)*(void**)0x00AC0BA4);
+		fclose(f);
+	}
+}
+
+typedef void (__cdecl *SpideyRetailSetBootSoundModeFn)(
+		bool);
+
+static void __cdecl SpideyAudioSetStereoModeCompat(
+		bool stereo)
+{
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_mode_change phase=before requested_stereo=%d boot_mode=%u runtime_directsound=0x%08lX bink_inited=%u bink_handle=0x%08lX\n",
+			stereo ? 1 : 0,
+			(unsigned int)*(unsigned char*)0x0061919D,
+			(unsigned long)*(LPDIRECTSOUND8*)0x006B7920,
+			(unsigned int)*(unsigned char*)0x00AC0BA0,
+			(unsigned long)*(void**)0x00AC0BA4);
+		fclose(f);
+	}
+
+	SpideyRetailSetBootSoundModeFn retail =
+		(SpideyRetailSetBootSoundModeFn)0x00472AA0;
+	retail(
+		stereo);
+
+	f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_mode_change phase=after requested_stereo=%d boot_mode=%u runtime_directsound=0x%08lX bink_inited=%u bink_handle=0x%08lX\n",
+			stereo ? 1 : 0,
+			(unsigned int)*(unsigned char*)0x0061919D,
+			(unsigned long)*(LPDIRECTSOUND8*)0x006B7920,
+			(unsigned int)*(unsigned char*)0x00AC0BA0,
+			(unsigned long)*(void**)0x00AC0BA4);
+		fclose(f);
+	}
 }
 
 static void SpideyInstallAudioMenuCompat()
@@ -2512,6 +2731,13 @@ static void SpideyInstallAudioMenuCompat()
 			(void*)&SpideyAudioMenuUpdate,
 			"audio_output_update");
 
+	const int stereoModeInstalled =
+		SpideyPatchDirectCall(
+			0x00497DD5,
+			0x00472AA0,
+			(void*)&SpideyAudioSetStereoModeCompat,
+			"audio_stereo_mode_telemetry");
+
 	FILE* f = fopen(
 		"spidey-decomp-audio.log",
 		"a");
@@ -2519,9 +2745,10 @@ static void SpideyInstallAudioMenuCompat()
 	{
 		fprintf(
 			f,
-			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d controls=retail_left_right live_restart=shell_only\n",
+			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d stereo_telemetry=%d controls=retail_left_right device_apply=next_audio_init recenter_rows=1 compact_label=1\n",
 			addEntryInstalled,
-			updateInstalled);
+			updateInstalled,
+			stereoModeInstalled);
 		fclose(f);
 	}
 }
