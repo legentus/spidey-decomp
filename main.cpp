@@ -5908,13 +5908,13 @@ static void SpideyInstallGameplayUiScaleCompat()
 	};
 	int panelQPolyCalls =
 		0;
-	for (int i = 0;
-		 i < (int)(sizeof(panelQPolySites) / sizeof(panelQPolySites[0]));
-		 ++i)
+	for (int qpolyIndex = 0;
+		 qpolyIndex < (int)(sizeof(panelQPolySites) / sizeof(panelQPolySites[0]));
+		 ++qpolyIndex)
 	{
 		panelQPolyCalls +=
 			SpideyPatchDirectCall(
-				panelQPolySites[i],
+				panelQPolySites[qpolyIndex],
 				0x00507910,
 				(void*)&SpideyCompatHealthBarQPoly2D,
 				"panel_fill_qpoly");
@@ -5928,13 +5928,13 @@ static void SpideyInstallGameplayUiScaleCompat()
 	};
 	int panelGouraudCalls =
 		0;
-	for (int i = 0;
-		 i < (int)(sizeof(panelGouraudSites) / sizeof(panelGouraudSites[0]));
-		 ++i)
+	for (int gouraudIndex = 0;
+		 gouraudIndex < (int)(sizeof(panelGouraudSites) / sizeof(panelGouraudSites[0]));
+		 ++gouraudIndex)
 	{
 		panelGouraudCalls +=
 			SpideyPatchDirectCall(
-				panelGouraudSites[i],
+				panelGouraudSites[gouraudIndex],
 				0x00462FB0,
 				(void*)&SpideyCompatPanelGouraudPoly,
 				"panel_fill_gouraud");
@@ -5948,13 +5948,13 @@ static void SpideyInstallGameplayUiScaleCompat()
 	};
 	int panelFlatCalls =
 		0;
-	for (int i = 0;
-		 i < (int)(sizeof(panelFlatSites) / sizeof(panelFlatSites[0]));
-		 ++i)
+	for (int flatIndex = 0;
+		 flatIndex < (int)(sizeof(panelFlatSites) / sizeof(panelFlatSites[0]));
+		 ++flatIndex)
 	{
 		panelFlatCalls +=
 			SpideyPatchDirectCall(
-				panelFlatSites[i],
+				panelFlatSites[flatIndex],
 				0x00462D60,
 				(void*)&SpideyCompatHealthBarFlatPoly,
 				"panel_fill_flat");
