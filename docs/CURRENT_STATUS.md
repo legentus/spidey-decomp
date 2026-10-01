@@ -5735,3 +5735,28 @@ Active priorities, in order:
    - This must be designed together with priority 3 so removing the menu cap does not accelerate shell logic.
 
 Immediate work resumes at priority 1. Do not ask for a new runtime test until a meaningful widescreen implementation batch is ready.
+
+
+### Hor+ RE: projection scalar and object culling use different FOV inputs — 2026-09-30
+
+Retail control flow is now grounded end-to-end:
+
+- `M3d_RenderSetup @ 0x00472DC0` constructs fixed-point clip/culling vectors in `0x0065CEB8..0x0065CF06`.
+- It rotates three vectors from the second set through the live camera rotation and stores the resulting 3x3 basis at `0x00628620`.
+- `M3d_Render @ 0x004739A0` immediately copies that 3x3 basis into `0x00610B60` via `sub_46D810`.
+- The same render entry writes the camera position to `0x00610BF0/F4/F8` via `sub_46E250`.
+- It then calls `M3dAsm_BoundingSpherePreprocessing @ 0x0046FAD0`, which consumes that basis/position and marks objects outside the camera-space planes as non-rendered.
+
+Crucial ordering/result:
+- the culling-vector construction occurs around `0x00472FC8..0x004731C6`;
+- the selected widescreen scalar `0x00550064` is not read until later at `0x00473504`, during the floating-point projection-matrix path;
+- therefore the current aspect scalar can change projected horizontal FOV without automatically widening the object-culling side planes.
+
+This is a real architectural mismatch for Hor+: projection and visibility currently derive horizontal FOV from different inputs. The final widescreen implementation must keep the side culling planes synchronized with the selected aspect while preserving the vertical planes/FOV.
+
+Additional exact helper semantics recovered:
+- `sub_46D810(source)` copies an 18-byte / 3x3 signed-short matrix to `0x00610B60`.
+- `sub_46E250(x,y,z)` writes the three camera-position globals at `0x00610BF0/F4/F8`.
+- `M3d_Render` calls both immediately before `M3dAsm_BoundingSpherePreprocessing`.
+
+Do not patch the culler with arbitrary multipliers yet. Next derive which of the three source normals in `0x0065CED0..` are horizontal vs vertical and how their slope is calculated from the viewport/Zoom terms, then apply the selected aspect at the vector-construction stage so projection and culling remain mathematically matched.
