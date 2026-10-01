@@ -6176,3 +6176,27 @@ After this batch is validated, resume:
 - gameplay Logic Hz vs Present Hz collection;
 - fixed-step/interpolation game-speed correction;
 - uncapped main-menu rendering with shell logic cadence preserved.
+
+
+## Exclusive fullscreen runtime crash — 2026-10-01
+
+Fresh combined runtime test of the frontend/audio/display batch reached the new Fullscreen Exclusive path and then failed immediately after DXGI took exclusive ownership.
+
+### Grounded runtime evidence
+
+- Borderless and Windowed transitions completed before the failure.
+- The final renderer event is:
+  - `fullscreen_state exclusive=1 width=1920 height=1440 hr=0x00000000`
+- The main bridge simultaneously reports:
+  - `renderer11_window_mode reason=display_options_enter_exclusive mode=0 label=Fullscreen Exclusive exclusive=1 selected=1920x1440 result=1`
+- Immediately after the mode switch, retail D3D7 reports `0x887601C2` at:
+  - `DXPoly.cpp:785` / retail call site `0x00502912`
+  - `DXinit.cpp:1105` / retail call site `0x004FD986`
+- Project DirectDraw headers define `0x887601C2` as `DDERR_SURFACELOST`: the DirectDraw surface is gone and must be restored.
+
+### Current diagnosis
+
+This is not a DXGI capability failure: `SetFullscreenState(TRUE)` succeeded. The exclusive display-mode switch invalidates the still-live hidden retail DirectDraw/D3D7 producer surfaces. Retail then continues submitting against those lost surfaces and reaches its fatal D3D error path.
+
+Do not remove Fullscreen Exclusive or reinterpret it as borderless. Fix the DXGI/D3D7 ownership boundary: either restore/rebuild the hidden producer after the DXGI mode switch if that coexistence is valid, or avoid executing obsolete D3D7 main-target work while true exclusive is active and the DX11 shadow renderer is authoritative. Preserve the confirmed background-distortion and post-level mouse fixes.
+
