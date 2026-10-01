@@ -1,3 +1,100 @@
+# DX11-AUTHORITATIVE FRONTIER — READ THIS FIRST (2026-10-01)
+
+**Current dev HEAD before this handoff refresh:** `2ab250f717003584cc1fed17a32225692e2c6db6`
+
+The user explicitly chose to stop treating D3D7 as the main renderer after the first true Fullscreen Exclusive test exposed the DXGI/D3D7 ownership conflict. The project is now in a deliberate renderer-replacement phase.
+
+## Current architecture
+
+After the first complete replayable DX11 frame:
+
+- DX11/DXGI own the visible main frame in Windowed, Borderless and Fullscreen Exclusive.
+- main-scene D3D7 `BeginScene/EndScene`, clear, fixed-function state forwarding, accepted main draws, main-surface Blt and retail Flip are no longer required for the visible frame.
+- D3D7 remains temporarily only for still-unported offscreen/resource compatibility paths.
+- a real D3D7 fallback scene opens lazily only if an unsupported/offscreen path genuinely needs it.
+- true Exclusive is deferred until the first authoritative DX11 frame, preventing startup from invalidating DirectDraw surfaces before the bypass is active.
+- old F9/F10 D3D7 reference/debug toggles are retired.
+
+## Commits that define this frontier
+
+- `df5cf4bbbfc00ca340b750325a747780202866ac` — renderer: make DX11 authoritative for main scene
+- `566aec873acf194c21e1ca609b52ae3b51732c8c` — renderer: defer exclusive until DX11 frame is authoritative
+- `f194ca2a924644dd94225235de6988f5cf96e4bb` — renderer: stop forwarding main-scene state to D3D7
+- `0b3c6cce0b9e1715296557a47172740b9cd8881e` — renderer: retire D3D7 reference toggles
+- `2ab250f717003584cc1fed17a32225692e2c6db6` — docs: checkpoint DX11-authoritative renderer pivot
+
+The triggering failure and exact evidence are documented in `docs/CURRENT_STATUS.md`.
+
+## Why this was safe enough to promote from preview
+
+The last runtime immediately before the Exclusive crash showed complete main-frame capture at the sampled frontier:
+
+- frame 2400: 121/121 draws submitted to DX11, `shadow_skip=0`, `missing=0`
+- frame 2640: 104/104 submitted, including 2D + 3D, no missing/offscreen fallback
+- frame 2760: 134/134 submitted, `shadow_skip=0`, `missing=0`
+
+DXGI itself successfully entered exclusive. The crash came afterward because legacy DirectDraw/D3D7 surfaces became `DDERR_SURFACELOST`. The migration therefore removes the visible frame's dependency on those surfaces rather than trying to keep two display owners synchronized.
+
+## NEXT ACTION — do not blindly extend before this runtime validation
+
+Have the user run the normal:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Test one focused renderer pass:
+
+1. boot normally and confirm frontend appears;
+2. Apply Borderless;
+3. Apply Windowed;
+4. Apply Fullscreen Exclusive and remain there while navigating menus;
+5. enter gameplay for at least roughly one minute;
+6. relaunch while Exclusive is persisted to test deferred-exclusive startup;
+7. switch Exclusive -> Windowed -> Exclusive once;
+8. if practical, return from gameplay and verify the already-fixed post-level mouse alignment.
+
+Do **not** use F9/F10; those reference toggles are intentionally retired.
+
+Request the fresh session logs, especially:
+
+- `spidey-decomp-draw.log`
+- `spidey-decomp-present.log`
+- `spidey-decomp-compat.log`
+- `spidey-renderer11.log`
+- any `spidey-decomp-dxerror*.log` / crash log
+
+Success signals:
+
+- `dx11_authoritative=1`
+- main `d3d7_suppressed > 0`
+- `missing=0`
+- `shadow_skip=0`
+- `d3d7_fallback=0`
+- `fallback_scene_begins=0`
+- DX11 shadow presentation active and retail Flip inactive after warmup
+- Exclusive log entered after `dx11_authoritative_ready`
+- no `DDERR_SURFACELOST`
+
+## After this passes
+
+Continue renderer removal in this order:
+
+1. direct DX11 texture ownership/source upload instead of D3D7-surface mirroring as source of truth;
+2. DX11-native transient/offscreen render targets and copies;
+3. drive all legacy fallback counters to zero;
+4. remove DirectDraw display ownership;
+5. finally remove the real D3D7 device/init once resource/object identity dependencies are gone.
+
+## Mandatory workflow
+
+- Live-update `docs/CURRENT_STATUS.md` while working.
+- Make small meaningful `dev` commits every few minutes / at each grounded milestone.
+- Repo/status outrank chat transcript on recovery.
+- On an interruption, inspect live `dev` + `CURRENT_STATUS.md`, identify surviving commits, reconstruct only the unsaved tail, checkpoint immediately.
+- Preserve confirmed regression guards: moving-background warp fix and post-level mouse alignment fix.
+- Prefer a few meaningful runtime tests, not speculative build spam.
+
+---
+
 # Spider-Man 2000 PC Modernization — New Chat Handoff
 
 **Date:** 2026-10-01  
