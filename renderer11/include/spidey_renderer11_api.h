@@ -67,6 +67,10 @@ __declspec(dllexport) int __cdecl SpideyRenderer11_Initialize(
 __declspec(dllexport) int __cdecl SpideyRenderer11_Resize(
     unsigned long width,
     unsigned long height);
+__declspec(dllexport) int __cdecl SpideyRenderer11_SetFullscreenState(
+    int exclusive,
+    unsigned long width,
+    unsigned long height);
 __declspec(dllexport) void __cdecl SpideyRenderer11_BeginFrame(
     float r,
     float g,
