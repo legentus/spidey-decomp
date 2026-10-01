@@ -4024,9 +4024,7 @@ static int SpideyGetResolutionAwareTextScale(
 	if (requestedScale <= 0)
 		return requestedScale;
 
-	if (!(gSpideyFrontendUiActive ||
-		  gSpideyFrontendLegacyMode) ||
-		!gSpideyShadowPreviewEnabled ||
+	if (!gSpideyShadowPreviewEnabled ||
 		gSpideyModernLogicalHeight <= 480)
 	{
 		return requestedScale;
@@ -4089,7 +4087,7 @@ static void SpideyApplyFrontendTextScale(
 		{
 			fprintf(
 				log,
-				"frontend_text_scale reason=%s requested=%d effective=%d frontend=%d logical=%lux%lu reference_height=480\n",
+				"ui_text_scale reason=%s requested=%d effective=%d frontend=%d logical=%lux%lu reference_height=480 scope=frontend_gameplay_pause\n",
 				reason ? reason : "unknown",
 				gSpideyRequestedFrontendTextScale,
 				effective,
@@ -4136,7 +4134,7 @@ static void SpideyInstallFrontendTextScaleCompat()
 	{
 		fprintf(
 			log,
-			"frontend_text_scale_install retail=0x00458620 wrapper=0x%08lX baseline=640x480 mode=resolution_aware\n",
+			"ui_text_scale_install retail=0x00458620 wrapper=0x%08lX baseline=640x480 mode=resolution_aware scope=frontend_gameplay_pause\n",
 			(unsigned long)&SpideyCompatMessSetScale);
 		fclose(log);
 	}
@@ -4294,9 +4292,10 @@ static void SpideySetFrontendUiActive(
 	}
 	else
 	{
-		// Restore the retail-requested scale immediately as the shell shuts
-		// down. The gameplay display transition can then choose its own
-		// logical canvas without inheriting frontend typography.
+		// Gameplay, pause menus, mission text and HUD text use the same
+		// modern-resolution typography policy as the frontend. Re-evaluate
+		// the last retail-requested scale here instead of restoring the
+		// original 640x480-sized glyph scale.
 		SpideyApplyFrontendTextScale(
 			reason ?
 				reason :
