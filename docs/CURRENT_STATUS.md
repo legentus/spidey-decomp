@@ -5609,3 +5609,23 @@ Priority 1 remains true Hor+ widescreen, but the implementation should now be sp
 5. trace the old-view culling/frustum boundary separately so widened projection does not reveal late-appearing edge geometry.
 
 Do not request a runtime test yet. Continue static classification and implementation until the 3D-vs-2D boundary is explicit enough for a meaningful widescreen build.
+
+
+### Rejected 2D classifier — depth/RHW relation is shared by projected 3D — 2026-10-01
+
+A tempting classifier was investigated from the decompiled `PCGfx_DrawQuad2D` path.
+
+That routine constructs transformed vertices with:
+- `z = (depth - 10) / 8038`
+- `rhw = 276 / depth`
+
+Several obvious frontend/HUD samples in the captured D3D7 stream satisfy that relationship closely.
+
+However, cross-checking the broader captured stream found ordinary world-geometry samples that satisfy the same relationship as well. This is therefore a generic transformed-projection characteristic in this renderer, **not** a unique marker for 2D.
+
+Decision:
+- do **not** classify HUD/frontend draws from `z`/`rhw`, depth bands, screen bounds, or similar numeric heuristics;
+- do **not** bake a guessed draw-stream classifier into the DX11 bridge;
+- derive the 2D/3D split from higher-level call provenance or an exact retail 2D submission hook instead.
+
+This dead end is recorded so a later recovery does not rediscover and accidentally ship the same unsafe heuristic.
