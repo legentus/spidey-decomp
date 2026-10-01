@@ -1,3 +1,30 @@
+# STARTUP-CRASH FIX FRONTIER — READ FIRST (2026-10-01)
+
+The first DX11-authoritative runtime at revision `5411665738851098256555b12c3b3ac048b12cfa` crashed during the first splash movie.
+
+Root cause is now grounded and fixed:
+- renderer helper falsely reported an empty frame as ready;
+- proxy immediately entered DXGI Exclusive on frame 1;
+- no shadow SRV existed, so DX11 presentation was rejected;
+- startup Bink still depended on DirectDraw movie/scene surfaces, which were lost by the premature Exclusive takeover.
+
+Fix chain:
+- `3f3d8fd6e6e8bf88a6cc596c0e8a20835277ba6b` — complete non-empty DX11 frame required for takeover.
+- `a4e005885f0eb1780b3366a990e20ffc8db3fcc2` — Bink/movie surfaces block takeover; movie frame releases Exclusive before retail DirectDraw work.
+- `ac275ef13e289e687eb3093c424d9d5ccfbd9e76` — restore retail primary/scene surfaces after Exclusive release.
+
+**NEXT ACTION:** user should run the normal `UPDATE_AND_TEST_LATEST_BUILD.bat` and first verify only that the game boots through the splash movies to the menu. If it does, continue the wider Windowed/Borderless/Exclusive test. Request fresh present/renderer11/draw/compat/dxerror logs.
+
+Expected first-frame evidence:
+- empty frame -> `presentable=0`
+- Exclusive remains deferred
+- movie gate reports `movie_blocks=1` while Bink is active
+- after movie ends, a complete non-empty DX11 frame becomes `presentable=1` and may acquire Exclusive.
+
+Do not undo the DX11-authoritative pivot. PCMovie/Bink is explicitly recognized as a remaining legacy producer until its surface path is migrated to DX11.
+
+---
+
 # DX11-AUTHORITATIVE FRONTIER — READ THIS FIRST (2026-10-01)
 
 **Current dev HEAD before this handoff refresh:** `2ab250f717003584cc1fed17a32225692e2c6db6`
