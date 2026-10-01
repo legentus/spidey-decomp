@@ -269,6 +269,8 @@ namespace
         ReleaseBlitPipeline();
         ReleaseShadowPipeline();
         ReleaseAllGameTexturesInternal();
+        if (gSwapChain)
+            gSwapChain->SetFullscreenState(FALSE, nullptr);
         SafeRelease(gSwapChain);
         SafeRelease(gContext);
         SafeRelease(gDevice);
@@ -1588,6 +1590,47 @@ void __cdecl SpideyRenderer11_BeginFrame(
             1.0f,
             0);
     }
+}
+
+extern "C" __declspec(dllexport)
+int __cdecl SpideyRenderer11_SetFullscreenState(
+    int exclusive,
+    unsigned long width,
+    unsigned long height)
+{
+    if (!gSwapChain)
+        return 0;
+
+    HRESULT hr = S_OK;
+
+    if (exclusive)
+    {
+        DXGI_MODE_DESC mode = {};
+        mode.Width = width ? width : gWidth;
+        mode.Height = height ? height : gHeight;
+        mode.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        mode.RefreshRate.Numerator = 0;
+        mode.RefreshRate.Denominator = 0;
+        mode.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
+        mode.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+
+        hr = gSwapChain->ResizeTarget(&mode);
+        if (SUCCEEDED(hr))
+            hr = gSwapChain->SetFullscreenState(TRUE, nullptr);
+    }
+    else
+    {
+        hr = gSwapChain->SetFullscreenState(FALSE, nullptr);
+    }
+
+    Log(
+        "fullscreen_state exclusive=%d width=%lu height=%lu hr=0x%08lX",
+        exclusive ? 1 : 0,
+        width,
+        height,
+        static_cast<unsigned long>(hr));
+
+    return SUCCEEDED(hr) ? 1 : 0;
 }
 
 extern "C" __declspec(dllexport)
