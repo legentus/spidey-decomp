@@ -3504,46 +3504,199 @@ typedef void (__cdecl *SpideyRetailGetMousePositionFn)(
 		i32*,
 		i32*);
 
+static int SpideyGetFrontendMouseDomains(
+		int* pClientWidth,
+		int* pClientHeight,
+		int* pLogicalWidth,
+		int* pLogicalHeight)
+{
+	int clientWidth =
+		0;
+	int clientHeight =
+		0;
+
+	HWND hwnd =
+		*(HWND*)0x006B58D0;
+
+	if (hwnd)
+	{
+		RECT client;
+		if (GetClientRect(
+				hwnd,
+				&client))
+		{
+			clientWidth =
+				client.right -
+				client.left;
+			clientHeight =
+				client.bottom -
+				client.top;
+		}
+	}
+
+	if (clientWidth < 64 ||
+		clientHeight < 64)
+	{
+		clientWidth =
+			(int)gSpideySelectedOutputWidth;
+		clientHeight =
+			(int)gSpideySelectedOutputHeight;
+	}
+
+	if (clientWidth < 64 ||
+		clientHeight < 64)
+	{
+		clientWidth =
+			(int)gSpideyLegacyPhysicalWidth;
+		clientHeight =
+			(int)gSpideyLegacyPhysicalHeight;
+	}
+
+	int logicalWidth =
+		gSpideyModernLogicalWidth >= 64 ?
+			(int)gSpideyModernLogicalWidth :
+			clientWidth;
+	int logicalHeight =
+		gSpideyModernLogicalHeight >= 64 ?
+			(int)gSpideyModernLogicalHeight :
+			clientHeight;
+
+	if (clientWidth < 64 ||
+		clientHeight < 64 ||
+		logicalWidth < 64 ||
+		logicalHeight < 64)
+	{
+		return 0;
+	}
+
+	if (pClientWidth)
+		*pClientWidth =
+			clientWidth;
+	if (pClientHeight)
+		*pClientHeight =
+			clientHeight;
+	if (pLogicalWidth)
+		*pLogicalWidth =
+			logicalWidth;
+	if (pLogicalHeight)
+		*pLogicalHeight =
+			logicalHeight;
+
+	return 1;
+}
+
+// @Ok
+static void SpideyMapFrontendMouseToLogical(
+		i32 rawX,
+		i32 rawY,
+		i32* pLogicalX,
+		i32* pLogicalY)
+{
+	int clientWidth =
+		0;
+	int clientHeight =
+		0;
+	int logicalWidth =
+		0;
+	int logicalHeight =
+		0;
+
+	if (!SpideyGetFrontendMouseDomains(
+			&clientWidth,
+			&clientHeight,
+			&logicalWidth,
+			&logicalHeight))
+	{
+		if (pLogicalX)
+			*pLogicalX =
+				rawX;
+		if (pLogicalY)
+			*pLogicalY =
+				rawY;
+		return;
+	}
+
+	// gMouseX/Y are relative-motion virtual cursor coordinates, not an OS
+	// absolute cursor. Let them use the entire live client domain, then map
+	// that domain onto the logical frontend canvas. The visible shell cursor
+	// and all hit tests therefore share one transformation while no longer
+	// inheriting the smaller logical-height clamp.
+	if (pLogicalX)
+	{
+		*pLogicalX =
+			(i32)(
+				((long)rawX *
+				 (long)logicalWidth) /
+				(long)clientWidth);
+	}
+	if (pLogicalY)
+	{
+		*pLogicalY =
+			(i32)(
+				((long)rawY *
+				 (long)logicalHeight) /
+				(long)clientHeight);
+	}
+}
+
+// @Ok
+static void __cdecl SpideyCompatGetMousePosition(
+		i32* pX,
+		i32* pY)
+{
+	SpideyMapFrontendMouseToLogical(
+		*(i32*)0x00AC0900,
+		*(i32*)0x00AC0904,
+		pX,
+		pY);
+}
+
 static void SpideySyncFrontendMouseBounds(
 		const char* reason)
 {
 	if (!gSpideyFrontendLegacyMode)
 		return;
 
-	unsigned long width =
-		gSpideyModernLogicalWidth >= 64 ?
-			gSpideyModernLogicalWidth :
-			gSpideyLegacyPhysicalWidth;
-	unsigned long height =
-		gSpideyModernLogicalHeight >= 64 ?
-			gSpideyModernLogicalHeight :
-			gSpideyLegacyPhysicalHeight;
+	int clientWidth =
+		0;
+	int clientHeight =
+		0;
+	int logicalWidth =
+		0;
+	int logicalHeight =
+		0;
 
-	if (width < 64 || height < 64)
+	if (!SpideyGetFrontendMouseDomains(
+			&clientWidth,
+			&clientHeight,
+			&logicalWidth,
+			&logicalHeight))
+	{
 		return;
+	}
 
 	i32 maxX =
-		(i32)width - 32;
+		clientWidth - 32;
 	i32 maxY =
-		(i32)height - 32;
+		clientHeight - 32;
 
 	if (maxX < 0)
 		maxX = 0;
 	if (maxY < 0)
 		maxY = 0;
 
-	SpideyRetailGetMousePositionFn retailGetPosition =
-		(SpideyRetailGetMousePositionFn)0x0050A750;
 	SpideyRetailSetMouseBoundsFn retailSetBounds =
 		(SpideyRetailSetMouseBoundsFn)0x0050A6B0;
 	SpideyRetailSetMousePositionFn retailSetPosition =
 		(SpideyRetailSetMousePositionFn)0x0050A700;
 
-	i32 mouseX = 0;
-	i32 mouseY = 0;
-	retailGetPosition(
-		&mouseX,
-		&mouseY);
+	// Work in the raw virtual-cursor domain here. The public GetMousePosition
+	// hook maps this into the logical frontend domain for cursor drawing and
+	// hover/click testing.
+	i32 mouseX =
+		*(i32*)0x00AC0900;
+	i32 mouseY =
+		*(i32*)0x00AC0904;
 
 	retailSetBounds(
 		0,
@@ -3571,6 +3724,16 @@ static void SpideySyncFrontendMouseBounds(
 		mouseX,
 		mouseY);
 
+	i32 mappedX =
+		0;
+	i32 mappedY =
+		0;
+	SpideyMapFrontendMouseToLogical(
+		mouseX,
+		mouseY,
+		&mappedX,
+		&mappedY);
+
 	FILE* f = fopen(
 		"spidey-decomp-input.log",
 		"a");
@@ -3578,17 +3741,19 @@ static void SpideySyncFrontendMouseBounds(
 	{
 		fprintf(
 			f,
-			"retail_input event=frontend_bounds_sync reason=%s physical=%lux%lu bounds=0,0,%d,%d position=%d,%d recentered=%d logical=%lux%lu\n",
+			"retail_input event=frontend_bounds_sync reason=%s client=%dx%d bounds=0,0,%d,%d raw_position=%d,%d logical_position=%d,%d recentered=%d logical=%dx%d basis=client_to_logical\n",
 			reason ? reason : "unknown",
-			width,
-			height,
+			clientWidth,
+			clientHeight,
 			maxX,
 			maxY,
 			mouseX,
 			mouseY,
+			mappedX,
+			mappedY,
 			recentered,
-			gSpideyModernLogicalWidth,
-			gSpideyModernLogicalHeight);
+			logicalWidth,
+			logicalHeight);
 		fclose(f);
 	}
 }
@@ -3627,6 +3792,17 @@ static void __cdecl SpideyCompatGetMouseHotspotPosition(
 		i32* pX,
 		i32* pY)
 {
+	i32 logicalX =
+		0;
+	i32 logicalY =
+		0;
+
+	SpideyMapFrontendMouseToLogical(
+		*(i32*)0x00AC0900,
+		*(i32*)0x00AC0904,
+		&logicalX,
+		&logicalY);
+
 	const i32 width =
 		SpideyMouseCanvasWidth();
 	const i32 height =
@@ -3635,7 +3811,7 @@ static void __cdecl SpideyCompatGetMouseHotspotPosition(
 	if (pX)
 	{
 		*pX =
-			*(i32*)0x00AC0900 +
+			logicalX +
 			(*(i32*)0x00AC0A04 * width) /
 				640;
 	}
@@ -3643,7 +3819,7 @@ static void __cdecl SpideyCompatGetMouseHotspotPosition(
 	if (pY)
 	{
 		*pY =
-			*(i32*)0x00AC0904 +
+			logicalY +
 			(*(i32*)0x00AC0A08 * height) /
 				480;
 	}
@@ -3675,6 +3851,12 @@ static i32 __cdecl SpideyCompatIsMouseOver(
 
 static void SpideyInstallMouseCoordinateCompat()
 {
+	// PCINPUT_GetMousePosition feeds the visible shell cursor. Hook it as
+	// well as hotspot/hit-testing so all three paths use the same mapping.
+	PATCH_PUSH_RET(
+		0x0050A750,
+		SpideyCompatGetMousePosition);
+
 	const unsigned char expectedMouseOver[6] =
 	{
 		0x8B, 0x0D, 0x54, 0x81, 0x56, 0x00
@@ -3725,7 +3907,7 @@ static void SpideyInstallMouseCoordinateCompat()
 	{
 		fprintf(
 			f,
-			"mouse_coordinate_compat mouse_over=%d hotspot=%d mouse_over_addr=0x0050A820 hotspot_addr=0x0050A770 canvas=%dx%d gameplay=%lux%lu basis=live_dx_canvas\n",
+			"mouse_coordinate_compat position=1 mouse_over=%d hotspot=%d position_addr=0x0050A750 mouse_over_addr=0x0050A820 hotspot_addr=0x0050A770 canvas=%dx%d gameplay=%lux%lu basis=client_to_logical\n",
 			mouseOverPatched,
 			hotspotPatched,
 			SpideyMouseCanvasWidth(),
