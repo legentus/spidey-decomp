@@ -3504,6 +3504,7 @@ typedef void (__cdecl *SpideyRetailGetMousePositionFn)(
 		i32*,
 		i32*);
 
+// @Ok
 static int SpideyGetFrontendMouseDomains(
 		int* pClientWidth,
 		int* pClientHeight,
@@ -3660,6 +3661,7 @@ static void __cdecl SpideyCompatGetMousePosition(
 		pY);
 }
 
+// @Ok
 static void SpideySyncFrontendMouseBounds(
 		const char* reason)
 {
@@ -3700,8 +3702,8 @@ static void SpideySyncFrontendMouseBounds(
 		(SpideyRetailSetMousePositionFn)0x0050A700;
 
 	// Work in the raw virtual-cursor domain here. The public GetMousePosition
-	// hook maps this into the logical frontend domain for cursor drawing and
-	// hover/click testing.
+	// hook maps this into the retail PC canvas expected by PCSHELL before its
+	// normal PC->512x240 conversion for cursor drawing and hit testing.
 	i32 mouseX =
 		*(i32*)0x00AC0900;
 	i32 mouseY =
@@ -3769,6 +3771,7 @@ static void SpideySyncFrontendMouseBounds(
 	}
 }
 
+// @Ok
 static i32 SpideyMouseCanvasWidth()
 {
 	i32 width =
@@ -3778,6 +3781,7 @@ static i32 SpideyMouseCanvasWidth()
 	return width;
 }
 
+// @Ok
 static i32 SpideyMouseCanvasHeight()
 {
 	i32 height =
@@ -3787,20 +3791,21 @@ static i32 SpideyMouseCanvasHeight()
 	return height;
 }
 
+// @Ok
 static void __cdecl SpideyCompatGetMouseHotspotPosition(
 		i32* pX,
 		i32* pY)
 {
-	i32 logicalX =
+	i32 shellX =
 		0;
-	i32 logicalY =
+	i32 shellY =
 		0;
 
 	SpideyMapFrontendMouseToLogical(
 		*(i32*)0x00AC0900,
 		*(i32*)0x00AC0904,
-		&logicalX,
-		&logicalY);
+		&shellX,
+		&shellY);
 
 	const i32 width =
 		SpideyMouseCanvasWidth();
@@ -3810,7 +3815,7 @@ static void __cdecl SpideyCompatGetMouseHotspotPosition(
 	if (pX)
 	{
 		*pX =
-			logicalX +
+			shellX +
 			(*(i32*)0x00AC0A04 * width) /
 				640;
 	}
@@ -3818,12 +3823,13 @@ static void __cdecl SpideyCompatGetMouseHotspotPosition(
 	if (pY)
 	{
 		*pY =
-			logicalY +
+			shellY +
 			(*(i32*)0x00AC0A08 * height) /
 				480;
 	}
 }
 
+// @Ok
 static i32 __cdecl SpideyCompatIsMouseOver(
 		i32 left,
 		i32 top,
@@ -3848,6 +3854,7 @@ static i32 __cdecl SpideyCompatIsMouseOver(
 		mouseY < bottom;
 }
 
+// @Ok
 static void SpideyInstallMouseCoordinateCompat()
 {
 	// PCINPUT_GetMousePosition feeds the visible shell cursor. Hook it as
@@ -4111,6 +4118,7 @@ static void __cdecl SpideyCompatMessSetScale(
 		"mess_set_scale");
 }
 
+// @Ok
 static void SpideyInstallFrontendTextScaleCompat()
 {
 	// patch_mess installs the reconstructed retail-compatible setter first;
