@@ -2565,16 +2565,6 @@ static void __fastcall SpideyAudioAddOutputDevice(
 		0,
 		gSpideyAudioOutputMenuLabel);
 
-	// Retail authored this screen for five rows at y=90 with a 20-unit
-	// line separation. The sixth row would otherwise sit one row lower than
-	// the original visual composition. Pull the complete menu up by one row
-	// so all six entries remain inside the same authored vertical footprint.
-	if (menu &&
-		menu->mNumLines >= 6)
-	{
-		menu->mY -=
-			menu->mLineSep;
-	}
 }
 
 static void __fastcall SpideyAudioMenuUpdate(
@@ -3014,9 +3004,13 @@ static void SpideySyncFrontendMouseBounds(
 		return;
 
 	unsigned long width =
-		gSpideyLegacyPhysicalWidth;
+		gSpideyModernLogicalWidth >= 64 ?
+			gSpideyModernLogicalWidth :
+			gSpideyLegacyPhysicalWidth;
 	unsigned long height =
-		gSpideyLegacyPhysicalHeight;
+		gSpideyModernLogicalHeight >= 64 ?
+			gSpideyModernLogicalHeight :
+			gSpideyLegacyPhysicalHeight;
 
 	if (width < 64 || height < 64)
 		return;
@@ -3094,6 +3088,12 @@ static void SpideySyncFrontendMouseBounds(
 
 static i32 SpideyMouseCanvasWidth()
 {
+	if (gSpideyShadowPreviewEnabled &&
+		gSpideyModernLogicalWidth >= 1)
+	{
+		return (i32)gSpideyModernLogicalWidth;
+	}
+
 	i32 width =
 		*(i32*)0x006B78E4;
 	if (width < 1)
@@ -3103,6 +3103,12 @@ static i32 SpideyMouseCanvasWidth()
 
 static i32 SpideyMouseCanvasHeight()
 {
+	if (gSpideyShadowPreviewEnabled &&
+		gSpideyModernLogicalHeight >= 1)
+	{
+		return (i32)gSpideyModernLogicalHeight;
+	}
+
 	i32 height =
 		*(i32*)0x006B78E8;
 	if (height < 1)
@@ -3667,22 +3673,45 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			requestedHeight;
 		gSpideySelectedOutputBpp =
 			32;
+	}
 
-		// Modern DX11 output is always 32-bit. Keep legacy physical D3D7
-		// below the exact 2560x1440 target that is known to fail CreateDevice.
+	// The old shell asks retail DirectDraw to fall back to 640x480x16 on
+	// frontend entry. DX11 now owns the visible output, so do not let that
+	// request become the active frontend canvas. Keep the user's selected
+	// modern dimensions authoritative and use only a hidden D3D7-compatible
+	// producer surface where the legacy device requires one.
+	if (frontendLegacy &&
+		gSpideySelectedOutputWidth >= 640 &&
+		gSpideySelectedOutputHeight >= 480)
+	{
+		physicalWidth =
+			(u32)gSpideySelectedOutputWidth;
+		physicalHeight =
+			(u32)gSpideySelectedOutputHeight;
 		physicalBpp =
 			32;
+		remappedLegacyBacking =
+			1;
+	}
+	else
+	{
+		physicalBpp =
+			32;
+	}
 
-		if (requestedWidth == 2560 &&
-			requestedHeight == 1440)
-		{
-			physicalWidth =
-				1920;
-			physicalHeight =
-				1440;
-			remappedLegacyBacking =
-				1;
-		}
+	// Runtime-grounded: retail D3D7 rejects a 2560x1440 scene surface.
+	// Keep that limitation quarantined to the hidden producer only.
+	if (physicalWidth == 2560 &&
+		physicalHeight == 1440)
+	{
+		physicalWidth =
+			1920;
+		physicalHeight =
+			1440;
+		physicalBpp =
+			32;
+		remappedLegacyBacking =
+			1;
 	}
 
 	SpideyRetailSetDisplayOptionsFn retail =
@@ -3847,35 +3876,18 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 	SpideyApplySelectedAspect(
 		"display_menu_apply_commit");
 
-	// While the retail frontend is active, keep its proven 640x480 canvas
-	// alive and commit only the modern output selection. That avoids the old
-	// frontend corruption while still making the new settings authoritative
-	// immediately. If this menu is ever invoked over gameplay, rebuild the
-	// compatibility backing to the newly selected mode right here.
 	const int liveFrontend =
-		*(DWORD*)0x006B78F4 &&
-		liveWidth == 640 &&
-		liveHeight == 480 &&
-		liveBpp == 16;
+		*(DWORD*)0x006B78F4 ? 1 : 0;
 
-	if (liveFrontend)
-	{
-		SpideyCompatSetDisplayOptions(
-			liveWidth,
-			liveHeight,
-			liveBpp,
-			option4,
-			option5);
-	}
-	else
-	{
-		SpideyCompatSetDisplayOptions(
-			(u32)gSpideySelectedOutputWidth,
-			(u32)gSpideySelectedOutputHeight,
-			32,
-			option4,
-			option5);
-	}
+	// Apply the selected modern mode immediately even while the shell is
+	// active. SpideyCompatSetDisplayOptions will quarantine any incompatible
+	// D3D7 backing size without changing the visible/logical DX11 mode.
+	SpideyCompatSetDisplayOptions(
+		(u32)gSpideySelectedOutputWidth,
+		(u32)gSpideySelectedOutputHeight,
+		32,
+		option4,
+		option5);
 
 	// Save immediately; Apply must not depend on exiting the menu or game.
 	SpideyRetailSaveSettingsFn retailSave =
