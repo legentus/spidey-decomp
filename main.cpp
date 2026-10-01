@@ -3999,6 +3999,141 @@ static void SpideyFitLogicalCanvasToSelectedAspect(
 	}
 }
 
+static int gSpideyRequestedFrontendTextScale =
+	256;
+static int gSpideyLastFrontendTextRequested =
+	-1;
+static int gSpideyLastFrontendTextEffective =
+	-1;
+static unsigned long gSpideyLastFrontendTextHeight =
+	0;
+static int gSpideyLastFrontendTextMode =
+	-1;
+
+// @Ok
+static int SpideyGetResolutionAwareTextScale(
+		int requestedScale)
+{
+	if (requestedScale <= 0)
+		return requestedScale;
+
+	if (!gSpideyFrontendLegacyMode ||
+		!gSpideyShadowPreviewEnabled ||
+		gSpideyModernLogicalHeight <= 480)
+	{
+		return requestedScale;
+	}
+
+	// Retail shell typography was authored for the 640x480 PC baseline.
+	// Shell coordinates themselves expand with modern resolution, so leaving
+	// the old scale unchanged makes glyphs balloon with the canvas. Invert
+	// that vertical resolution gain so the font occupies progressively less
+	// of a 1080p/1440p menu instead of clipping modern labels.
+	long scaled =
+		((long)requestedScale * 480L) /
+		(long)gSpideyModernLogicalHeight;
+
+	const int minimumScale =
+		requestedScale < 64 ?
+			requestedScale :
+			64;
+
+	if (scaled < minimumScale)
+		scaled =
+			minimumScale;
+	if (scaled > requestedScale)
+		scaled =
+			requestedScale;
+	if (scaled > 65535L)
+		scaled =
+			65535L;
+
+	return (int)scaled;
+}
+
+// @Ok
+static void SpideyApplyFrontendTextScale(
+		const char* reason)
+{
+	const int effective =
+		SpideyGetResolutionAwareTextScale(
+			gSpideyRequestedFrontendTextScale);
+
+	*(u16*)0x0060D5A4 =
+		(u16)effective;
+
+	const int frontend =
+		gSpideyFrontendLegacyMode ? 1 : 0;
+
+	if (gSpideyLastFrontendTextRequested !=
+			gSpideyRequestedFrontendTextScale ||
+		gSpideyLastFrontendTextEffective !=
+			effective ||
+		gSpideyLastFrontendTextHeight !=
+			gSpideyModernLogicalHeight ||
+		gSpideyLastFrontendTextMode !=
+			frontend)
+	{
+		FILE* log = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (log)
+		{
+			fprintf(
+				log,
+				"frontend_text_scale reason=%s requested=%d effective=%d frontend=%d logical=%lux%lu reference_height=480\n",
+				reason ? reason : "unknown",
+				gSpideyRequestedFrontendTextScale,
+				effective,
+				frontend,
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight);
+			fclose(log);
+		}
+
+		gSpideyLastFrontendTextRequested =
+			gSpideyRequestedFrontendTextScale;
+		gSpideyLastFrontendTextEffective =
+			effective;
+		gSpideyLastFrontendTextHeight =
+			gSpideyModernLogicalHeight;
+		gSpideyLastFrontendTextMode =
+			frontend;
+	}
+}
+
+// @Ok
+static void __cdecl SpideyCompatMessSetScale(
+		i32 requestedScale)
+{
+	gSpideyRequestedFrontendTextScale =
+		requestedScale;
+	SpideyApplyFrontendTextScale(
+		"mess_set_scale");
+}
+
+static void SpideyInstallFrontendTextScaleCompat()
+{
+	// patch_mess installs the reconstructed retail-compatible setter first;
+	// this final entrypoint override keeps its exact one-argument ABI while
+	// applying modern frontend resolution policy.
+	PATCH_PUSH_RET(
+		0x00458620,
+		SpideyCompatMessSetScale);
+
+	FILE* log = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (log)
+	{
+		fprintf(
+			log,
+			"frontend_text_scale_install retail=0x00458620 wrapper=0x%08lX baseline=640x480 mode=resolution_aware\n",
+			(unsigned long)&SpideyCompatMessSetScale);
+		fclose(log);
+	}
+}
+
 static void SpideyRefreshModernLogicalResolution()
 {
 	unsigned long width =
@@ -4092,6 +4227,12 @@ static void SpideyApplyLogicalRenderResolution(
 		width;
 	*(DWORD*)0x00568158 =
 		height;
+
+	// Mess_SetScale may have been called before this transition established
+	// the new frontend/logical size. Re-evaluate the last retail-requested
+	// scale now so level -> menu transitions immediately get the right size.
+	SpideyApplyFrontendTextScale(
+		reason ? reason : "logical_resolution");
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
@@ -10846,6 +10987,9 @@ void game_patches(void)
 	patch_pshell();
 	patch_FontTools();
 	patch_mess();
+#ifdef _WIN32
+	SpideyInstallFrontendTextScaleCompat();
+#endif
 	patch_m3dcolij();
 	patch_CSuper();
 	patch_ps2m3d();
