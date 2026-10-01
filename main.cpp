@@ -1241,6 +1241,8 @@ static int gSpideySelectedAudioDevice =
 static int gSpideyAudioSettingsLoaded =
 	0;
 static char gSpideyModernAudioIniPath[MAX_PATH];
+static LPDIRECTSOUND8 gSpideyRetainedBinkDirectSound =
+	0;
 
 typedef HRESULT (WINAPI *SpideyRealDirectSoundCreate8Fn)(
 		LPCGUID,
@@ -2451,6 +2453,48 @@ static int SpideyCreateSelectedDirectSound(
 	return 1;
 }
 
+static void SpideyTryRebindBinkAudio(
+		const char* reason)
+{
+	if (!gSpideyRetainedBinkDirectSound)
+		return;
+
+	void* activeBink =
+		*(void**)0x00AC0BA4;
+	if (activeBink)
+		return;
+
+	// PCMOVIE_Init only binds Bink's sound system once. No Bink movie is
+	// active now, so clear the one-shot flag and let retail bind the current
+	// G_PDS safely before releasing the old retained DirectSound object.
+	*(unsigned char*)0x00AC0BA0 =
+		0;
+
+	typedef void (__cdecl *SpideyRetailPCMovieInitFn)(void);
+	SpideyRetailPCMovieInitFn movieInit =
+		(SpideyRetailPCMovieInitFn)0x0050B0F0;
+	movieInit();
+
+	gSpideyRetainedBinkDirectSound->Release();
+	gSpideyRetainedBinkDirectSound =
+		0;
+
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_bink_rebind reason=%s runtime_directsound=0x%08lX bink_inited=%u bink_handle=0x%08lX retained_released=1\n",
+			reason ? reason : "unknown",
+			(unsigned long)*(LPDIRECTSOUND8*)0x006B7920,
+			(unsigned int)*(unsigned char*)0x00AC0BA0,
+			(unsigned long)*(void**)0x00AC0BA4);
+		fclose(f);
+	}
+}
+
 static int SpideyRestartDirectSoundForShell(
 		int selectedIndex,
 		const char* reason)
@@ -2469,9 +2513,19 @@ static int SpideyRestartDirectSoundForShell(
 	LPDIRECTSOUND8* directSoundSlot =
 		(LPDIRECTSOUND8*)0x006B7920;
 
-	// Retail shutdown releases the primary buffer, every loaded sample
-	// buffer and the DirectSound object. Only use this from the shell Audio
-	// screen, then re-spool the menu sound bank after reinitialization.
+	// If Bink has already been initialized, it may still hold the current
+	// DirectSound object as a raw backend pointer. Retain that object before
+	// retail releases its game-owned reference so live endpoint switching
+	// cannot invalidate Bink underneath an active movie.
+	if (*directSoundSlot &&
+		*(unsigned char*)0x00AC0BA0 &&
+		!gSpideyRetainedBinkDirectSound)
+	{
+		(*directSoundSlot)->AddRef();
+		gSpideyRetainedBinkDirectSound =
+			*directSoundSlot;
+	}
+
 	if (*directSoundSlot)
 	{
 		SpideyRetailShutdownDirectSoundFn shutdownSound =
@@ -2517,6 +2571,8 @@ static int SpideyRestartDirectSoundForShell(
 
 	SpideySaveAudioSettings();
 	SpideyUpdateAudioOutputMenuLabel();
+	SpideyTryRebindBinkAudio(
+		"device_switch");
 
 	FILE* f = fopen(
 		"spidey-decomp-audio.log",
@@ -2527,13 +2583,15 @@ static int SpideyRestartDirectSoundForShell(
 			SpideyGetSelectedAudioDevice();
 		fprintf(
 			f,
-			"audio_restart reason=%s requested_index=%d selected_index=%d name=%s created=%d fallback_default=%d shell_only=1\n",
+			"audio_restart reason=%s requested_index=%d selected_index=%d name=%s created=%d fallback_default=%d shell_only=1 retained_bink_ds=0x%08lX active_bink=0x%08lX apply=live\n",
 			reason ? reason : "unknown",
 			selectedIndex,
 			gSpideySelectedAudioDevice,
 			selected ? selected->name : "(System Default)",
 			created,
-			fellBack);
+			fellBack,
+			(unsigned long)gSpideyRetainedBinkDirectSound,
+			(unsigned long)*(void**)0x00AC0BA4);
 		fclose(f);
 	}
 
@@ -2632,33 +2690,11 @@ static void __fastcall SpideyAudioMenuUpdate(
 		return;
 	}
 
-	gSpideySelectedAudioDevice =
-		next;
-	SpideySaveAudioSettings();
-	SpideyUpdateAudioOutputMenuLabel();
-
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
-	if (f)
-	{
-		const SpideyAudioDeviceInfo* selected =
-			SpideyGetSelectedAudioDevice();
-		fprintf(
-			f,
-			"audio_select reason=%s selected_index=%d name=%s apply=next_audio_init runtime_directsound=0x%08lX bink_inited=%u bink_handle=0x%08lX\n",
-			delta > 0 ?
-				"audio_menu_next" :
-				"audio_menu_prev",
-			gSpideySelectedAudioDevice,
-			selected ?
-				selected->name :
-				"(System Default)",
-			(unsigned long)*(LPDIRECTSOUND8*)0x006B7920,
-			(unsigned int)*(unsigned char*)0x00AC0BA0,
-			(unsigned long)*(void**)0x00AC0BA4);
-		fclose(f);
-	}
+	SpideyRestartDirectSoundForShell(
+		next,
+		delta > 0 ?
+			"audio_menu_next" :
+			"audio_menu_prev");
 }
 
 typedef void (__cdecl *SpideyRetailSetBootSoundModeFn)(
@@ -2735,7 +2771,7 @@ static void SpideyInstallAudioMenuCompat()
 	{
 		fprintf(
 			f,
-			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d stereo_telemetry=%d controls=retail_left_right device_apply=next_audio_init recenter_rows=1 compact_label=1\n",
+			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d stereo_telemetry=%d controls=retail_left_right device_apply=live retained_bink_backend=1 recenter_rows=0 compact_label=1\n",
 			addEntryInstalled,
 			updateInstalled,
 			stereoModeInstalled);
@@ -5682,6 +5718,9 @@ static void __cdecl SpideyCompatLogicTiming()
 
 static void SpideyRecordPresentTiming()
 {
+	SpideyTryRebindBinkAudio(
+		"frame_safe_point");
+
 	const unsigned long now =
 		(unsigned long)GetTickCount();
 
