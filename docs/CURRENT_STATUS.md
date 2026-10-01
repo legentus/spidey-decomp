@@ -7548,3 +7548,261 @@ Run `UPDATE_AND_TEST_LATEST_BUILD.bat` again. If the matching build succeeds, co
 2. Pause -> Display Options activation;
 3. live Gameplay UI Scale + Menu/Text Scale Apply behavior;
 4. Alt+Tab out and back into a running level.
+
+
+## e5afb28 runtime: in-level retail Display Options crash + HUD double-scale proof (2026-10-01)
+
+### Runtime evidence
+
+The user tested revision:
+
+- `e5afb28dedf2ba978aba0d9c12326cac22ed78f2`
+
+with the installed retail executable:
+
+- SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
+- PE timestamp `0x3B7A3167`
+- image size `0x02A0D000`
+
+The matching consolidated log is the user-uploaded `spidey-decomp(1).log`, started 2026-10-01 17:32:05 local.
+
+User observations:
+- selecting the synthetic in-level `Display Options` row crashed;
+- the gameplay HUD became even smaller;
+- colored bars were still not visually inside their holders;
+- no screenshot was available for this run, so the next build must provide enough coordinate telemetry to diagnose without one.
+
+### In-level Display Options crash is now explained
+
+The pause-confirm interception itself worked:
+
+- `pause_display_options phase=confirm_intercept line=4 rows=5 mask=0x00000100`
+- `pause_display_options phase=open gameplay_ui=125 text=100`
+- `display_pending_reset reason=menu_open ...`
+
+The process then immediately raised `0xC0000005`.
+
+The grounded game-side fault is:
+
+- `EIP = 0x0048DABF`
+- read target `0x00000004`
+- module `SpideyPC.exe`
+
+Retail disassembly of `Shell_DrawBackground @ 0x0048DA90` shows:
+
+- it reads the frontend background object from `0x006A7780`;
+- at `0x0048DABF` it dereferences `[eax+4]`.
+
+During gameplay that frontend object is null, so directly invoking `PCSHELL_DoDisplayOptions @ 0x0050D9B0` from the pause loop enters frontend/Shell drawing with uninitialized frontend resources and crashes.
+
+This is an architectural dead end:
+
+**Do not call retail `PCSHELL_DoDisplayOptions` from gameplay again.**
+
+The normal title/frontend Display Options screen remains valid. Only the in-level route is replaced.
+
+### HUD log proves the six broad-panel QPolys were being scaled twice
+
+At 2560x1440 and Gameplay UI Scale 125%, the panel-holder wrapper logged:
+
+- authored holder before:
+  `54,42 -> 86,58`
+- compact authored holder after:
+  `17,18 -> 27,24`
+
+Retail panel rendering later expands authored panel space by:
+
+- X: logical width / 512 = `2560 / 512 = 5`
+- Y: logical height / 240 = `1440 / 240 = 6`
+
+Therefore that holder's live-screen bounds are:
+
+- `17*5,18*6 -> 27*5,24*6`
+- `85,108 -> 135,144`
+
+The immediately following broad-panel QPoly arrived at our wrapper with **exactly**:
+
+- `85,108 -> 135,144`
+
+The same exact relationship repeats for the subsequent HUD elements:
+- compact holder `5,5 -> 19,18` projects to `25,30 -> 95,108`; QPoly before = `25,30 -> 95,108`;
+- compact holder `18,9 -> 26,15` projects to `90,54 -> 130,90`; QPoly before = `90,54 -> 130,90`.
+
+Therefore those six `Panel_Display/sub_4658C0` QPolys are **already in post-holder live-screen space** when they reach `PCGfx_DrawQPoly2D`.
+
+The previous wrapper then multiplied them by the UI density again, e.g.:
+
+- `85,108 -> 135,144`
+- became `26.56,45 -> 42.19,60`.
+
+That is the grounded reason the latest build visibly shrank the HUD even further.
+
+### Corrected gameplay-QPoly policy
+
+Commit:
+
+- `021f1f602cee997cb92e125cfacb36b03d741b5c` — **fix: use pause-native UI controls and stop QPoly double scaling**
+
+The six live broad-panel QPoly sites:
+
+- `0x00465D08`
+- `0x00465F46`
+- `0x00466176`
+- `0x004663AA`
+- `0x004665D1`
+- `0x004667F6`
+
+now use a **passthrough** wrapper.
+
+They are no longer compacted a second time.
+
+New telemetry:
+
+- `gameplay_ui_alignment source=panel_qpoly policy=passthrough seq=... coords=...`
+
+The holder telemetry now also emits:
+
+- `live_after=left,top,right,bottom`
+
+so the next log can numerically compare holder live bounds against QPoly bounds without requiring a screenshot.
+
+The three separate `Panel_DisplayHealthBar` QPoly sites remain isolated behind their prior wrapper because those calls did not execute in the earlier player-HUD session and are a distinct path.
+
+### Remaining Gouraud/flat gauge path: measure before deciding
+
+The latest successful runtime also proves these broad-panel calls execute:
+
+Gouraud examples:
+- `88,25,30,6 -> 28,10,9,3`
+- `58,25,31,6 -> 18,10,10,3`
+
+Flat example:
+- `31,41,11,26 -> 10,17,3,11`
+
+Unlike the six QPoly calls, the old log did not include enough final/live-coordinate evidence to prove whether these were aligned or double-scaled.
+
+Do **not** guess.
+
+New diagnostic commits:
+
+- `2e0e5687253014d466268eb207e47907d612f678` — **diag: log projected HUD fill bounds**
+- `bf5544fc221245c5692c218bfbe63e92d9c84007` — **diag: trace in-level pause scale controls**
+
+The next log will identify the three Gouraud and three broad-panel flat call streams separately and report:
+
+- authored `before`;
+- compacted `after`;
+- projected `live_after`;
+- stable sequence index `seq=0..2`.
+
+Telemetry:
+- `gameplay_ui_alignment source=panel_gouraud seq=... live_after=...`
+- `gameplay_ui_alignment source=panel_flat seq=... live_after=...`
+
+The holder sample budget is increased to 48 so enough holder/live-bound pairings survive in the same run.
+
+### In-level scale controls no longer use frontend/PShell state
+
+The unsafe gameplay-to-`PCSHELL_DoDisplayOptions` bridge has been removed completely.
+
+In-level pause now stays inside the existing gameplay pause `CMenu`.
+
+Three synthetic rows are appended directly:
+
+- `Gameplay UI Scale: N%`
+- `Menu/Text Scale: N%`
+- `Apply UI Scale`
+
+The existing title/frontend Display Options screen still contains its own two scale sliders and Apply row.
+
+Pause hooks:
+
+- `0x00440CAC -> CMenu::Display @ 0x004401B0` — pause-only display wrapper for the two sliders;
+- `0x004415F8 -> CMenu_Update @ 0x00440600` — row insertion + left/right/mouse adjustment;
+- `0x00441606 -> PCSHELL_CheckTriggers @ 0x0050C180` — consumes confirm only for the synthetic rows and commits on `Apply UI Scale`.
+
+Apply behavior:
+- commits Gameplay UI Scale and Menu/Text Scale;
+- persists `spidey-modern-video.ini`;
+- no renderer/DirectDraw/DXGI rebuild;
+- gameplay geometry wrappers read the committed gameplay scale on subsequent draws;
+- message text scaling reads the committed text scale on subsequent `Mess_SetScale` calls.
+
+A follow-up guard commit:
+
+- `2e0d41555264938714256bec926fe6e501cd8a06` — **fix: guard pause slider rendering**
+
+ensures the pause-display wrapper never tries to draw the synthetic sliders until those rows are actually present.
+
+### Pause diagnostics for the next run
+
+The first 12 inline-pause display frames emit phase markers:
+
+- `pause_ui_display phase=begin ...`
+- `pause_ui_display phase=before_gameplay_slider ...`
+- `pause_ui_display phase=after_gameplay_slider ...`
+- `pause_ui_display phase=before_text_slider ...`
+- `pause_ui_display phase=after_text_slider ...`
+- `pause_ui_display phase=end ...`
+
+If the generic retail slider renderer is unsafe in the gameplay pause context, the last emitted phase identifies the exact failing call.
+
+Control telemetry:
+- `pause_ui_controls rows_added=3 ... retail_display_options_disabled=1`
+- `pause_ui_adjust kind=gameplay_ui ...`
+- `pause_ui_adjust kind=menu_text ...`
+- `pause_ui_apply old_gameplay=... new_gameplay=... old_text=... new_text=...`
+- `pause_ui_confirm action=apply ...`
+
+### Static validation of the current frontier
+
+After `bf5544f`:
+
+- unsafe `SpideyOpenDisplayOptionsFromPause` is absent;
+- no direct gameplay call to `PCSHELL_DoDisplayOptions` remains;
+- old synthetic `Display Options` pause label is absent;
+- pause-native Apply label is present;
+- QPoly passthrough policy is present;
+- holder, QPoly, Gouraud, and flat alignment telemetry is present;
+- new helpers each have exactly one `// @Ok` validator annotation;
+- source lexical state ends in code;
+- braces, brackets, and parentheses balance;
+- VC6 loop-scope audit is clean for the new code;
+- installer loops retain distinct `qpolyIndex`, `gouraudIndex`, and `flatIndex`.
+
+Connector-written commits do not currently trigger the repository Actions workflow, so this frontier is **not** claimed as matching-build or runtime proven until the user runs the updater/test script.
+
+### Mandatory next test
+
+Run:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+At 2560x1440:
+
+1. Confirm the matching build succeeds.
+2. Enter gameplay and spend several seconds with the HUD visible.
+   - A screenshot is welcome but no longer required for coordinate diagnosis.
+3. Pause.
+   - There should be **no in-level Display Options submenu** now.
+   - The pause menu itself should contain Gameplay UI Scale, Menu/Text Scale, and Apply UI Scale.
+4. Move Gameplay UI Scale left/right.
+   - confirm its displayed percentage changes.
+5. Move Menu/Text Scale left/right.
+6. Select Apply UI Scale.
+   - no crash;
+   - no level reload/restart;
+   - return to gameplay and verify the new HUD size applies.
+7. If stable, test Alt+Tab out and back once.
+8. Exit normally if possible.
+
+For the next log, inspect:
+- `gameplay_ui_scale ... live_after=...`
+- `gameplay_ui_alignment source=panel_qpoly ...`
+- `gameplay_ui_alignment source=panel_gouraud ... live_after=...`
+- `gameplay_ui_alignment source=panel_flat ... live_after=...`
+- all `pause_ui_*` events;
+- any crash record;
+- Alt+Tab `background_message_pump` and post-return `foreground_acquire`.
+
+Do not make another visual HUD transform until the new holder/fill live bounds are compared numerically.
