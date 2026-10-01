@@ -6200,3 +6200,144 @@ This is not a DXGI capability failure: `SetFullscreenState(TRUE)` succeeded. The
 
 Do not remove Fullscreen Exclusive or reinterpret it as borderless. Fix the DXGI/D3D7 ownership boundary: either restore/rebuild the hidden producer after the DXGI mode switch if that coexistence is valid, or avoid executing obsolete D3D7 main-target work while true exclusive is active and the DX11 shadow renderer is authoritative. Preserve the confirmed background-distortion and post-level mouse fixes.
 
+
+
+## DX11-authoritative renderer pivot — 2026-10-01
+
+The project has now crossed the architectural boundary requested after the first true-exclusive runtime crash: **DX11 is the authoritative visible/main-scene renderer after its first complete replayable frame. Direct3D 7 / DirectDraw remain temporarily only as compatibility/resource providers and as a fail-closed offscreen fallback while the remaining legacy dependencies are ported.**
+
+This is intentionally not a one-off repair for `DDERR_SURFACELOST`. The goal is to eliminate the class of problems caused by keeping two display/rendering owners alive.
+
+### Runtime evidence that justified the pivot
+
+The failed Exclusive test established:
+
+- DXGI successfully entered true exclusive:
+  - `fullscreen_state exclusive=1 width=1920 height=1440 hr=0x00000000`
+  - bridge result for `display_options_enter_exclusive` was success.
+- Retail then failed with `0x887601C2 == DDERR_SURFACELOST` in both the DXPOLY path and DXINIT.
+- Exact failing legacy operations were grounded as:
+  - `IDirect3DDevice7::BeginScene` through Device7 vtable slot 5.
+  - `IDirectDrawSurface7::Blt` through Surface7 vtable slot 5.
+- Immediately before that transition, the captured frame vocabulary was already fully representable by the DX11 replay:
+  - frame 2400: 121/121 main draws submitted to DX11, `shadow_skip=0`, `missing=0`.
+  - frame 2640: 104/104 submitted, including 68 2D + 36 3D draws, `shadow_skip=0`, `missing=0`, no offscreen fallback.
+  - frame 2760: 134/134 submitted, `shadow_skip=0`, `missing=0`.
+  - all observed main draws in the tested frontier were triangle-fan / FVF 324, with resident mirrored textures where required.
+
+### Implemented migration commits
+
+- `df5cf4bbbfc00ca340b750325a747780202866ac` — **renderer: make DX11 authoritative for main scene**
+  - main-scene `BeginScene` / `EndScene` can now be virtualized once DX11 is authoritative.
+  - `IDirectDrawSurface7::Blt` on the retail primary/main-scene surfaces is suppressed on the authoritative path.
+  - main-scene clear is submitted to DX11 and no longer requires the legacy display surface.
+  - any main draw successfully accepted by DX11 with its texture ready is automatically suppressed on D3D7; F9 is no longer required.
+  - presentation now prefers the DX11 shadow/replay frame in Windowed, Borderless and true Exclusive.
+  - retail Flip is fallback-only before DX11 becomes authoritative.
+  - a genuinely unsupported/offscreen path may lazily start a real D3D7 fallback scene rather than making every frame depend on D3D7.
+
+- `566aec873acf194c21e1ca609b52ae3b51732c8c` — **renderer: defer exclusive until DX11 frame is authoritative**
+  - persisted Fullscreen Exclusive no longer lets DXGI seize the display during early startup before the first complete DX11 frame exists.
+  - requested Exclusive stays non-exclusive through replay warmup.
+  - after the first successful complete shadow frame, the bridge calls `SpideyApplyRendererWindowMode("dx11_authoritative_ready")` and only then enters true DXGI exclusive.
+  - window-mode telemetry records requested vs actual exclusive plus the deferred state.
+
+- `f194ca2a924644dd94225235de6988f5cf96e4bb` — **renderer: stop forwarding main-scene state to D3D7**
+  - main-scene `SetViewport`, `SetRenderState`, `SetTexture`, and `SetTextureStageState` now update the DX11 shadow-state cache and return success without forwarding to D3D7.
+  - a lazy legacy offscreen fallback replays the cached fixed-function state into D3D7 only when that fallback is genuinely needed.
+  - added explicit telemetry for main-state suppression and fallback-scene starts.
+
+- `0b3c6cce0b9e1715296557a47172740b9cd8881e` — **renderer: retire D3D7 reference toggles**
+  - the old F9 main-draw-suppression diagnostic and F10 D3D7-reference display toggle are retired.
+  - once DX11 owns the output, runtime cannot intentionally switch back to a potentially lost DirectDraw display surface.
+
+### Current ownership model
+
+After DX11 replay warmup:
+
+```
+retail game draw/state calls
+        |
+        v
+compatibility interception / provenance
+        |
+        +--> DX11 state + textures + primitive replay --> DXGI --> visible frame
+        |
+        +--> D3D7 only when a still-unported offscreen/compatibility dependency
+             explicitly requires it
+```
+
+The authoritative main frame must no longer require a successful D3D7 `BeginScene`, main-target `Clear`, main-target `Blt`, fixed-function state submission, main-scene `DrawPrimitive`, or retail Flip.
+
+### New telemetry to judge remaining D3D7 dependency
+
+`spidey-decomp-draw.log` frame summaries now expose:
+
+- `dx11_authoritative=`
+- `d3d7_suppressed=`
+- `d3d7_fallback=`
+- `begin_suppressed=`
+- `end_suppressed=`
+- `clear_suppressed=`
+- `state_suppressed=`
+- `blt_suppressed=`
+- `fallback_scene_begins=`
+
+The desired normal main-frame state is:
+
+- `dx11_authoritative=1`
+- `d3d7_suppressed > 0` whenever there are main-scene draws
+- `missing=0`
+- `shadow_skip=0`
+- `d3d7_fallback=0`
+- `fallback_scene_begins=0`
+
+The desired presentation state is:
+
+- DX11 shadow/replay presentation active.
+- retail Flip inactive after warmup.
+- Exclusive entered only after `dx11_authoritative_ready`.
+- no `DDERR_SURFACELOST` fatal path.
+
+### Static validation completed before runtime handoff
+
+- Verified the exact COM layout from the checked-in DirectX headers:
+  - `IDirect3DDevice7` slot 5 = `BeginScene`, slot 6 = `EndScene`.
+  - `IDirectDrawSurface7` slot 5 = `Blt`.
+- `main.cpp` source-level structure passed a local consistency scan after the migration:
+  - braces balanced,
+  - parentheses balanced,
+  - brackets balanced.
+- F9/F10 runtime key handlers are absent after retirement.
+- GitHub Actions/check-run data was not exposed through the connected GitHub endpoint for these pushes, so this checkpoint does **not** claim a CI-green Windows build. The next normal local update/build is the build/runtime validation.
+
+### Regression guards
+
+Do not regress these while removing the remaining D3D7 dependencies:
+
+- moving-background distortion/warp remains fixed;
+- post-level mouse hover/click alignment remains fixed;
+- six-row Audio layout + live endpoint/Bink lifetime work remains intact;
+- selected modern frontend logical resolution remains authoritative;
+- Hor+ projection/culling work remains intact.
+
+### Next renderer migration after the first authoritative runtime validation
+
+If this first DX11-authoritative runtime pass is stable:
+
+1. **Move texture ownership upstream.**
+   - stop treating a D3D7 texture surface as the source of truth;
+   - upload decoded/source texture pixels directly into DX11;
+   - retain a legacy surface/handle only where retail code still requires object identity.
+
+2. **Port transient/offscreen render targets and copies.**
+   - enumerate every non-main render-target fallback;
+   - provide native DX11 equivalents for transient compositing/render-to-texture/movie paths;
+   - drive `fallback_scene_begins` and `d3d7_fallback` to zero.
+
+3. **Remove DirectDraw display ownership completely.**
+   - DXGI/Win32 alone own resolution, window modes, resize, fullscreen and presentation.
+
+4. **Remove the D3D7 device/init path.**
+   - only after no remaining game/resource code requires real D3D7 COM rendering objects.
+
