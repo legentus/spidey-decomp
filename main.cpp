@@ -3195,6 +3195,201 @@ static void SpideyApplyLogicalRenderResolution(
 	}
 }
 
+
+typedef void (__cdecl *SpideyRetailLoadCullBasisFn)(
+		const short*);
+typedef int (__cdecl *SpideyRetailM3dSqrtFn)(
+		int);
+
+static void SpideyNormalizeCullPlane(
+		short* destination,
+		long x,
+		long y,
+		long z)
+{
+	if (!destination)
+		return;
+
+	const long lengthSquared =
+		x * x +
+		y * y +
+		z * z;
+
+	if (lengthSquared <= 0)
+	{
+		destination[0] = 0;
+		destination[1] = 0;
+		destination[2] = 0;
+		return;
+	}
+
+	SpideyRetailM3dSqrtFn retailSqrt =
+		(SpideyRetailM3dSqrtFn)0x0046D430;
+	const int length =
+		retailSqrt(
+			(int)lengthSquared);
+
+	if (length <= 0)
+	{
+		destination[0] = 0;
+		destination[1] = 0;
+		destination[2] = 0;
+		return;
+	}
+
+	destination[0] =
+		(short)((x * 4096L) / length);
+	destination[1] =
+		(short)((y * 4096L) / length);
+	destination[2] =
+		(short)((z * 4096L) / length);
+}
+
+static int gSpideyHorPlusCullLogged =
+	0;
+
+static void __cdecl SpideyCompatLoadCullBasis(
+		const short* source)
+{
+	SpideyRetailLoadCullBasisFn retail =
+		(SpideyRetailLoadCullBasisFn)0x0046D810;
+
+	if (!source ||
+		!gSpideyShadowPreviewEnabled ||
+		gSpideyFrontendLegacyMode ||
+		!SpideyUseModernOutputAspect())
+	{
+		retail(
+			source);
+		return;
+	}
+
+	float aspectScalar =
+		*(float*)0x00550064;
+
+	if (aspectScalar < 0.25f ||
+		aspectScalar > 2.0f)
+	{
+		aspectScalar =
+			1.0f;
+	}
+
+	const long aspectFixed =
+		(long)(
+			aspectScalar * 4096.0f +
+			0.5f);
+
+	// M3d_RenderSetup produces six normalized frustum-plane normals as two
+	// 3x3 matrices. This source is the second matrix. Row 0 is the opposing
+	// vertical plane; rows 1 and 2 are the mirrored left/right side planes.
+	// Their sum is the camera-forward component and their difference is the
+	// camera-right component. Scale only that right component by the same
+	// aspect scalar used by retail projection, then renormalize to the
+	// 4096-length fixed-point convention expected by the sphere culler.
+	short adjusted[9];
+	int component;
+
+	for (component = 0;
+		 component < 9;
+		 ++component)
+	{
+		adjusted[component] =
+			source[component];
+	}
+
+	long leftRaw[3];
+	long rightRaw[3];
+
+	for (component = 0;
+		 component < 3;
+		 ++component)
+	{
+		const long left =
+			(long)source[3 + component];
+		const long right =
+			(long)source[6 + component];
+		const long sum =
+			left + right;
+		const long difference =
+			left - right;
+		const long scaledDifference =
+			(difference * aspectFixed) >>
+				12;
+
+		leftRaw[component] =
+			sum + scaledDifference;
+		rightRaw[component] =
+			sum - scaledDifference;
+	}
+
+	SpideyNormalizeCullPlane(
+		&adjusted[3],
+		leftRaw[0],
+		leftRaw[1],
+		leftRaw[2]);
+	SpideyNormalizeCullPlane(
+		&adjusted[6],
+		rightRaw[0],
+		rightRaw[1],
+		rightRaw[2]);
+
+	if (!gSpideyHorPlusCullLogged)
+	{
+		FILE* f = fopen(
+			"spidey-decomp-compat.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"horplus_cull scalar=%.6f source_left=%d,%d,%d source_right=%d,%d,%d adjusted_left=%d,%d,%d adjusted_right=%d,%d,%d call=0x004739CB retail=0x0046D810\n",
+				(double)aspectScalar,
+				(int)source[3],
+				(int)source[4],
+				(int)source[5],
+				(int)source[6],
+				(int)source[7],
+				(int)source[8],
+				(int)adjusted[3],
+				(int)adjusted[4],
+				(int)adjusted[5],
+				(int)adjusted[6],
+				(int)adjusted[7],
+				(int)adjusted[8]);
+			fclose(f);
+		}
+		gSpideyHorPlusCullLogged =
+			1;
+	}
+
+	retail(
+		adjusted);
+}
+
+static void SpideyInstallHorPlusCullCompat()
+{
+	const int installed =
+		SpideyPatchDirectCall(
+			0x004739CB,
+			0x0046D810,
+			SpideyCompatLoadCullBasis,
+			"horplus_cull_basis");
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"horplus_cull_install installed=%d call=0x004739CB retail=0x0046D810 scalar=%.6f\n",
+			installed,
+			(double)*(float*)0x00550064);
+		fclose(f);
+	}
+}
+
+
 typedef void (__cdecl *SpideyRetailSetDisplayOptionsFn)(
 		u32,
 		u32,
@@ -8400,6 +8595,7 @@ void game_patches(void)
 	// SetDisplayOptions scan rewrites the remaining retail call sites.
 	SpideyInstallDisplayAspectCompat();
 	SpideyInstallDisplayOptionsCompat();
+	SpideyInstallHorPlusCullCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
