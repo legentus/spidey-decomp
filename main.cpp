@@ -4438,6 +4438,295 @@ static void SpideyInstallFrontendLifecycleCompat()
 	}
 }
 
+typedef void (__cdecl *SpideyRetailPanelSetCoordsFn)(
+		i32,
+		i32,
+		POLY_FT4*,
+		void*,
+		i32,
+		i32);
+
+static unsigned long gSpideyGameplayUiScaledPolys =
+	0;
+static unsigned long gSpideyGameplayUiScaleSamples =
+	0;
+
+// @Ok
+static short SpideyScaleGameplayUiCoord(
+		short value,
+		float anchor,
+		float density)
+{
+	const float scaled =
+		anchor +
+		((float)value - anchor) *
+		density;
+
+	if (scaled >= 32767.0f)
+		return 32767;
+	if (scaled <= -32768.0f)
+		return -32768;
+
+	return (short)(
+		scaled >= 0.0f ?
+			scaled + 0.5f :
+			scaled - 0.5f);
+}
+
+// @Ok
+static float SpideyChooseGameplayUiAnchor(
+		short a,
+		short b,
+		short c,
+		short d,
+		float extent)
+{
+	short minimum =
+		a;
+	short maximum =
+		a;
+
+	if (b < minimum)
+		minimum = b;
+	if (c < minimum)
+		minimum = c;
+	if (d < minimum)
+		minimum = d;
+
+	if (b > maximum)
+		maximum = b;
+	if (c > maximum)
+		maximum = c;
+	if (d > maximum)
+		maximum = d;
+
+	const float center =
+		((float)minimum +
+		 (float)maximum) *
+		0.5f;
+
+	if (center < extent * 0.40f)
+		return 0.0f;
+
+	if (center > extent * 0.60f)
+		return extent;
+
+	return extent * 0.5f;
+}
+
+// @Ok
+static void SpideyCompactGameplayUiPoly(
+		POLY_FT4* poly,
+		const char* source)
+{
+	if (!poly ||
+		gSpideyFrontendUiActive ||
+		!gSpideyShadowPreviewEnabled ||
+		gSpideyModernLogicalWidth <= 640 ||
+		gSpideyModernLogicalHeight <= 480)
+	{
+		return;
+	}
+
+	const float densityX =
+		640.0f /
+		(float)gSpideyModernLogicalWidth;
+	const float densityY =
+		480.0f /
+		(float)gSpideyModernLogicalHeight;
+
+	if (densityX >= 1.0f &&
+		densityY >= 1.0f)
+	{
+		return;
+	}
+
+	const short beforeX0 = poly->x0;
+	const short beforeY0 = poly->y0;
+	const short beforeX1 = poly->x1;
+	const short beforeY1 = poly->y1;
+	const short beforeX2 = poly->x2;
+	const short beforeY2 = poly->y2;
+	const short beforeX3 = poly->x3;
+	const short beforeY3 = poly->y3;
+
+	const float anchorX =
+		SpideyChooseGameplayUiAnchor(
+			poly->x0,
+			poly->x1,
+			poly->x2,
+			poly->x3,
+			512.0f);
+	const float anchorY =
+		SpideyChooseGameplayUiAnchor(
+			poly->y0,
+			poly->y1,
+			poly->y2,
+			poly->y3,
+			240.0f);
+
+	poly->x0 =
+		SpideyScaleGameplayUiCoord(
+			poly->x0,
+			anchorX,
+			densityX);
+	poly->x1 =
+		SpideyScaleGameplayUiCoord(
+			poly->x1,
+			anchorX,
+			densityX);
+	poly->x2 =
+		SpideyScaleGameplayUiCoord(
+			poly->x2,
+			anchorX,
+			densityX);
+	poly->x3 =
+		SpideyScaleGameplayUiCoord(
+			poly->x3,
+			anchorX,
+			densityX);
+
+	poly->y0 =
+		SpideyScaleGameplayUiCoord(
+			poly->y0,
+			anchorY,
+			densityY);
+	poly->y1 =
+		SpideyScaleGameplayUiCoord(
+			poly->y1,
+			anchorY,
+			densityY);
+	poly->y2 =
+		SpideyScaleGameplayUiCoord(
+			poly->y2,
+			anchorY,
+			densityY);
+	poly->y3 =
+		SpideyScaleGameplayUiCoord(
+			poly->y3,
+			anchorY,
+			densityY);
+
+	++gSpideyGameplayUiScaledPolys;
+
+	if (gSpideyGameplayUiScaleSamples < 16)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"gameplay_ui_scale source=%s logical=%lux%lu density=%.6f,%.6f anchor=%.1f,%.1f before=%d,%d,%d,%d,%d,%d,%d,%d after=%d,%d,%d,%d,%d,%d,%d,%d count=%lu\n",
+				source ? source : "unknown",
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight,
+				(double)densityX,
+				(double)densityY,
+				(double)anchorX,
+				(double)anchorY,
+				(int)beforeX0,
+				(int)beforeY0,
+				(int)beforeX1,
+				(int)beforeY1,
+				(int)beforeX2,
+				(int)beforeY2,
+				(int)beforeX3,
+				(int)beforeY3,
+				(int)poly->x0,
+				(int)poly->y0,
+				(int)poly->x1,
+				(int)poly->y1,
+				(int)poly->x2,
+				(int)poly->y2,
+				(int)poly->x3,
+				(int)poly->y3,
+				gSpideyGameplayUiScaledPolys);
+			fclose(log);
+		}
+
+		++gSpideyGameplayUiScaleSamples;
+	}
+}
+
+// @Ok
+static void __cdecl SpideyCompatPanelSetCoordsFrame(
+		i32 x,
+		i32 y,
+		POLY_FT4* poly,
+		void* frame,
+		i32 width,
+		i32 height)
+{
+	SpideyRetailPanelSetCoordsFn retail =
+		(SpideyRetailPanelSetCoordsFn)0x00462C30;
+
+	retail(
+		x,
+		y,
+		poly,
+		frame,
+		width,
+		height);
+
+	SpideyCompactGameplayUiPoly(
+		poly,
+		"anim_frame");
+}
+
+// @Ok
+static void __cdecl SpideyCompatPanelSetCoordsTexture(
+		i32 x,
+		i32 y,
+		POLY_FT4* poly,
+		void* texture,
+		i32 width,
+		i32 height)
+{
+	SpideyRetailPanelSetCoordsFn retail =
+		(SpideyRetailPanelSetCoordsFn)0x00462CD0;
+
+	retail(
+		x,
+		y,
+		poly,
+		texture,
+		width,
+		height);
+
+	SpideyCompactGameplayUiPoly(
+		poly,
+		"texture");
+}
+
+// @Ok
+static void SpideyInstallGameplayUiScaleCompat()
+{
+	const int frameCalls =
+		SpideyPatchAllRetailDirectCalls(
+			0x00462C30,
+			(void*)&SpideyCompatPanelSetCoordsFrame);
+	const int textureCalls =
+		SpideyPatchAllRetailDirectCalls(
+			0x00462CD0,
+			(void*)&SpideyCompatPanelSetCoordsTexture);
+
+	FILE* log =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (log)
+	{
+		fprintf(
+			log,
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d reference=512x240 baseline_output=640x480 policy=compact_resolution_density\n",
+			frameCalls,
+			textureCalls);
+		fclose(log);
+	}
+}
+
+
 
 typedef void (__cdecl *SpideyRetailLoadCullBasisFn)(
 		const short*);
@@ -11102,6 +11391,7 @@ void game_patches(void)
 	SpideyInstallRetailInputCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();
+	SpideyInstallGameplayUiScaleCompat();
 	SpideyInstallCleanup503AF0Compat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
