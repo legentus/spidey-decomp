@@ -6716,3 +6716,64 @@ Key expected input telemetry:
 Key expected typography telemetry:
 - `frontend_text_scale ... requested=256 effective=113 ... logical=1920x1080` at 1080-high logical frontend;
 - or approximately `effective=85` at 1440-high logical frontend.
+
+
+## Follow-up runtime: Display Apply resets text + mouse trapped in upper-left box — 2026-10-01
+
+Tested revision:
+- `56374190919f6a12ff8abbe6602fee4dcba75f1b`
+
+### User-visible result
+- Changing resolution makes frontend text large again immediately.
+- Text becomes correctly small again only after entering a level and returning.
+- Mouse is not merely hitting a lower floor: it is confined to an invisible rectangular region in the upper-left portion of the screen.
+
+### Log-grounded text diagnosis
+Fresh compat telemetry proves the scale hook itself is working:
+- frontend setup reaches `requested=256 effective=113 frontend=1 logical=1920x1080`.
+- But Display Apply calls the modern selected resolution through `SpideyCompatSetDisplayOptions`, which classifies that rebuild as gameplay and logs `frontend=0`.
+- The same transition then sets `requested=256 effective=256`, so the font becomes retail-sized again even though the user is still physically in the shell.
+- A later level -> frontend transition reasserts frontend mode and returns the effective scale to the smaller value.
+
+Fix:
+- `b04a78b492dfe41842d42cf6017328b48d4138e6` — **frontend: fix apply scale reset and mouse double conversion**
+- `SpideyDisplayConfirmOrApply` now remembers whether the shell was live before the rebuild.
+- Immediately after the modern display rebuild, if the shell was live it restores `gSpideyFrontendLegacyMode=1`, refreshes the modern logical size, reapplies the logical render resolution (which reapplies the effective text scale), and resynchronizes mouse bounds.
+- Expected new compat line after Apply: `frontend_text_scale reason=display_apply_frontend_restore ... frontend=1`.
+- The text should no longer wait for a level roundtrip.
+
+### Log-grounded mouse diagnosis
+The previous raw-bound fix succeeded:
+- client = `2560x1440`
+- raw bounds = `0,0,2528,1408`
+So the remaining upper-left rectangle was not caused by raw clamping.
+
+The bug was a double transform:
+1. raw virtual mouse was mapped from client coordinates into modern logical `1920x1080`;
+2. retail `PCSHELL_CoordsPCtoDC` then performed its own PC-pixel -> 512x240 shell conversion.
+
+The shell expects `PCINPUT_GetMousePosition` and hotspot/hit-test coordinates in the retail DirectX PC canvas, not the modern DX11 logical canvas.
+
+Mouse fix in `b04a78b`:
+- raw bounds remain full HWND client size;
+- raw client coordinates are mapped exactly once into the retail PC canvas (`0x006B78E4/0x006B78E8`, same backing domain consumed by PCSHELL);
+- visible cursor, hotspot, and `IsMouseOver` all use that same retail-PC mapping;
+- modern logical dimensions are now telemetry only for this path.
+
+Expected new input telemetry:
+- `basis=client_to_retail_pc_canvas`
+- `shell_canvas=<retail backing>`
+- `modern_logical=<DX11 content canvas>`
+
+Validation metadata follow-up:
+- `19eb5bca0824e31d09e66ccce737e9ebca653d30` — **meta: validate frontend mouse ownership helpers**
+- adds repo-validator status comments to the new frontend/mouse helpers and cleans stale comments that still referred to the old logical mapping.
+
+### Focused retest
+1. Open Display and change resolution; Apply.
+2. Verify text stays small immediately after Apply.
+3. Repeat across 2-3 resolutions.
+4. Move cursor to all four screen edges/corners while still in frontend.
+5. Enter a level and return.
+6. Again reach all four edges/corners and check hover/click alignment.
+7. Upload fresh compat + input logs if either issue persists.
