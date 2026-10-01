@@ -6777,3 +6777,56 @@ Validation metadata follow-up:
 5. Enter a level and return.
 6. Again reach all four edges/corners and check hover/click alignment.
 7. Upload fresh compat + input logs if either issue persists.
+
+
+## Permanent runtime logging policy — single attachment only (2026-10-01)
+
+User requirement:
+- **All routine runtime diagnostics must be consolidated into one log file** so test sessions do not consume the ChatGPT attachment limit.
+- Future chats/tests should request **only `spidey-decomp.log`** unless there is an exceptional, explicitly stated reason for a different artifact.
+
+Implementation commits:
+- `66d39d8f5ceb24d60cf87954e4059c940311b151` — **logging: consolidate proxy telemetry into one file**
+  - all proxy-side COMPAT/AUDIO/INPUT/CAMERA/TEXTURE/DRAW/TIMING/PRESENT/DXERROR/RUNTIME logging now opens `spidey-decomp.log`;
+  - proxy opens prefix their category, e.g. `[COMPAT]`, `[DRAW]`, `[PRESENT]`, `[INPUT]`, etc.
+- `ae8b8332d3fa94ee8258e1d77a74099e6c2c00db` — **logging: fold crash diagnostics into consolidated log**
+  - vectored crash handler now appends its crash section to the same file rather than creating `spidey-decomp-crash.log`.
+- `1d49799222c71696ee57b222fc33e3d142574c11` — **logging: send renderer11 telemetry to consolidated log**
+  - renderer helper writes each line as `[RENDERER11] ...`.
+- `897c4f8b6e711405beaff7585802bc3590331b90` — **logging: send input11 telemetry to consolidated log**
+  - modern input helper writes each line as `[INPUT11] ...`.
+- `ea9b5d679d300a8f749be8f806171974c5ffdde8` — **logging: archive one consolidated runtime log**
+  - test launcher deletes stale legacy split logs;
+  - seeds `spidey-decomp.log` with `[SESSION]` revision, DLL hashes, game path, EXE hash/PE metadata and start time;
+  - appends exit code/end time after the game exits;
+  - copies only the consolidated runtime log into the timestamped session folder;
+  - launcher explicitly tells the user to attach only `spidey-decomp.log`.
+- `c87954c7616d18321a22be8846aa0e1134078fbe` — **logging: make runtime session folder single-file**
+  - routine session no longer creates separate `test-session.txt`, `game-exe-fingerprint.txt`, or copied `proxy-link-map.txt` artifacts;
+  - the important session/fingerprint identity is already embedded in `[SESSION]` records in the consolidated log;
+  - linker/source information remains available from the live repo/build when needed.
+
+Current consolidated categories include:
+- `[SESSION]`
+- `[COMPAT]`
+- `[AUDIO]`
+- `[INPUT]`
+- `[CAMERA]`
+- `[TEXTURE]`
+- `[DRAW]`
+- `[TIMING]`
+- `[PRESENT]`
+- `[DXERROR]`
+- `[CRASH]`
+- `[RUNTIME]`
+- `[RENDERER11]`
+- `[INPUT11]`
+
+Static audit:
+- proxy source contains zero old split-log filenames;
+- renderer11 source contains zero `spidey-renderer11.log` references;
+- input11 source contains zero `spidey-input11.log` references;
+- old filenames remain only in the launcher cleanup array;
+- main.cpp structural delimiter balance remains clean.
+
+**Do not regress this.** Historical documentation may mention uploading several logs, but those instructions are superseded by this policy.
