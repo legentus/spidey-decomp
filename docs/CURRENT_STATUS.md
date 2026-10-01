@@ -7511,3 +7511,40 @@ Provide screenshots if anything is still visually wrong. Use the single consolid
 - live `gameplay_ui_fill_scale` samples;
 - `background_message_pump`;
 - a post-Alt+Tab `foreground_acquire`.
+
+
+## Matching-build VC6 compile fix (2026-10-01)
+
+The first test attempt at revision `72c838e99458d8f8e3071548fbf8706ae29dd2af` did not reach runtime because the forced clean **matching build failed** in `main.cpp`.
+
+The matching compiler reported:
+
+- `main.cpp(5931): error C2374: 'i' : redefinition; multiple initialization`
+- previous declaration at `main.cpp(5911)`
+- `main.cpp(5951): error C2374: 'i' : redefinition; multiple initialization`
+- previous declaration at `main.cpp(5911)`
+
+Cause: the matching toolchain is MSVC 6-era and uses the old/non-standard for-loop variable scope, so three consecutive `for (int i = ...)` loops inside `SpideyInstallGameplayUiScaleCompat()` collide in the same function scope.
+
+Fix commit:
+
+- `37acd2c6bb31454217144e2cd3ec778543b81f9c` — **build: fix VC6 loop variable scoping**
+
+The three loops now use unique identifiers:
+
+- `qpolyIndex`
+- `gouraudIndex`
+- `flatIndex`
+
+A follow-up source scan over all newly added compatibility regions found no other repeated same-name `for (int ...)` declarations in the same new function bodies.
+
+This was a compile-only failure; none of the `430461d` pause/HUD/Alt+Tab runtime fixes have been tested yet.
+
+### Next action
+
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat` again. If the matching build succeeds, continue with the existing mandatory runtime test for:
+
+1. gameplay gauge/holder alignment;
+2. Pause -> Display Options activation;
+3. live Gameplay UI Scale + Menu/Text Scale Apply behavior;
+4. Alt+Tab out and back into a running level.
