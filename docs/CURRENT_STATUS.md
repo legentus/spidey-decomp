@@ -5476,3 +5476,69 @@ Current timing direction:
 - interpolate visual state between fixed logical updates where useful/feasible.
 
 This approach is safer than global delta-time conversion for this 2000 fixed-point engine and directly addresses the user's request to avoid physics/gameplay speed changes at high FPS.
+
+
+## Recovery after input-stream interruption — 2026-10-01
+
+The user supplied the interrupted-session transcript and asked whether any work was lost.
+
+Recovery audit:
+- live `dev` was inspected directly;
+- the last pre-audio timing/documentation checkpoint was:
+  - `e497ed897cfb6aeca55a08d5a5b39a4ad0e973b7` — `docs: ground gameplay and shell fixed-step timing`;
+- live `dev` is three implementation commits ahead of that checkpoint:
+  - `ea594c7ce6e8349a46ca29b4d4e5d834b5eb6b24` — `audio: add persisted output-device selection backend`;
+  - `4aa5d59a4000c03ab5a9c3c80ae775058dfe4379` — `audio: collect device-selection log in test sessions`;
+  - `7826aec4b1fb6adb2d2afcf14284ed807b4ae188` — `audio: add output-device row with safe shell restart`.
+
+### Audio work that definitely survived
+
+Backend:
+- dynamically resolves `DirectSoundCreate8` and `DirectSoundEnumerateA`;
+- enumerates playback devices;
+- creates an authored row 0 named `(System Default)`;
+- persists manual device selection by DirectSound GUID in `spidey-modern-audio.ini`;
+- default/fallback policy is row 0 / system default;
+- hooks the retail DirectSoundCreate8 import thunk at `0x00517A70`;
+- logs enumeration/selection/create results to `spidey-decomp-audio.log`.
+
+Audio menu:
+- retail `Shell_SFXMusic @ 0x004977D0` is extended from five rows to six;
+- row 5 is `Output: <device name>`;
+- uses the retail left/right trigger masks for selection;
+- refreshes devices when the Audio menu opens;
+- switching output is shell-only and performs a controlled DirectSound shutdown/recreate;
+- after recreation it runs retail `DXSOUND_Init @ 0x005039F0` and re-spools the `menu` SFX bank;
+- if a manually selected device fails to initialize, it falls back to `(System Default)`;
+- the resulting selection is persisted;
+- install marker:
+  `audio_menu_mod retail=0x004977D0 rows=6 output_row=5 ... live_restart=shell_only`.
+
+### Other work confirmed safe
+
+Mouse:
+- `4381062061b7a625c036dff7d851a3fac9430818` survives on `dev`;
+- frontend cursor hotspot/hit-test scaling now uses the same live DX canvas as shell hit rectangles.
+
+Timing:
+- retail gameplay is grounded as a maximum 60 Hz fixed-step/update loop;
+- retail main menu's ~30 FPS cap is grounded as two one-vblank waits per normal loop;
+- no global delta-time conversion was committed;
+- no menu-FPS uncapping patch was committed yet.
+
+Widescreen:
+- substantial static RE survived in the interrupted transcript;
+- `M3d_RenderSetup @ 0x00472DC0` was identified as the upstream 3D projection path;
+- the aspect scalar `0x00550064` is consumed inside that projection math;
+- the engine's separate PSX-style pixel-aspect state was also identified;
+- no final Hor+ implementation was committed before the interruption.
+
+### What was actually lost
+
+No substantive implementation commit was lost.
+
+The only missing durable state from the interrupted tail was:
+- final written documentation summarizing the new audio implementation;
+- any analysis performed after commit `7826aec4...` but before the stream terminated.
+
+That analysis was short and can be reconstructed from the supplied transcript plus the surviving source. The authoritative implementation frontier is the live `dev` branch, not the interrupted chat text.
