@@ -6130,6 +6130,7 @@ static int gSpideyD3D7FallbackSceneActive = 0;
 static unsigned long gSpideyD3D7BeginSceneSuppressed = 0;
 static unsigned long gSpideyD3D7EndSceneSuppressed = 0;
 static unsigned long gSpideyD3D7MainClearSuppressed = 0;
+static unsigned long gSpideyD3D7MainStateSuppressed = 0;
 static unsigned long gSpideyD3D7MainBltSuppressed = 0;
 static unsigned long gSpideyD3D7FallbackSceneBegins = 0;
 
@@ -6823,6 +6824,156 @@ static HRESULT WINAPI SpideyCompatD3D7SurfaceBlt(
 		effects);
 }
 
+static int SpideyReplayCachedD3D7State(
+		LPDIRECT3DDEVICE7 device)
+{
+	if (!device ||
+		!gSpideyRetailShadowStateValid)
+	{
+		return 0;
+	}
+
+	int ok =
+		1;
+
+	if (gSpideyRetailD3D7SetViewportOriginal)
+	{
+		D3DVIEWPORT7 viewport;
+		memset(
+			&viewport,
+			0,
+			sizeof(viewport));
+		viewport.dwX =
+			gSpideyRetailShadowState.viewportX;
+		viewport.dwY =
+			gSpideyRetailShadowState.viewportY;
+		viewport.dwWidth =
+			gSpideyRetailShadowState.viewportWidth;
+		viewport.dwHeight =
+			gSpideyRetailShadowState.viewportHeight;
+		viewport.dvMinZ =
+			gSpideyRetailShadowState.viewportMinZ;
+		viewport.dvMaxZ =
+			gSpideyRetailShadowState.viewportMaxZ;
+
+		if (FAILED(
+				gSpideyRetailD3D7SetViewportOriginal(
+					device,
+					&viewport)))
+		{
+			ok = 0;
+		}
+	}
+
+	if (gSpideyRetailD3D7SetRenderStateOriginal)
+	{
+		const D3DRENDERSTATETYPE renderStates[] =
+		{
+			D3DRENDERSTATE_ZENABLE,
+			D3DRENDERSTATE_ZWRITEENABLE,
+			D3DRENDERSTATE_ZFUNC,
+			D3DRENDERSTATE_ALPHABLENDENABLE,
+			D3DRENDERSTATE_SRCBLEND,
+			D3DRENDERSTATE_DESTBLEND,
+			D3DRENDERSTATE_ALPHATESTENABLE,
+			D3DRENDERSTATE_ALPHAREF,
+			D3DRENDERSTATE_ALPHAFUNC,
+			D3DRENDERSTATE_FOGENABLE,
+			D3DRENDERSTATE_FOGCOLOR
+		};
+		const DWORD renderValues[] =
+		{
+			gSpideyRetailShadowState.zEnable,
+			gSpideyRetailShadowState.zWrite,
+			gSpideyRetailShadowState.zFunc,
+			gSpideyRetailShadowState.alphaBlendEnable,
+			gSpideyRetailShadowState.srcBlend,
+			gSpideyRetailShadowState.dstBlend,
+			gSpideyRetailShadowState.alphaTestEnable,
+			gSpideyRetailShadowState.alphaRef,
+			gSpideyRetailShadowState.alphaFunc,
+			gSpideyRetailShadowState.fogEnable,
+			gSpideyRetailShadowState.fogColor
+		};
+
+		for (int i = 0;
+			 i < (int)(sizeof(renderStates) /
+					 sizeof(renderStates[0]));
+			 ++i)
+		{
+			if (FAILED(
+					gSpideyRetailD3D7SetRenderStateOriginal(
+						device,
+						renderStates[i],
+						renderValues[i])))
+			{
+				ok = 0;
+			}
+		}
+	}
+
+	if (gSpideyRetailD3D7SetTextureStageStateOriginal)
+	{
+		const D3DTEXTURESTAGESTATETYPE textureStates[] =
+		{
+			D3DTSS_COLOROP,
+			D3DTSS_COLORARG1,
+			D3DTSS_COLORARG2,
+			D3DTSS_ALPHAOP,
+			D3DTSS_ALPHAARG1,
+			D3DTSS_ALPHAARG2,
+			D3DTSS_ADDRESSU,
+			D3DTSS_ADDRESSV,
+			D3DTSS_MAGFILTER,
+			D3DTSS_MINFILTER
+		};
+		const DWORD textureValues[] =
+		{
+			gSpideyRetailShadowState.colorOp,
+			gSpideyRetailShadowState.colorArg1,
+			gSpideyRetailShadowState.colorArg2,
+			gSpideyRetailShadowState.alphaOp,
+			gSpideyRetailShadowState.alphaArg1,
+			gSpideyRetailShadowState.alphaArg2,
+			gSpideyRetailShadowState.addressU,
+			gSpideyRetailShadowState.addressV,
+			gSpideyRetailShadowState.magFilter,
+			gSpideyRetailShadowState.minFilter
+		};
+
+		for (int i = 0;
+			 i < (int)(sizeof(textureStates) /
+					 sizeof(textureStates[0]));
+			 ++i)
+		{
+			if (FAILED(
+					gSpideyRetailD3D7SetTextureStageStateOriginal(
+						device,
+						0,
+						textureStates[i],
+						textureValues[i])))
+			{
+				ok = 0;
+			}
+		}
+	}
+
+	if (gSpideyRetailD3D7SetTextureOriginal)
+	{
+		if (FAILED(
+				gSpideyRetailD3D7SetTextureOriginal(
+					device,
+					0,
+					(LPDIRECTDRAWSURFACE7)
+						gSpideyRetailShadowState.textureHandle)))
+		{
+			ok = 0;
+		}
+	}
+
+	return ok;
+}
+
 static HRESULT WINAPI SpideyShadowD3D7SetRenderTarget(
 		LPDIRECT3DDEVICE7 device,
 		LPDIRECTDRAWSURFACE7 renderTarget,
@@ -6844,6 +6995,9 @@ static HRESULT WINAPI SpideyShadowD3D7SetRenderTarget(
 
 	// If a genuinely offscreen path appears after a virtual main-scene
 	// BeginScene, start D3D7 lazily only for that compatibility work.
+	const int fallbackWasActive =
+		gSpideyD3D7FallbackSceneActive;
+
 	if (SpideyDx11AuthoritativeActive() &&
 		gSpideyDx11VirtualSceneActive &&
 		renderTarget != mainScene &&
@@ -6866,6 +7020,15 @@ static HRESULT WINAPI SpideyShadowD3D7SetRenderTarget(
 	{
 		gSpideyRetailShadowRenderTarget =
 			renderTarget;
+
+		if (SpideyDx11AuthoritativeActive() &&
+			renderTarget != mainScene &&
+			!fallbackWasActive &&
+			gSpideyD3D7FallbackSceneActive)
+		{
+			SpideyReplayCachedD3D7State(
+				device);
+		}
 	}
 
 	return hr;
@@ -6917,16 +7080,7 @@ static HRESULT WINAPI SpideyShadowD3D7SetViewport(
 		LPDIRECT3DDEVICE7 device,
 		LPD3DVIEWPORT7 viewport)
 {
-	if (!gSpideyRetailD3D7SetViewportOriginal)
-		return E_FAIL;
-
-	HRESULT hr =
-		gSpideyRetailD3D7SetViewportOriginal(
-			device,
-			viewport);
-
-	if (SUCCEEDED(hr) &&
-		viewport)
+	if (viewport)
 	{
 		gSpideyRetailShadowState.viewportX =
 			viewport->dwX;
@@ -6944,7 +7098,19 @@ static HRESULT WINAPI SpideyShadowD3D7SetViewport(
 			1;
 	}
 
-	return hr;
+	if (SpideyDx11AuthoritativeActive() &&
+		SpideyDx11OnMainScene())
+	{
+		++gSpideyD3D7MainStateSuppressed;
+		return S_OK;
+	}
+
+	if (!gSpideyRetailD3D7SetViewportOriginal)
+		return E_FAIL;
+
+	return gSpideyRetailD3D7SetViewportOriginal(
+		device,
+		viewport);
 }
 
 static HRESULT WINAPI SpideyShadowD3D7SetRenderState(
@@ -6952,18 +7118,6 @@ static HRESULT WINAPI SpideyShadowD3D7SetRenderState(
 		D3DRENDERSTATETYPE state,
 		DWORD value)
 {
-	if (!gSpideyRetailD3D7SetRenderStateOriginal)
-		return E_FAIL;
-
-	HRESULT hr =
-		gSpideyRetailD3D7SetRenderStateOriginal(
-			device,
-			state,
-			value);
-
-	if (FAILED(hr))
-		return hr;
-
 	switch (state)
 	{
 		case D3DRENDERSTATE_ZENABLE:
@@ -7001,7 +7155,23 @@ static HRESULT WINAPI SpideyShadowD3D7SetRenderState(
 			break;
 	}
 
-	return hr;
+	gSpideyRetailShadowStateValid =
+		1;
+
+	if (SpideyDx11AuthoritativeActive() &&
+		SpideyDx11OnMainScene())
+	{
+		++gSpideyD3D7MainStateSuppressed;
+		return S_OK;
+	}
+
+	if (!gSpideyRetailD3D7SetRenderStateOriginal)
+		return E_FAIL;
+
+	return gSpideyRetailD3D7SetRenderStateOriginal(
+		device,
+		state,
+		value);
 }
 
 static HRESULT WINAPI SpideyShadowD3D7SetTexture(
@@ -7009,23 +7179,28 @@ static HRESULT WINAPI SpideyShadowD3D7SetTexture(
 		DWORD stage,
 		LPDIRECTDRAWSURFACE7 texture)
 {
-	if (!gSpideyRetailD3D7SetTextureOriginal)
-		return E_FAIL;
-
-	HRESULT hr =
-		gSpideyRetailD3D7SetTextureOriginal(
-			device,
-			stage,
-			texture);
-
-	if (SUCCEEDED(hr) &&
-		stage == 0)
+	if (stage == 0)
 	{
 		gSpideyRetailShadowState.textureHandle =
 			(unsigned long)texture;
+		gSpideyRetailShadowStateValid =
+			1;
 	}
 
-	return hr;
+	if (SpideyDx11AuthoritativeActive() &&
+		SpideyDx11OnMainScene())
+	{
+		++gSpideyD3D7MainStateSuppressed;
+		return S_OK;
+	}
+
+	if (!gSpideyRetailD3D7SetTextureOriginal)
+		return E_FAIL;
+
+	return gSpideyRetailD3D7SetTextureOriginal(
+		device,
+		stage,
+		texture);
 }
 
 static HRESULT WINAPI SpideyShadowD3D7SetTextureStageState(
@@ -7034,57 +7209,61 @@ static HRESULT WINAPI SpideyShadowD3D7SetTextureStageState(
 		D3DTEXTURESTAGESTATETYPE state,
 		DWORD value)
 {
+	if (stage == 0)
+	{
+		switch (state)
+		{
+			case D3DTSS_COLOROP:
+				gSpideyRetailShadowState.colorOp = value;
+				break;
+			case D3DTSS_COLORARG1:
+				gSpideyRetailShadowState.colorArg1 = value;
+				break;
+			case D3DTSS_COLORARG2:
+				gSpideyRetailShadowState.colorArg2 = value;
+				break;
+			case D3DTSS_ALPHAOP:
+				gSpideyRetailShadowState.alphaOp = value;
+				break;
+			case D3DTSS_ALPHAARG1:
+				gSpideyRetailShadowState.alphaArg1 = value;
+				break;
+			case D3DTSS_ALPHAARG2:
+				gSpideyRetailShadowState.alphaArg2 = value;
+				break;
+			case D3DTSS_ADDRESSU:
+				gSpideyRetailShadowState.addressU = value;
+				break;
+			case D3DTSS_ADDRESSV:
+				gSpideyRetailShadowState.addressV = value;
+				break;
+			case D3DTSS_MAGFILTER:
+				gSpideyRetailShadowState.magFilter = value;
+				break;
+			case D3DTSS_MINFILTER:
+				gSpideyRetailShadowState.minFilter = value;
+				break;
+		}
+
+		gSpideyRetailShadowStateValid =
+			1;
+	}
+
+	if (SpideyDx11AuthoritativeActive() &&
+		SpideyDx11OnMainScene())
+	{
+		++gSpideyD3D7MainStateSuppressed;
+		return S_OK;
+	}
+
 	if (!gSpideyRetailD3D7SetTextureStageStateOriginal)
 		return E_FAIL;
 
-	HRESULT hr =
-		gSpideyRetailD3D7SetTextureStageStateOriginal(
-			device,
-			stage,
-			state,
-			value);
-
-	if (FAILED(hr) ||
-		stage != 0)
-	{
-		return hr;
-	}
-
-	switch (state)
-	{
-		case D3DTSS_COLOROP:
-			gSpideyRetailShadowState.colorOp = value;
-			break;
-		case D3DTSS_COLORARG1:
-			gSpideyRetailShadowState.colorArg1 = value;
-			break;
-		case D3DTSS_COLORARG2:
-			gSpideyRetailShadowState.colorArg2 = value;
-			break;
-		case D3DTSS_ALPHAOP:
-			gSpideyRetailShadowState.alphaOp = value;
-			break;
-		case D3DTSS_ALPHAARG1:
-			gSpideyRetailShadowState.alphaArg1 = value;
-			break;
-		case D3DTSS_ALPHAARG2:
-			gSpideyRetailShadowState.alphaArg2 = value;
-			break;
-		case D3DTSS_ADDRESSU:
-			gSpideyRetailShadowState.addressU = value;
-			break;
-		case D3DTSS_ADDRESSV:
-			gSpideyRetailShadowState.addressV = value;
-			break;
-		case D3DTSS_MAGFILTER:
-			gSpideyRetailShadowState.magFilter = value;
-			break;
-		case D3DTSS_MINFILTER:
-			gSpideyRetailShadowState.minFilter = value;
-			break;
-	}
-
-	return hr;
+	return gSpideyRetailD3D7SetTextureStageStateOriginal(
+		device,
+		stage,
+		state,
+		value);
 }
 
 static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
@@ -7597,6 +7776,7 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyD3D7BeginSceneSuppressed = 0;
 	gSpideyD3D7EndSceneSuppressed = 0;
 	gSpideyD3D7MainClearSuppressed = 0;
+	gSpideyD3D7MainStateSuppressed = 0;
 	gSpideyD3D7MainBltSuppressed = 0;
 	gSpideyD3D7FallbackSceneBegins = 0;
 	gSpideyModernRangeValid = 0;
@@ -7639,7 +7819,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu dx11_authoritative=%d d3d7_suppressed=%lu d3d7_fallback=%lu begin_suppressed=%lu end_suppressed=%lu clear_suppressed=%lu blt_suppressed=%lu fallback_scene_begins=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f class2d_valid=%d class2d_x=%.3f,%.3f class2d_y=%.3f,%.3f class3d_valid=%d class3d_x=%.3f,%.3f class3d_y=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu dx11_authoritative=%d d3d7_suppressed=%lu d3d7_fallback=%lu begin_suppressed=%lu end_suppressed=%lu clear_suppressed=%lu state_suppressed=%lu blt_suppressed=%lu fallback_scene_begins=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f class2d_valid=%d class2d_x=%.3f,%.3f class2d_y=%.3f,%.3f class3d_valid=%d class3d_x=%.3f,%.3f class3d_y=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -7663,6 +7843,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyD3D7BeginSceneSuppressed,
 				gSpideyD3D7EndSceneSuppressed,
 				gSpideyD3D7MainClearSuppressed,
+				gSpideyD3D7MainStateSuppressed,
 				gSpideyD3D7MainBltSuppressed,
 				gSpideyD3D7FallbackSceneBegins,
 				SpideyRenderer11GetMirroredTextureCount(),
