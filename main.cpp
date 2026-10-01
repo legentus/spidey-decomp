@@ -1292,6 +1292,7 @@ static const char* SpideyGetModernVideoIniPath()
 	return gSpideyModernVideoIniPath;
 }
 
+// @Ok
 static int SpideyClampUiScalePercent(
 		int percent)
 {
@@ -1302,6 +1303,7 @@ static int SpideyClampUiScalePercent(
 	return percent;
 }
 
+// @Ok
 static int SpideyUiScalePercentToSliderValue(
 		int percent)
 {
@@ -1321,6 +1323,7 @@ static int SpideyUiScalePercentToSliderValue(
 		range;
 }
 
+// @Ok
 static void SpideyUpdateUiScaleMenuLabels()
 {
 	gSpideyPendingGameplayUiScalePercent =
@@ -2444,6 +2447,7 @@ typedef void (__fastcall *SpideyRetailMenuAddEntryFn)(
 		void*,
 		const char*);
 
+// @Ok
 static void __fastcall SpideyDisplayAddBrightnessAndApply(
 		CMenu* menu,
 		void*,
@@ -2512,6 +2516,7 @@ typedef int (__cdecl *SpideyDisplaySliderMouseFn)(
 		int,
 		int);
 
+// @Ok
 static int SpideyGetDisplayScaleSliderY(
 		CMenu* menu,
 		const char* label,
@@ -2542,6 +2547,7 @@ static int SpideyGetDisplayScaleSliderY(
 	return 1;
 }
 
+// @Ok
 static void __fastcall SpideyDisplayMenuDisplay(
 		CMenu* menu,
 		void*)
@@ -2594,6 +2600,7 @@ static void __fastcall SpideyDisplayMenuDisplay(
 	}
 }
 
+// @Ok
 static int SpideyStepPendingUiScale(
 		int row,
 		int* percent,
@@ -2642,6 +2649,7 @@ static int SpideyStepPendingUiScale(
 	return 1;
 }
 
+// @Ok
 static void __fastcall SpideyDisplayMenuUpdate(
 		CMenu* menu,
 		void*)
@@ -2780,6 +2788,7 @@ static void __fastcall SpideyDisplayMenuUpdate(
 	}
 }
 
+// @Ok
 static void __fastcall SpideyPauseMenuUpdate(
 		CMenu* menu,
 		void*)
@@ -2902,6 +2911,7 @@ static void __fastcall SpideyPauseMenuUpdate(
 	}
 }
 
+// @Ok
 static void __cdecl SpideyDisplayConfirmOrApply(
 		u32,
 		u32,
@@ -4951,6 +4961,7 @@ static unsigned long gSpideyGameplayUiFillScaledDraws =
 static unsigned long gSpideyGameplayUiFillScaleSamples =
 	0;
 
+// @Ok
 static void SpideyGetGameplayUiDensity(
 		float* densityX,
 		float* densityY)
@@ -5257,6 +5268,7 @@ typedef void (__cdecl *SpideyRetailFlatUiPolyFn)(
 		i32,
 		i32);
 
+// @Ok
 static float SpideyChooseGameplayUiFloatAnchor(
 		float a,
 		float b,
@@ -5294,6 +5306,7 @@ static float SpideyChooseGameplayUiFloatAnchor(
 	return extent * 0.5f;
 }
 
+// @Ok
 static float SpideyScaleGameplayUiFloatCoord(
 		float value,
 		float anchor,
@@ -5304,6 +5317,7 @@ static float SpideyScaleGameplayUiFloatCoord(
 		density;
 }
 
+// @Ok
 static int SpideyRoundGameplayUiCoord(
 		float value)
 {
@@ -5313,6 +5327,7 @@ static int SpideyRoundGameplayUiCoord(
 			value - 0.5f);
 }
 
+// @Ok
 static void __cdecl SpideyCompatHealthBarQPoly2D(
 		float x0,
 		float y0,
@@ -5488,6 +5503,7 @@ static void __cdecl SpideyCompatHealthBarQPoly2D(
 		z);
 }
 
+// @Ok
 static void __cdecl SpideyCompatHealthBarFlatPoly(
 		float z,
 		i32 x,
