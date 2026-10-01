@@ -6134,6 +6134,7 @@ static unsigned long gSpideyD3D7MainStateSuppressed = 0;
 static unsigned long gSpideyD3D7MainBltSuppressed = 0;
 static unsigned long gSpideyD3D7FallbackSceneBegins = 0;
 
+// @Ok
 static int SpideyDx11AuthoritativeActive()
 {
 	return
@@ -6143,6 +6144,7 @@ static int SpideyDx11AuthoritativeActive()
 		gSpideyShadowPreviewReady;
 }
 
+// @Ok
 static int SpideyDx11OnMainScene()
 {
 	return
@@ -6698,6 +6700,7 @@ static void SpideyInitializeRetailShadowState(
 		1;
 }
 
+// @Ok
 static int SpideyEnsureD3D7FallbackScene(
 		LPDIRECT3DDEVICE7 device)
 {
@@ -6726,6 +6729,7 @@ static int SpideyEnsureD3D7FallbackScene(
 	return 1;
 }
 
+// @Ok
 static HRESULT WINAPI SpideyCompatD3D7BeginScene(
 		LPDIRECT3DDEVICE7 device)
 {
@@ -6750,6 +6754,7 @@ static HRESULT WINAPI SpideyCompatD3D7BeginScene(
 	return hr;
 }
 
+// @Ok
 static HRESULT WINAPI SpideyCompatD3D7EndScene(
 		LPDIRECT3DDEVICE7 device)
 {
@@ -6791,6 +6796,7 @@ static HRESULT WINAPI SpideyCompatD3D7EndScene(
 	return hr;
 }
 
+// @Ok
 static HRESULT WINAPI SpideyCompatD3D7SurfaceBlt(
 		LPDIRECTDRAWSURFACE7 destination,
 		LPRECT destinationRect,
@@ -6824,6 +6830,7 @@ static HRESULT WINAPI SpideyCompatD3D7SurfaceBlt(
 		effects);
 }
 
+// @Ok
 static int SpideyReplayCachedD3D7State(
 		LPDIRECT3DDEVICE7 device)
 {
@@ -7989,6 +7996,7 @@ static int SpideyPatchRetailD3D7VtableMethod(
 	return 1;
 }
 
+// @Ok
 static int SpideyInstallRetailD3D7SurfaceCompat()
 {
 	const int bltIndex = 5;
