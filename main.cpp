@@ -2763,6 +2763,11 @@ static void SpideyTryRebindBinkAudio(
 	if (!gSpideyRetainedBinkDirectSound)
 		return;
 
+	LPDIRECTSOUND8 currentDirectSound =
+		*(LPDIRECTSOUND8*)0x006B7920;
+	if (!currentDirectSound)
+		return;
+
 	void* activeBink =
 		*(void**)0x00AC0BA4;
 	if (activeBink)
@@ -2811,11 +2816,21 @@ static int SpideyRestartDirectSoundForShell(
 			0;
 	}
 
+	const int previousSelectedAudioDevice =
+		gSpideySelectedAudioDevice;
 	gSpideySelectedAudioDevice =
 		selectedIndex;
 
 	LPDIRECTSOUND8* directSoundSlot =
 		(LPDIRECTSOUND8*)0x006B7920;
+	LPDIRECTSOUND8 previousDirectSound =
+		*directSoundSlot;
+
+	// Keep a temporary rollback reference regardless of Bink state. Retail
+	// shutdown releases the game's ownership, but a failed new endpoint
+	// create must be able to restore the previous working device.
+	if (previousDirectSound)
+		previousDirectSound->AddRef();
 
 	// If Bink has already been initialized, it may still hold the current
 	// DirectSound object as a raw backend pointer. Retain that object before
@@ -2857,6 +2872,23 @@ static int SpideyRestartDirectSoundForShell(
 				&directSound);
 	}
 
+	int restoredPrevious =
+		0;
+
+	if (!created &&
+		previousDirectSound)
+	{
+		gSpideySelectedAudioDevice =
+			previousSelectedAudioDevice;
+		previousDirectSound->AddRef();
+		directSound =
+			previousDirectSound;
+		created =
+			1;
+		restoredPrevious =
+			1;
+	}
+
 	if (created &&
 		directSound)
 	{
@@ -2873,6 +2905,13 @@ static int SpideyRestartDirectSoundForShell(
 			"menu");
 	}
 
+	if (previousDirectSound)
+	{
+		previousDirectSound->Release();
+		previousDirectSound =
+			0;
+	}
+
 	SpideySaveAudioSettings();
 	SpideyUpdateAudioOutputMenuLabel();
 	SpideyTryRebindBinkAudio(
@@ -2887,13 +2926,14 @@ static int SpideyRestartDirectSoundForShell(
 			SpideyGetSelectedAudioDevice();
 		fprintf(
 			f,
-			"audio_restart reason=%s requested_index=%d selected_index=%d name=%s created=%d fallback_default=%d shell_only=1 retained_bink_ds=0x%08lX active_bink=0x%08lX apply=live\n",
+			"audio_restart reason=%s requested_index=%d selected_index=%d name=%s created=%d fallback_default=%d restored_previous=%d shell_only=1 retained_bink_ds=0x%08lX active_bink=0x%08lX apply=live\n",
 			reason ? reason : "unknown",
 			selectedIndex,
 			gSpideySelectedAudioDevice,
 			selected ? selected->name : "(System Default)",
 			created,
 			fellBack,
+			restoredPrevious,
 			(unsigned long)gSpideyRetainedBinkDirectSound,
 			(unsigned long)*(void**)0x00AC0BA4);
 		fclose(f);
@@ -4083,6 +4123,15 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		requestedHeight == 480 &&
 		requestedBpp == 16 &&
 		option4 == 0;
+
+	// If Apply changed us away from exclusive fullscreen, release DXGI
+	// ownership before retail tears down/rebuilds its hidden D3D7 producer.
+	if (gSpideyWindowMode !=
+		SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
+	{
+		SpideyApplyRendererWindowMode(
+			"display_options_pre_retail");
+	}
 
 	u32 physicalWidth =
 		requestedWidth;
