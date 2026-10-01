@@ -1520,8 +1520,10 @@ scannedHard:
 					(unsigned long)a1,
 					G_GLOBAL_TEXTURES[a1].mD3DTex);
 
-			hr = pTempSurf->Release();
-			D3D_ERROR_LOG_AND_QUIT(hr);
+			// IDirectDrawSurface7::Release returns a COM reference count, not an
+			// HRESULT. Treating a nonzero remaining refcount as a D3D error
+			// pollutes transition diagnostics even though it is not failure.
+			pTempSurf->Release();
 #endif
 		}
 
