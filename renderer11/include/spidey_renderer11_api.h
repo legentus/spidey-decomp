@@ -7,7 +7,7 @@ typedef void* HWND;
 typedef void* HDC;
 #endif
 
-#define SPIDEY_RENDERER11_ABI_VERSION 7UL
+#define SPIDEY_RENDERER11_ABI_VERSION 8UL
 
 typedef struct SpideyRenderer11ShadowVertex
 {
