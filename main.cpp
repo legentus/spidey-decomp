@@ -2865,8 +2865,13 @@ static void __fastcall SpideyPauseMenuDisplay(
 		menu,
 		0);
 
-	if (!menu)
+	if (!menu ||
+		!SpideyPauseMenuHasEntry(
+			menu,
+			gSpideyPauseApplyUiScaleLabel))
+	{
 		return;
+	}
 
 	SpideyDisplaySliderDrawFn drawSlider =
 		(SpideyDisplaySliderDrawFn)0x00498060;
@@ -2875,6 +2880,12 @@ static void __fastcall SpideyPauseMenuDisplay(
 		305;
 	int y =
 		0;
+	const char* selected =
+		0;
+
+	if (menu->mLine < menu->mNumLines)
+		selected =
+			menu->mEntry[menu->mLine].name;
 
 	if (SpideyGetDisplayScaleSliderY(
 			menu,
@@ -2884,7 +2895,7 @@ static void __fastcall SpideyPauseMenuDisplay(
 		drawSlider(
 			sliderX,
 			y,
-			menu->mEntry[menu->mLine].name ==
+			selected ==
 				gSpideyGameplayUiScaleMenuLabel ? 1 : 0,
 			SpideyUiScalePercentToSliderValue(
 				gSpideyPendingGameplayUiScalePercent));
@@ -2898,7 +2909,7 @@ static void __fastcall SpideyPauseMenuDisplay(
 		drawSlider(
 			sliderX,
 			y,
-			menu->mEntry[menu->mLine].name ==
+			selected ==
 				gSpideyMenuTextScaleMenuLabel ? 1 : 0,
 			SpideyUiScalePercentToSliderValue(
 				gSpideyPendingMenuTextScalePercent));
