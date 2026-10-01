@@ -5290,6 +5290,11 @@ static void SpideyReleaseRendererExclusiveForCompatRebuild(
 			gSpideySelectedOutputWidth,
 			gSpideySelectedOutputHeight);
 
+	HRESULT primaryRestore =
+		S_OK;
+	HRESULT sceneRestore =
+		S_OK;
+
 	if (result)
 	{
 		gSpideyRenderer11AppliedWindowMode =
@@ -5298,6 +5303,27 @@ static void SpideyReleaseRendererExclusiveForCompatRebuild(
 			0;
 		gSpideyRenderer11AppliedModeHeight =
 			0;
+
+		LPDIRECTDRAWSURFACE7 primary =
+			*(LPDIRECTDRAWSURFACE7*)0x006B7904;
+		LPDIRECTDRAWSURFACE7 scene =
+			*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
+		if (primary &&
+			primary->IsLost() ==
+				DDERR_SURFACELOST)
+		{
+			primaryRestore =
+				primary->Restore();
+		}
+
+		if (scene &&
+			scene->IsLost() ==
+				DDERR_SURFACELOST)
+		{
+			sceneRestore =
+				scene->Restore();
+		}
 	}
 
 	FILE* f = fopen(
@@ -5307,11 +5333,13 @@ static void SpideyReleaseRendererExclusiveForCompatRebuild(
 	{
 		fprintf(
 			f,
-			"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu result=%d\n",
+			"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu result=%d primary_restore=0x%08lX scene_restore=0x%08lX\n",
 			reason ? reason : "unknown",
 			gSpideySelectedOutputWidth,
 			gSpideySelectedOutputHeight,
-			result);
+			result,
+			(unsigned long)primaryRestore,
+			(unsigned long)sceneRestore);
 		fclose(f);
 	}
 }
