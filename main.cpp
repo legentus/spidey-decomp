@@ -5289,53 +5289,74 @@ static void SpideyApplyRendererWindowMode(
 }
 
 // @Ok
+// @Ok
 static void SpideyReleaseRendererExclusiveForCompatRebuild(
 		const char* reason)
 {
-	if (!gSpideyRenderer11Initialized ||
-		!gSpideyRenderer11SetFullscreenState ||
-		gSpideyRenderer11AppliedWindowMode !=
-			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
+	const int hadExclusive =
+		gSpideyRenderer11Initialized &&
+		gSpideyRenderer11SetFullscreenState &&
+		gSpideyRenderer11AppliedWindowMode ==
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE;
+
+	int releaseResult =
+		1;
+
+	if (hadExclusive)
 	{
-		return;
+		releaseResult =
+			gSpideyRenderer11SetFullscreenState(
+				0,
+				gSpideySelectedOutputWidth,
+				gSpideySelectedOutputHeight);
+
+		if (releaseResult)
+		{
+			gSpideyRenderer11AppliedWindowMode =
+				-1;
+			gSpideyRenderer11AppliedModeWidth =
+				0;
+			gSpideyRenderer11AppliedModeHeight =
+				0;
+		}
 	}
 
-	const int result =
-		gSpideyRenderer11SetFullscreenState(
-			0,
-			gSpideySelectedOutputWidth,
-			gSpideySelectedOutputHeight);
-
+	// Compatibility producers can encounter surfaces that were invalidated
+	// by an earlier DXGI-exclusive interval even after the current visible
+	// mode has become Windowed/Borderless. Always repair those surfaces
+	// before handing execution back to legacy movie/rebuild code.
+	HRESULT primaryLost =
+		S_OK;
+	HRESULT sceneLost =
+		S_OK;
 	HRESULT primaryRestore =
 		S_OK;
 	HRESULT sceneRestore =
 		S_OK;
 
-	if (result)
+	LPDIRECTDRAWSURFACE7 primary =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7904;
+	LPDIRECTDRAWSURFACE7 scene =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
+	if (primary)
 	{
-		gSpideyRenderer11AppliedWindowMode =
-			-1;
-		gSpideyRenderer11AppliedModeWidth =
-			0;
-		gSpideyRenderer11AppliedModeHeight =
-			0;
-
-		LPDIRECTDRAWSURFACE7 primary =
-			*(LPDIRECTDRAWSURFACE7*)0x006B7904;
-		LPDIRECTDRAWSURFACE7 scene =
-			*(LPDIRECTDRAWSURFACE7*)0x006B7908;
-
-		if (primary &&
-			primary->IsLost() ==
-				DDERR_SURFACELOST)
+		primaryLost =
+			primary->IsLost();
+		if (primaryLost ==
+			DDERR_SURFACELOST)
 		{
 			primaryRestore =
 				primary->Restore();
 		}
+	}
 
-		if (scene &&
-			scene->IsLost() ==
-				DDERR_SURFACELOST)
+	if (scene)
+	{
+		sceneLost =
+			scene->IsLost();
+		if (sceneLost ==
+			DDERR_SURFACELOST)
 		{
 			sceneRestore =
 				scene->Restore();
@@ -5349,12 +5370,15 @@ static void SpideyReleaseRendererExclusiveForCompatRebuild(
 	{
 		fprintf(
 			f,
-			"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu result=%d primary_restore=0x%08lX scene_restore=0x%08lX\n",
+			"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu had_exclusive=%d release_result=%d primary_lost=0x%08lX primary_restore=0x%08lX scene_lost=0x%08lX scene_restore=0x%08lX\n",
 			reason ? reason : "unknown",
 			gSpideySelectedOutputWidth,
 			gSpideySelectedOutputHeight,
-			result,
+			hadExclusive,
+			releaseResult,
+			(unsigned long)primaryLost,
 			(unsigned long)primaryRestore,
+			(unsigned long)sceneLost,
 			(unsigned long)sceneRestore);
 		fclose(f);
 	}
