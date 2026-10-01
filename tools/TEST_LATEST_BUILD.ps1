@@ -426,7 +426,7 @@ New-Item -ItemType Directory -Force -Path $sessionDir | Out-Null
 
 Write-Host "[..] Fingerprinting SpideyPC.exe..."
 try {
-    $peInfo = Write-PeFingerprint $gameExe (Join-Path $sessionDir "game-exe-fingerprint.txt")
+    $peInfo = Get-PeFingerprint $gameExe
     Write-Host ("[INFO] EXE SHA-256: " + $peInfo.Sha256)
     Write-Host ("[INFO] PE timestamp: 0x{0:X8}" -f $peInfo.TimeDateStamp)
     Write-Host ("[INFO] Image size: 0x{0:X8}" -f $peInfo.SizeOfImage)
@@ -434,20 +434,9 @@ try {
     Stop-WithPause ("Failed to fingerprint SpideyPC.exe: " + $_.Exception.Message)
 }
 
-@(
-    "revision=$revision",
-    "proxy_sha256=$hash",
-    "renderer11_sha256=$renderer11Hash",
-    "input11_sha256=$input11Hash",
-    "game=$gameExe",
-    "started=$(Get-Date -Format o)"
-) | Set-Content -Path (Join-Path $sessionDir "test-session.txt") -Encoding UTF8
-
-if (Test-Path $linkMap) {
-    Copy-Item $linkMap (Join-Path $sessionDir "proxy-link-map.txt") -Force
-    Write-Host "[MAP] Proxy linker map captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "proxy-link-map.txt"))
-}
+# Routine runtime sessions intentionally archive one uploadable diagnostic
+# artifact only: spidey-decomp.log. Revision/build hashes and the important
+# executable fingerprint fields are seeded into that file below.
 
 $consolidatedLog = Join-Path $gameDir "spidey-decomp.log"
 
