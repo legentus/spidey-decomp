@@ -7358,6 +7358,13 @@ events during the failed in-level activation.
 
 Retail disassembly shows why. The actual pause confirm dispatch occurs *after* `CMenu_Update`:
 
+The exact retail code also verifies that the pause-menu pointer is the global at `0x005FAED0`:
+
+- `0x004415F2 mov ecx,[0x005FAED0]` immediately before `CMenu_Update`;
+- `0x00441616 mov eax,[0x005FAED0]` immediately after the confirm trigger, before retail selection/hit dispatch.
+
+Therefore the corrective confirm wrapper's menu lookup uses the same object retail is dispatching; `0x005FAED0` is not an inferred/guessed pointer.
+
 - `0x004415F8 call CMenu_Update`
 - pushes `1, 1, 0x100`
 - `0x00441606 call PCSHELL_CheckTriggers @ 0x0050C180`
