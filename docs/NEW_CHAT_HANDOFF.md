@@ -35,6 +35,14 @@ The last runtime immediately before the Exclusive crash showed complete main-fra
 
 DXGI itself successfully entered exclusive. The crash came afterward because legacy DirectDraw/D3D7 surfaces became `DDERR_SURFACELOST`. The migration therefore removes the visible frame's dependency on those surfaces rather than trying to keep two display owners synchronized.
 
+## Final hardening after the initial DX11-authoritative checkpoint
+
+- `f4385217703d0a4e5669e17cd0ea95dbd337d76a` — metadata tags for new migration helpers.
+- `4c726ebd6f4ecf0c1996bc64512596935228fc18` — release DXGI exclusive before any legacy compatibility rebuild, install hooks on replacement D3D7 objects, then reacquire Exclusive.
+- `0de70eaf8983a14c94c1b67138fd4406ad52f927` — CURRENT_STATUS checkpoint for this hardened runtime frontier.
+
+Static audit at `4c726eb` passed structural delimiter checks, verified the 51-field draw telemetry argument count, verified no F9/F10 handlers remain, and verified replacement-object hooks are installed before Exclusive reacquisition.
+
 ## NEXT ACTION — do not blindly extend before this runtime validation
 
 Have the user run the normal:
