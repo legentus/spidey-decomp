@@ -6365,3 +6365,111 @@ Final source-level audit at `4c726eb`:
 - the explicit `renderer11_release_exclusive_for_compat` path is present.
 
 **Runtime-test frontier:** `4c726ebd6f4ecf0c1996bc64512596935228fc18` plus the status/handoff-only commits that follow it.
+
+
+## DX11-authoritative startup crash — runtime result + fix (2026-10-01)
+
+### User runtime result
+
+The first DX11-authoritative build crashed almost immediately on launch. The user heard/briefly reached the first splash movie, then the process aborted.
+
+Test session revision:
+- `5411665738851098256555b12c3b3ac048b12cfa`
+
+The failure was **not** caused by incorrect COM vtable slot selection:
+- Device7 hooks installed for BeginScene=5, EndScene=6, SetRenderTarget=8, Clear=10, SetViewport=13, SetRenderState=20, DrawPrimitive=25, SetTexture=35, SetTextureStageState=37.
+- Surface7 Blt hook installed.
+- draw probe reported all 9 state hooks installed.
+
+### Exact root cause
+
+The first completed `DXPOLY_Flip` had no replayable geometry:
+- `shadow_frame frame=1 target=1920x1440 queued=0 submitted=0 skipped_submit=0 rendered=0 ...`
+
+However, `SpideyRenderer11_ShadowEndFrame` incorrectly returned success for an empty command stream.
+
+The proxy interpreted that success as a complete DX11 frame:
+- set `gSpideyShadowPreviewReady=1`;
+- cleared exclusive deferral;
+- called `SpideyApplyRendererWindowMode("dx11_authoritative_ready")`;
+- DXGI successfully entered Exclusive.
+
+The renderer then immediately rejected DX11 shadow presentation because no shadow target/SRV existed:
+- `present_shadow rejected ... srv=0x00000000 shadow=0x0`.
+
+At the same moment, the still-live DirectDraw surfaces used by the startup Bink movie became lost:
+- `scene_pre ... lost_hr=0x887601C2`
+- `primary_post ... lost_hr=0x887601C2`
+
+PCMovie then failed while using its DirectDraw movie surface/path, producing the startup abort.
+
+### Relevant architectural finding
+
+Retail movie playback is still a genuine legacy producer:
+
+```
+BinkDoFrame
+  -> lock g_MovieDD7Surface
+  -> BinkCopyToBuffer
+  -> unlock
+  -> g_pDDS_Scene->Blt(g_MovieDD7Surface)
+  -> DXPOLY_Flip
+```
+
+Therefore Bink/PCMovie must remain on the compatibility side until movie surfaces/copies are migrated to DX11. DXGI Exclusive must not invalidate those surfaces mid-frame.
+
+### Fix commits
+
+- `3f3d8fd6e6e8bf88a6cc596c0e8a20835277ba6b` — **renderer11: require a complete frame before takeover**
+  - `ShadowEndFrame` now returns 0 for an empty queue.
+  - it also returns 0 when no replay occurred.
+  - after replay it returns 1 only when:
+    - rendered > 0,
+    - rendered == queued commands,
+    - skipped submit == 0,
+    - skipped render == 0.
+  - frame logs now expose `presentable=0/1`.
+  - This fixes the contract itself instead of special-casing frame 1 in the proxy.
+
+- `a4e005885f0eb1780b3366a990e20ffc8db3fcc2` — **renderer: keep DXGI takeover out of retail movies**
+  - proxy readiness is forced false while either retail Bink handle `0x00AC0BA4` or movie surface `0x00AC0A3C` is live.
+  - takeover-gate telemetry logs movie handle/surface, shadow result, ready state and deferred state.
+  - added a compatibility wrapper around retail movie-frame routine `0x0050B5A0`.
+  - before the retail movie frame runs, any active DXGI Exclusive ownership is released, exclusive takeover is deferred again, and DX11 authoritative readiness is cleared.
+  - this protects later Bink/cutscene playback too, not only startup.
+
+- `ac275ef13e289e687eb3093c424d9d5ccfbd9e76` — **renderer: restore legacy movie surfaces after exclusive**
+  - when DXGI Exclusive is released for a legacy compatibility producer, the retail primary and scene surfaces are explicitly restored if they are still marked `DDERR_SURFACELOST`.
+  - telemetry records `primary_restore` and `scene_restore` HRESULTs.
+
+### Expected next runtime behavior
+
+On startup:
+1. frame 1 has no DX11 geometry -> `ShadowEndFrame presentable=0`;
+2. DX11 authoritative readiness remains false;
+3. requested Exclusive stays deferred;
+4. startup Bink movie continues using the known-good legacy DirectDraw compatibility path;
+5. once no movie is active and a complete non-empty DX11 frame renders successfully, readiness becomes true;
+6. only then does DXGI acquire true Exclusive and DX11 become the visible main renderer.
+
+During later movies/cutscenes:
+1. movie-frame wrapper releases DXGI Exclusive before retail touches its surfaces;
+2. legacy primary/scene are restored if necessary;
+3. movie remains compatibility-rendered;
+4. after the movie ends, a later complete DX11 frame can reacquire Exclusive.
+
+### What to verify in the next runtime
+
+Use the normal updater/build and simply boot first.
+
+Success indicators:
+- `shadow_frame frame=1 ... queued=0 ... presentable=0`
+- no `renderer11_window_mode reason=dx11_authoritative_ready ... exclusive=1` during the empty startup frame
+- `dx11_takeover_gate ... movie_blocks=1 ... ready=0 deferred=1` while splash/Bink is active
+- `movie_frame_compat patched_calls` should be nonzero
+- startup movies survive
+- after movies finish, first complete non-empty DX11 frame reports `presentable=1`
+- only then does `dx11_authoritative_ready` enter Exclusive
+- no PCMovie D3D error / no `DDERR_SURFACELOST` abort
+
+If boot reaches the menu, continue the existing Windowed/Borderless/Exclusive and gameplay validation from the prior handoff.
