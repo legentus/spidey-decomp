@@ -1393,6 +1393,8 @@ static void SpideyApplySelectedWindowStyle(
 
 static void SpideyApplyRendererWindowMode(
 		const char* reason);
+static void SpideyReleaseRendererExclusiveForCompatRebuild(
+		const char* reason);
 
 struct SpideyAudioDeviceInfo
 {
@@ -4160,14 +4162,12 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		requestedBpp == 16 &&
 		option4 == 0;
 
-	// If Apply changed us away from exclusive fullscreen, release DXGI
-	// ownership before retail tears down/rebuilds its hidden D3D7 producer.
-	if (gSpideyWindowMode !=
-		SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
-	{
-		SpideyApplyRendererWindowMode(
-			"display_options_pre_retail");
-	}
+	// The compatibility producer must never be torn down/rebuilt while DXGI
+	// owns the display exclusively. Release exclusive unconditionally if it
+	// is currently active; the selected target mode is reacquired only after
+	// the replacement compatibility objects have their interception hooks.
+	SpideyReleaseRendererExclusiveForCompatRebuild(
+		"display_options_pre_retail");
 
 	u32 physicalWidth =
 		requestedWidth;
@@ -4271,26 +4271,20 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 
 	SpideyInjectModernVideoModes();
 
-	// Leave DXGI exclusive ownership before changing to a normal Win32
-	// borderless/windowed style. For exclusive entry, establish the popup
-	// window first and let DXGI take ownership immediately afterward.
-	if (gSpideyWindowMode !=
-		SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
-	{
-		SpideyApplyRendererWindowMode(
-			"display_options_leave_exclusive");
-	}
-
 	SpideyApplySelectedWindowStyle(
 		*(HWND*)0x006B58D0,
 		"display_options");
 
-	if (gSpideyWindowMode ==
-		SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
-	{
-		SpideyApplyRendererWindowMode(
-			"display_options_enter_exclusive");
-	}
+	// Retail may have replaced the Direct3D7 device and main surfaces. Hook
+	// those replacement compatibility objects *before* DXGI is allowed to
+	// reacquire exclusive display ownership.
+	SpideyInstallRetailD3D7DrawProbe();
+
+	SpideyApplyRendererWindowMode(
+		gSpideyWindowMode ==
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE ?
+			"display_options_enter_exclusive" :
+			"display_options_leave_exclusive");
 
 	SpideyRefreshModernLogicalResolution();
 	SpideyApplyLogicalRenderResolution(
@@ -4327,8 +4321,6 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		fclose(f);
 	}
 
-	// Display-option changes can destroy/recreate the retail D3D7 device.
-	SpideyInstallRetailD3D7DrawProbe();
 }
 
 
@@ -5275,6 +5267,50 @@ static void SpideyApplyRendererWindowMode(
 			gSpideyRenderer11ExclusiveDeferred,
 			width,
 			height,
+			result);
+		fclose(f);
+	}
+}
+
+// @Ok
+static void SpideyReleaseRendererExclusiveForCompatRebuild(
+		const char* reason)
+{
+	if (!gSpideyRenderer11Initialized ||
+		!gSpideyRenderer11SetFullscreenState ||
+		gSpideyRenderer11AppliedWindowMode !=
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
+	{
+		return;
+	}
+
+	const int result =
+		gSpideyRenderer11SetFullscreenState(
+			0,
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight);
+
+	if (result)
+	{
+		gSpideyRenderer11AppliedWindowMode =
+			-1;
+		gSpideyRenderer11AppliedModeWidth =
+			0;
+		gSpideyRenderer11AppliedModeHeight =
+			0;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu result=%d\n",
+			reason ? reason : "unknown",
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight,
 			result);
 		fclose(f);
 	}
