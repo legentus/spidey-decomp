@@ -105,9 +105,11 @@ namespace
 
     void Log(const char* format, ...)
     {
-        FILE* file = std::fopen("spidey-renderer11.log", "a");
+        FILE* file = std::fopen("spidey-decomp.log", "a");
         if (!file)
             return;
+
+        std::fputs("[RENDERER11] ", file);
 
         va_list args;
         va_start(args, format);
