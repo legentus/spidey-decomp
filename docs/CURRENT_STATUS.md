@@ -5760,3 +5760,76 @@ Additional exact helper semantics recovered:
 - `M3d_Render` calls both immediately before `M3dAsm_BoundingSpherePreprocessing`.
 
 Do not patch the culler with arbitrary multipliers yet. Next derive which of the three source normals in `0x0065CED0..` are horizontal vs vertical and how their slope is calculated from the viewport/Zoom terms, then apply the selected aspect at the vector-construction stage so projection and culling remain mathematically matched.
+
+
+## Hor+ implementation checkpoint before interruption — 2026-09-30
+
+### Source implementation now committed
+
+Commit:
+- `e59539d4a501cc1269cf0b23988c15ede041bd80` — `widescreen: synchronize Hor+ side-plane culling`
+
+Implementation in `main.cpp`:
+- patches the single retail call at `M3d_Render + 0x2B`, call site `0x004739CB -> sub_46D810 @ 0x0046D810`;
+- wrapper `SpideyCompatLoadCullBasis` leaves the first row of the second 3x3 frustum matrix unchanged;
+- treats rows 1/2 as the mirrored horizontal side-plane pair;
+- decomposes the pair into common forward component + opposing right component;
+- scales only the horizontal/right component by the same selected aspect scalar at `0x00550064`;
+- renormalizes both side planes back to the engine's 4096-length fixed-point convention;
+- passes the adjusted 3x3 matrix to the original retail `sub_46D810`;
+- adds one-shot `horplus_cull` and install telemetry in `spidey-decomp-compat.log`.
+
+No vertical plane, near/far depth, physics, UI, or timing code is changed by this patch.
+
+### Frustum/culling mapping is now grounded
+
+Retail `M3d_RenderSetup @ 0x00472DC0` constructs six normalized fixed-point frustum normals as two 3x3 matrices.
+
+Grounded data flow:
+- first 3x3 matrix starts at `0x0065CEB8`;
+- second 3x3 matrix starts at `0x0065CED0`;
+- the second matrix is rotated into camera/world space and stored at `0x00628620`;
+- `M3d_Render` copies that basis into `0x00610B60` via `sub_46D810`;
+- `sub_46E250` writes camera position into `0x00610BF0/F4/F8`;
+- `M3dAsm_BoundingSpherePreprocessing @ 0x0046FAD0` consumes the basis + camera position and marks objects outside those planes non-rendered.
+
+Algebraic inspection of the setup code shows:
+- row 0 of the second 3x3 matrix is the opposing vertical plane;
+- rows 1 and 2 are the mirrored left/right side planes;
+- their shared component is camera-forward;
+- their opposing component is camera-right;
+- widening horizontal FOV therefore requires reducing the right-component magnitude while preserving the forward component, then renormalizing.
+
+This matches the selected aspect scalar convention:
+- 4:3 = 1.0;
+- 16:9 = 0.75;
+- wider formats use progressively smaller scalars.
+
+Important architectural result:
+- retail projection reads `0x00550064` later in `M3d_RenderSetup`;
+- retail object-culling planes are constructed earlier and do not automatically read that scalar;
+- without the new wrapper, projected Hor+ and object visibility can disagree at the widened left/right edges.
+
+### Exact 2D/3D submission provenance now identified
+
+Retail function boundaries:
+- `PCGfx_DrawQuad2D @ 0x00507470`;
+- `PCGfx_DrawQPoly2D @ 0x00507910`;
+- `PCGfx_DrawQPoly3D @ 0x00508550`;
+- `DXPOLY_DrawPoly @ 0x00503100`.
+
+The two exact 2D functions both end in direct calls to `DXPOLY_DrawPoly`:
+- `0x005078F0 -> 0x00503100`;
+- `0x00507D83 -> 0x00503100`.
+
+This gives a reliable higher-level 2D provenance boundary. Do not use z/RHW, depth, bounds, or other vertex heuristics to identify HUD/frontend draws.
+
+### Unfinished next step
+
+The current DX11 replay still applies one modern viewport override to all captured main-scene draws. The next implementation task is to preserve exact 2D-vs-3D provenance through the retail queued/sorted polygon path so:
+- world geometry uses the Hor+ modern viewport/projection;
+- HUD/frontend 2D retains its own stable layout/safe-area transform instead of being stretched with world geometry.
+
+Work stopped while tracing how `DXPOLY_DrawPoly @ 0x00503100` stores/sorts queued polygons and how to attach provenance without modifying retail vertex semantics.
+
+Do not resume the old UV/RHW distortion investigation unless the previously fixed visual distortion regresses.
