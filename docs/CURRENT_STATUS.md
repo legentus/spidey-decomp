@@ -5833,3 +5833,82 @@ The current DX11 replay still applies one modern viewport override to all captur
 Work stopped while tracing how `DXPOLY_DrawPoly @ 0x00503100` stores/sorts queued polygons and how to attach provenance without modifying retail vertex semantics.
 
 Do not resume the old UV/RHW distortion investigation unless the previously fixed visual distortion regresses.
+
+
+## Combined widescreen/timing implementation checkpoint — 2026-09-30
+
+Source work added after the prior Hor+ culling checkpoint:
+
+- `a3421ff146f6144cb608e9fbc3792eff0373aaf1` — exact 2D polygon provenance sidecar in `main.cpp`.
+- `fe6f93a75feb2bbce622dbc7c1078089cb97b3f1` — renderer legacy bridge carries `drawClass`.
+- `63f7e9b8056d336b802f8f15dcbd978da1fbc915` — renderer11 ABI bumped 6 -> 7 for draw provenance.
+- `7a075095130225954338804eedeb354d3c2097d9` — gameplay Logic and completed-frame present-rate telemetry.
+- `c03238788d38b3ff7f7fd2a77428bde1894fc744` — test launcher captures `spidey-decomp-timing.log`.
+- `f1a0899fa3e9dfc72753c000c8ced13e83a1249c` — separate 2D and 3D transformed-vertex coordinate ranges in draw telemetry.
+
+### Exact 2D provenance implementation
+
+Retail-proven direct calls:
+- `PCGfx_DrawQuad2D: 0x005078F0 -> DXPOLY_DrawPoly 0x00503100`
+- `PCGfx_DrawQPoly2D: 0x00507D83 -> DXPOLY_DrawPoly 0x00503100`
+
+Both calls are patched to a wrapper that tags the originating `DXPOLY*` in a DLL-owned fixed-size sidecar table.
+
+Why the sidecar is required:
+- `DXPOLY_DrawPoly` queues sorted primitives when sort slot >= 0;
+- `DXPOLY_EndScene` later walks those queued `DXPOLY*` objects and submits their vertices with `vertices = poly + 0x10`;
+- therefore the final D3D7/DX11 DrawPrimitive hook recovers the exact queued polygon as `vertices - 0x10` and can identify whether it originated from the exact 2D path without modifying any retail structure or using heuristics.
+
+The resulting renderer shadow state carries:
+- `drawClass = 1` for exact 2D provenance;
+- `drawClass = 0` otherwise.
+
+Draw telemetry now records:
+- `class_2d`
+- `class_3d`
+- `tagged_2d`
+- separate `class2d_x/y` and `class3d_x/y` coordinate ranges.
+
+This is the evidence needed to apply the next HUD/frontend safe-area transform against the *actual transformed coordinate basis* rather than the unreliable legacy D3D7 viewport value.
+
+### Timing telemetry implementation
+
+Retail gameplay call site:
+- `PlayAway 0x004559D0`
+- direct gameplay update call `0x00455A8B -> Logic 0x00455400`
+
+That exact call is wrapped for observation only. It does not change simulation cadence.
+
+New `spidey-decomp-timing.log` records approximately once per second:
+- `timing_logic ... hz=<actual Logic calls/sec>`
+- `timing_present ... hz=<completed frames/sec>`
+- frontend state
+- engine `Vblanks @ 0x006B4CA0`
+- modern logical and legacy physical dimensions.
+
+This will distinguish:
+- true >60 Hz gameplay simulation (actual speed-up source), from
+- 60 Hz fixed simulation with higher/different presentation cadence.
+
+### Frontend coordinate grounding
+
+Reconstructed `PCSHELL_CoordsDCtoPC` is matching and confirms authored shell coordinates are Dreamcast-style:
+- X domain: 0..512
+- Y domain: 0..240
+
+Retail converts them as:
+- `x = x / 512 * gDxResolutionX`
+- `y = y / 240 * gDxResolutionY`
+
+Therefore the main menu can remain on the stable retail 640x480 compatibility canvas while DX11 remaps it into a modern high-resolution layout. It is not necessary to force retail frontend internals themselves to run natively at 2560x1440.
+
+### Next runtime pass
+
+A runtime pass is now higher-value than more static guessing because it will provide, in one session:
+1. exact 2D vs 3D transformed coordinate ranges;
+2. whether the Hor+ culling-plane adjustment behaves correctly;
+3. actual gameplay Logic Hz vs present Hz;
+4. whether the already-committed mouse hotspot fix resolves post-level hover/click alignment;
+5. whether the already-committed System Default/manual audio output work behaves correctly.
+
+Do not use F9. F10 reference switching is unnecessary for this pass.
