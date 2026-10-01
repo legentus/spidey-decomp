@@ -5542,3 +5542,70 @@ The only missing durable state from the interrupted tail was:
 - any analysis performed after commit `7826aec4...` but before the stream terminated.
 
 That analysis was short and can be reconstructed from the supplied transcript plus the surviving source. The authoritative implementation frontier is the live `dev` branch, not the interrupted chat text.
+
+
+## Widescreen recovery RE — projection patch vs render-domain separation — 2026-10-01
+
+Recovery package and live branch were re-verified before further engineering:
+- handoff SHA-256: `8bee9904a6ea22854f87c0301425c2b5ba0d771bccc319f7d73e5c0f9b0432a6`;
+- ZIP integrity: PASS;
+- live `dev` HEAD still exactly `ce20a6eb1caf00df0816551f54a5c88a6fcd0c95`;
+- no branch/package divergence exists.
+
+### Established aspect scalar is valid
+
+The current aspect values are not speculative.
+
+The public `r57zone/Spider-Man-Settings` utility writes the aspect-ratio float at executable file offset `0x150064`, which maps to retail VA `0x00550064`, and uses the same values already present in this project:
+- 4:3 = 1.0
+- 5:4 = 1.06667
+- 16:9 = 0.75
+- 16:10 = 0.83333
+- 21:9 = 0.57143
+- 32:9 = 0.375
+
+That independent implementation credits the original address discovery and documents widescreen support, while also documenting two limitations relevant to our current work:
+- HUD remains stretched;
+- edge polygons can appear late because culling/optimization still assumes the old view.
+
+Therefore do **not** replace `0x00550064` with a guessed FOV constant. The remaining work is to separate world projection, source-screen coordinates, 2D/HUD layout, frontend layout, and culling.
+
+### Runtime evidence proves the render domains are already decoupled
+
+Latest 2560x1440/16:9 evidence shows:
+- selected visible output = `2560x1440`;
+- aspect scalar = `0.750000`;
+- gameplay logical dimensions at `0x00568154/58` = `2560x1440`;
+- compatibility D3D7 backing can remain `1920x1440`;
+- early pixel-present path preserves that 4:3 backing as `rect=320,0,1920x1440` on the 2560x1440 DX11 target;
+- once geometry replay becomes active, the DX11 shadow target is `2560x1440`;
+- captured transformed vertices span `x=0..2560`, `y=0..1440`.
+
+The captured D3D7 viewport state can still report `640x480` while the transformed XYZRHW stream spans the 2560x1440 logical domain. For shadow preview the proxy currently compensates by overriding the replay viewport to the modern logical dimensions.
+
+Implication:
+- D3D7 `SetViewport` state alone is **not** a trustworthy normalization basis after compatibility remapping;
+- transformed XYZRHW coordinates, the logical projection canvas, the hidden backing surface, and the visible DX11 target must be modeled as separate domains;
+- a blanket “modern canvas” policy for both 3D and 2D is the wrong final architecture.
+
+### M3d_RenderSetup confirms the upstream split
+
+Retail `M3d_RenderSetup @ 0x00472DC0`:
+- consumes `PixelAspectX @ 0x00654F58` and `PixelAspectY @ 0x00654F5C`;
+- computes viewport center/scale fields from the supplied `SViewport`;
+- consumes logical output width/height at `0x00568154/58`;
+- consumes aspect scalar `0x00550064` in the projection coefficient divided by viewport Zoom.
+
+This confirms that `0x00550064` is an upstream 3D projection control, while logical width/height also participate in screen-space conversion.
+
+### Current engineering direction
+
+Priority 1 remains true Hor+ widescreen, but the implementation should now be split deliberately:
+
+1. retain the proven aspect scalar for 3D projection;
+2. give geometry replay an explicit logical/source-screen normalization basis instead of inheriting arbitrary retail D3D7 viewport state;
+3. classify/separate 2D/HUD/frontend layout from 3D world projection before applying any widescreen transform;
+4. preserve the original frontend coordinate semantics until its modern layout pass is handled explicitly;
+5. trace the old-view culling/frustum boundary separately so widened projection does not reveal late-appearing edge geometry.
+
+Do not request a runtime test yet. Continue static classification and implementation until the 3D-vs-2D boundary is explicit enough for a meaningful widescreen build.
