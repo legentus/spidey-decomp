@@ -1,3 +1,30 @@
+# PERMANENT SINGLE-LOG POLICY — READ BEFORE ALL OLDER TEST INSTRUCTIONS
+
+The user has explicitly required that routine test logging be consolidated so they do not hit the attachment limit.
+
+**From now on, request exactly one runtime attachment:**
+- `spidey-decomp.log`
+
+Do **not** ask for separate compat/draw/present/texture/input/timing/renderer11/input11/audio/camera/crash/dxerror logs. Historical instructions below that name multiple files are superseded.
+
+The test launcher now creates a single uploadable runtime artifact containing:
+- `[SESSION]` revision/build/executable identity;
+- proxy categories such as `[COMPAT]`, `[DRAW]`, `[PRESENT]`, `[TEXTURE]`, `[INPUT]`, `[TIMING]`, `[AUDIO]`, `[CAMERA]`, `[DXERROR]`, `[CRASH]`, `[RUNTIME]`;
+- `[RENDERER11]` lines;
+- `[INPUT11]` lines.
+
+Logging implementation frontier:
+- `66d39d8f5ceb24d60cf87954e4059c940311b151`
+- `ae8b8332d3fa94ee8258e1d77a74099e6c2c00db`
+- `1d49799222c71696ee57b222fc33e3d142574c11`
+- `897c4f8b6e711405beaff7585802bc3590331b90`
+- `ea9b5d679d300a8f749be8f806171974c5ffdde8`
+- `c87954c7616d18321a22be8846aa0e1134078fbe`
+
+Routine timestamped session folders are now intentionally single-file for diagnostics.
+
+---
+
 # FRONTEND APPLY-SCALE + MOUSE-BOX FIX FRONTIER — READ FIRST (2026-10-01)
 
 Latest runtime tested `56374190919f6a12ff8abbe6602fee4dcba75f1b`:
