@@ -5221,6 +5221,10 @@ static unsigned long gSpideyGameplayUiFillScaledDraws =
 	0;
 static unsigned long gSpideyGameplayUiFillScaleSamples =
 	0;
+static unsigned long gSpideyPanelGouraudProbeSamples =
+	0;
+static unsigned long gSpideyPanelFlatProbeSamples =
+	0;
 
 // @Ok
 static void SpideyGetGameplayUiDensity(
@@ -5868,13 +5872,6 @@ static void __cdecl SpideyCompatPanelGouraudPoly(
 		&densityX,
 		&densityY);
 
-	const int shouldScale =
-		!gSpideyFrontendUiActive &&
-		(densityX < 0.9995f ||
-		 densityX > 1.0005f ||
-		 densityY < 0.9995f ||
-		 densityY > 1.0005f);
-
 	const int beforeX =
 		x;
 	const int beforeY =
@@ -5884,7 +5881,11 @@ static void __cdecl SpideyCompatPanelGouraudPoly(
 	const int beforeHeight =
 		height;
 
-	if (shouldScale)
+	if (!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f))
 	{
 		const float right =
 			(float)x +
@@ -5944,35 +5945,43 @@ static void __cdecl SpideyCompatPanelGouraudPoly(
 			scaledTop;
 
 		++gSpideyGameplayUiFillScaledDraws;
+	}
 
-		if (gSpideyGameplayUiFillScaleSamples < 24)
+	if (gSpideyPanelGouraudProbeSamples < 48)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
 		{
-			FILE* log =
-				SpideyOpenConsolidatedLog(
-					"COMPAT");
-			if (log)
-			{
-				fprintf(
-					log,
-					"gameplay_ui_fill_scale source=gouraud logical=%lux%lu density=%.6f,%.6f user_percent=%d before=%d,%d,%d,%d after=%d,%d,%d,%d count=%lu\n",
-					gSpideyModernLogicalWidth,
-					gSpideyModernLogicalHeight,
-					(double)densityX,
-					(double)densityY,
-					gSpideyGameplayUiScalePercent,
-					beforeX,
-					beforeY,
-					beforeWidth,
-					beforeHeight,
-					x,
-					y,
-					width,
-					height,
-					gSpideyGameplayUiFillScaledDraws);
-				fclose(log);
-			}
-			++gSpideyGameplayUiFillScaleSamples;
+			fprintf(
+				log,
+				"gameplay_ui_alignment source=panel_gouraud seq=%lu logical=%lux%lu density=%.6f,%.6f user_percent=%d before=%d,%d,%d,%d after=%d,%d,%d,%d live_after=%.2f,%.2f,%.2f,%.2f\n",
+				gSpideyPanelGouraudProbeSamples % 3,
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight,
+				(double)densityX,
+				(double)densityY,
+				gSpideyGameplayUiScalePercent,
+				beforeX,
+				beforeY,
+				beforeWidth,
+				beforeHeight,
+				x,
+				y,
+				width,
+				height,
+				(double)x *
+					(double)gSpideyModernLogicalWidth / 512.0,
+				(double)y *
+					(double)gSpideyModernLogicalHeight / 240.0,
+				(double)(x + width) *
+					(double)gSpideyModernLogicalWidth / 512.0,
+				(double)(y + height) *
+					(double)gSpideyModernLogicalHeight / 240.0);
+			fclose(log);
 		}
+		++gSpideyPanelGouraudProbeSamples;
 	}
 
 	SpideyRetailGouraudUiPolyFn retail =
@@ -5987,6 +5996,154 @@ static void __cdecl SpideyCompatPanelGouraudPoly(
 		color1,
 		color2,
 		color3,
+		option10);
+}
+
+// @Ok
+static void __cdecl SpideyCompatPanelFlatPoly(
+		float z,
+		i32 x,
+		i32 y,
+		i32 width,
+		i32 height,
+		u8 red,
+		u8 green,
+		u8 blue,
+		i32 option9,
+		i32 option10)
+{
+	float densityX =
+		1.0f;
+	float densityY =
+		1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	const int beforeX =
+		x;
+	const int beforeY =
+		y;
+	const int beforeWidth =
+		width;
+	const int beforeHeight =
+		height;
+
+	if (!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f))
+	{
+		const float right =
+			(float)x +
+			(float)width;
+		const float bottom =
+			(float)y +
+			(float)height;
+		const float anchorX =
+			SpideyChooseGameplayUiFloatAnchor(
+				(float)x,
+				right,
+				(float)x,
+				right,
+				512.0f);
+		const float anchorY =
+			SpideyChooseGameplayUiFloatAnchor(
+				(float)y,
+				(float)y,
+				bottom,
+				bottom,
+				240.0f);
+
+		const int scaledLeft =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)x,
+					anchorX,
+					densityX));
+		const int scaledRight =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					right,
+					anchorX,
+					densityX));
+		const int scaledTop =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)y,
+					anchorY,
+					densityY));
+		const int scaledBottom =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					bottom,
+					anchorY,
+					densityY));
+
+		x =
+			scaledLeft;
+		y =
+			scaledTop;
+		width =
+			scaledRight -
+			scaledLeft;
+		height =
+			scaledBottom -
+			scaledTop;
+
+		++gSpideyGameplayUiFillScaledDraws;
+	}
+
+	if (gSpideyPanelFlatProbeSamples < 48)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"gameplay_ui_alignment source=panel_flat seq=%lu logical=%lux%lu density=%.6f,%.6f user_percent=%d before=%d,%d,%d,%d after=%d,%d,%d,%d live_after=%.2f,%.2f,%.2f,%.2f\n",
+				gSpideyPanelFlatProbeSamples % 3,
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight,
+				(double)densityX,
+				(double)densityY,
+				gSpideyGameplayUiScalePercent,
+				beforeX,
+				beforeY,
+				beforeWidth,
+				beforeHeight,
+				x,
+				y,
+				width,
+				height,
+				(double)x *
+					(double)gSpideyModernLogicalWidth / 512.0,
+				(double)y *
+					(double)gSpideyModernLogicalHeight / 240.0,
+				(double)(x + width) *
+					(double)gSpideyModernLogicalWidth / 512.0,
+				(double)(y + height) *
+					(double)gSpideyModernLogicalHeight / 240.0);
+			fclose(log);
+		}
+		++gSpideyPanelFlatProbeSamples;
+	}
+
+	SpideyRetailFlatUiPolyFn retail =
+		(SpideyRetailFlatUiPolyFn)0x00462D60;
+	retail(
+		z,
+		x,
+		y,
+		width,
+		height,
+		red,
+		green,
+		blue,
+		option9,
 		option10);
 }
 
@@ -6235,7 +6392,7 @@ static void SpideyInstallGameplayUiScaleCompat()
 			SpideyPatchDirectCall(
 				panelFlatSites[flatIndex],
 				0x00462D60,
-				(void*)&SpideyCompatHealthBarFlatPoly,
+				(void*)&SpideyCompatPanelFlatPoly,
 				"panel_fill_flat");
 	}
 
