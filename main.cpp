@@ -5999,6 +5999,15 @@ unsigned long SpideyRenderer11GetMirroredTextureCount(void)
 	return gSpideyRenderer11GetResidentTextureCount();
 }
 
+typedef HRESULT (WINAPI *SpideyRetailD3D7SceneFn)(
+		LPDIRECT3DDEVICE7);
+typedef HRESULT (WINAPI *SpideyRetailD3D7SurfaceBltFn)(
+		LPDIRECTDRAWSURFACE7,
+		LPRECT,
+		LPDIRECTDRAWSURFACE7,
+		LPRECT,
+		DWORD,
+		LPDDBLTFX);
 typedef HRESULT (WINAPI *SpideyRetailD3D7SetRenderTargetFn)(
 		LPDIRECT3DDEVICE7,
 		LPDIRECTDRAWSURFACE7,
@@ -6046,6 +6055,9 @@ struct SpideyRetailTLVertexProbe
 	f32 v;
 };
 
+static SpideyRetailD3D7SceneFn gSpideyRetailD3D7BeginSceneOriginal = 0;
+static SpideyRetailD3D7SceneFn gSpideyRetailD3D7EndSceneOriginal = 0;
+static SpideyRetailD3D7SurfaceBltFn gSpideyRetailD3D7SurfaceBltOriginal = 0;
 static SpideyRetailD3D7SetRenderTargetFn gSpideyRetailD3D7SetRenderTargetOriginal = 0;
 static SpideyRetailD3D7ClearFn gSpideyRetailD3D7ClearOriginal = 0;
 static SpideyRetailD3D7SetViewportFn gSpideyRetailD3D7SetViewportOriginal = 0;
@@ -6080,6 +6092,36 @@ static int gSpideyShadowPreviewModeSynced = 0;
 static int gSpideyD3D7MainDrawSuppressionEnabled = 0;
 static unsigned long gSpideyD3D7MainDrawSuppressed = 0;
 static unsigned long gSpideyD3D7MainDrawFallback = 0;
+
+// DX11-authoritative renderer migration. D3D7 remains alive only as a
+// compatibility object provider while unsupported/offscreen paths are ported.
+// Main-scene presentation and every main draw accepted by DX11 must no longer
+// depend on a valid DirectDraw display surface.
+static int gSpideyDx11AuthoritativeRendering = 1;
+static int gSpideyDx11VirtualSceneActive = 0;
+static int gSpideyD3D7FallbackSceneActive = 0;
+static unsigned long gSpideyD3D7BeginSceneSuppressed = 0;
+static unsigned long gSpideyD3D7EndSceneSuppressed = 0;
+static unsigned long gSpideyD3D7MainClearSuppressed = 0;
+static unsigned long gSpideyD3D7MainBltSuppressed = 0;
+static unsigned long gSpideyD3D7FallbackSceneBegins = 0;
+
+static int SpideyDx11AuthoritativeActive()
+{
+	return
+		gSpideyDx11AuthoritativeRendering &&
+		gSpideyRenderer11Initialized &&
+		gSpideyShadowPreviewEnabled &&
+		gSpideyShadowPreviewReady;
+}
+
+static int SpideyDx11OnMainScene()
+{
+	return
+		gSpideyRetailShadowRenderTarget &&
+		gSpideyRetailShadowRenderTarget ==
+			*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+}
 
 static unsigned long gSpideyRetailDrawCalls = 0;
 static unsigned long gSpideyRetailDrawTextured = 0;
@@ -6628,11 +6670,162 @@ static void SpideyInitializeRetailShadowState(
 		1;
 }
 
+static int SpideyEnsureD3D7FallbackScene(
+		LPDIRECT3DDEVICE7 device)
+{
+	if (!SpideyDx11AuthoritativeActive() ||
+		!gSpideyDx11VirtualSceneActive ||
+		gSpideyD3D7FallbackSceneActive)
+	{
+		return 1;
+	}
+
+	if (!gSpideyRetailD3D7BeginSceneOriginal ||
+		!device)
+	{
+		return 0;
+	}
+
+	const HRESULT hr =
+		gSpideyRetailD3D7BeginSceneOriginal(
+			device);
+	if (FAILED(hr))
+		return 0;
+
+	gSpideyD3D7FallbackSceneActive =
+		1;
+	++gSpideyD3D7FallbackSceneBegins;
+	return 1;
+}
+
+static HRESULT WINAPI SpideyCompatD3D7BeginScene(
+		LPDIRECT3DDEVICE7 device)
+{
+	if (SpideyDx11AuthoritativeActive())
+	{
+		gSpideyDx11VirtualSceneActive =
+			1;
+		gSpideyD3D7FallbackSceneActive =
+			0;
+		++gSpideyD3D7BeginSceneSuppressed;
+		return S_OK;
+	}
+
+	if (!gSpideyRetailD3D7BeginSceneOriginal)
+		return E_FAIL;
+
+	const HRESULT hr =
+		gSpideyRetailD3D7BeginSceneOriginal(
+			device);
+	if (SUCCEEDED(hr))
+		gSpideyD3D7FallbackSceneActive = 1;
+	return hr;
+}
+
+static HRESULT WINAPI SpideyCompatD3D7EndScene(
+		LPDIRECT3DDEVICE7 device)
+{
+	if (SpideyDx11AuthoritativeActive() &&
+		gSpideyDx11VirtualSceneActive)
+	{
+		HRESULT hr =
+			S_OK;
+
+		if (gSpideyD3D7FallbackSceneActive)
+		{
+			if (!gSpideyRetailD3D7EndSceneOriginal)
+				hr = E_FAIL;
+			else
+				hr =
+					gSpideyRetailD3D7EndSceneOriginal(
+						device);
+		}
+		else
+		{
+			++gSpideyD3D7EndSceneSuppressed;
+		}
+
+		gSpideyDx11VirtualSceneActive =
+			0;
+		gSpideyD3D7FallbackSceneActive =
+			0;
+		return hr;
+	}
+
+	if (!gSpideyRetailD3D7EndSceneOriginal)
+		return E_FAIL;
+
+	const HRESULT hr =
+		gSpideyRetailD3D7EndSceneOriginal(
+			device);
+	gSpideyD3D7FallbackSceneActive =
+		0;
+	return hr;
+}
+
+static HRESULT WINAPI SpideyCompatD3D7SurfaceBlt(
+		LPDIRECTDRAWSURFACE7 destination,
+		LPRECT destinationRect,
+		LPDIRECTDRAWSURFACE7 source,
+		LPRECT sourceRect,
+		DWORD flags,
+		LPDDBLTFX effects)
+{
+	const LPDIRECTDRAWSURFACE7 primary =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7904;
+	const LPDIRECTDRAWSURFACE7 scene =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
+	if (SpideyDx11AuthoritativeActive() &&
+		(destination == primary ||
+		 destination == scene))
+	{
+		++gSpideyD3D7MainBltSuppressed;
+		return S_OK;
+	}
+
+	if (!gSpideyRetailD3D7SurfaceBltOriginal)
+		return E_FAIL;
+
+	return gSpideyRetailD3D7SurfaceBltOriginal(
+		destination,
+		destinationRect,
+		source,
+		sourceRect,
+		flags,
+		effects);
+}
+
 static HRESULT WINAPI SpideyShadowD3D7SetRenderTarget(
 		LPDIRECT3DDEVICE7 device,
 		LPDIRECTDRAWSURFACE7 renderTarget,
 		DWORD flags)
 {
+	const LPDIRECTDRAWSURFACE7 mainScene =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
+	// Shadow/DX11 state owns the main target. Do not bind the legacy display
+	// surface after DX11 has become authoritative; a DXGI mode switch may
+	// legitimately leave that DirectDraw surface lost.
+	if (SpideyDx11AuthoritativeActive() &&
+		renderTarget == mainScene)
+	{
+		gSpideyRetailShadowRenderTarget =
+			renderTarget;
+		return S_OK;
+	}
+
+	// If a genuinely offscreen path appears after a virtual main-scene
+	// BeginScene, start D3D7 lazily only for that compatibility work.
+	if (SpideyDx11AuthoritativeActive() &&
+		gSpideyDx11VirtualSceneActive &&
+		renderTarget != mainScene &&
+		!SpideyEnsureD3D7FallbackScene(
+			device))
+	{
+		return E_FAIL;
+	}
+
 	if (!gSpideyRetailD3D7SetRenderTargetOriginal)
 		return E_FAIL;
 
@@ -6660,23 +6853,11 @@ static HRESULT WINAPI SpideyShadowD3D7Clear(
 		D3DVALUE z,
 		DWORD stencil)
 {
-	if (!gSpideyRetailD3D7ClearOriginal)
-		return E_FAIL;
+	const int onMainScene =
+		SpideyDx11OnMainScene();
 
-	HRESULT hr =
-		gSpideyRetailD3D7ClearOriginal(
-			device,
-			count,
-			rects,
-			flags,
-			color,
-			z,
-			stencil);
-
-	if (SUCCEEDED(hr) &&
-		count == 0 &&
-		gSpideyRetailShadowRenderTarget ==
-			*(LPDIRECTDRAWSURFACE7*)0x006B7908)
+	if (count == 0 &&
+		onMainScene)
 	{
 		SpideyRenderer11ShadowSetClear(
 			(unsigned long)flags,
@@ -6685,7 +6866,24 @@ static HRESULT WINAPI SpideyShadowD3D7Clear(
 			(unsigned long)stencil);
 	}
 
-	return hr;
+	if (SpideyDx11AuthoritativeActive() &&
+		onMainScene)
+	{
+		++gSpideyD3D7MainClearSuppressed;
+		return S_OK;
+	}
+
+	if (!gSpideyRetailD3D7ClearOriginal)
+		return E_FAIL;
+
+	return gSpideyRetailD3D7ClearOriginal(
+		device,
+		count,
+		rects,
+		flags,
+		color,
+		z,
+		stencil);
 }
 
 static HRESULT WINAPI SpideyShadowD3D7SetViewport(
@@ -6920,6 +7118,7 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 	const unsigned long shadowFrame =
 		gSpideyPresentFrame + 1;
 	const int captureShadowFrame =
+		gSpideyDx11AuthoritativeRendering ||
 		gSpideyShadowPreviewEnabled ||
 		shadowFrame <= 5 ||
 		(shadowFrame % 120) == 0;
@@ -7303,7 +7502,8 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		!texture ||
 		mirroredTextureId >= 0;
 	const int suppressRetailMainDraw =
-		gSpideyD3D7MainDrawSuppressionEnabled &&
+		(SpideyDx11AuthoritativeActive() ||
+		 gSpideyD3D7MainDrawSuppressionEnabled) &&
 		gSpideyShadowPreviewEnabled &&
 		gSpideyShadowPreviewReady &&
 		onMainScene &&
@@ -7316,10 +7516,19 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		return S_OK;
 	}
 
-	if (gSpideyD3D7MainDrawSuppressionEnabled &&
+	if ((SpideyDx11AuthoritativeActive() ||
+		 gSpideyD3D7MainDrawSuppressionEnabled) &&
 		onMainScene)
 	{
 		++gSpideyD3D7MainDrawFallback;
+	}
+
+	if (SpideyDx11AuthoritativeActive() &&
+		gSpideyDx11VirtualSceneActive &&
+		!SpideyEnsureD3D7FallbackScene(
+			device))
+	{
+		return E_FAIL;
 	}
 
 	if (!gSpideyRetailD3D7DrawPrimitiveOriginal)
@@ -7358,6 +7567,11 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyTransientMirrored = 0;
 	gSpideyD3D7MainDrawSuppressed = 0;
 	gSpideyD3D7MainDrawFallback = 0;
+	gSpideyD3D7BeginSceneSuppressed = 0;
+	gSpideyD3D7EndSceneSuppressed = 0;
+	gSpideyD3D7MainClearSuppressed = 0;
+	gSpideyD3D7MainBltSuppressed = 0;
+	gSpideyD3D7FallbackSceneBegins = 0;
 	gSpideyModernRangeValid = 0;
 	gSpideyModernMinX = 0.0f;
 	gSpideyModernMaxX = 0.0f;
@@ -7398,7 +7612,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu d3d7_suppress=%d d3d7_suppressed=%lu d3d7_fallback=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f class2d_valid=%d class2d_x=%.3f,%.3f class2d_y=%.3f,%.3f class3d_valid=%d class3d_x=%.3f,%.3f class3d_y=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu dx11_authoritative=%d d3d7_suppressed=%lu d3d7_fallback=%lu begin_suppressed=%lu end_suppressed=%lu clear_suppressed=%lu blt_suppressed=%lu fallback_scene_begins=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f class2d_valid=%d class2d_x=%.3f,%.3f class2d_y=%.3f,%.3f class3d_valid=%d class3d_x=%.3f,%.3f class3d_y=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -7416,9 +7630,14 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyShadowOffscreenSkipped,
 				gSpideyTransientQueued,
 				gSpideyTransientMirrored,
-				gSpideyD3D7MainDrawSuppressionEnabled,
+				SpideyDx11AuthoritativeActive() ? 1 : 0,
 				gSpideyD3D7MainDrawSuppressed,
 				gSpideyD3D7MainDrawFallback,
+				gSpideyD3D7BeginSceneSuppressed,
+				gSpideyD3D7EndSceneSuppressed,
+				gSpideyD3D7MainClearSuppressed,
+				gSpideyD3D7MainBltSuppressed,
+				gSpideyD3D7FallbackSceneBegins,
 				SpideyRenderer11GetMirroredTextureCount(),
 				(unsigned long)gSpideyRetailD3D7DrawProbeDevice,
 				SpideyUseModernOutputAspect() ? 1 : 0,
@@ -7562,6 +7781,131 @@ static int SpideyPatchRetailD3D7VtableMethod(
 	return 1;
 }
 
+static int SpideyInstallRetailD3D7SurfaceCompat()
+{
+	const int bltIndex = 5;
+	LPDIRECTDRAWSURFACE7 surfaces[2];
+	surfaces[0] =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7904;
+	surfaces[1] =
+		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
+
+	int patched =
+		0;
+
+	for (int i = 0;
+		 i < 2;
+		 ++i)
+	{
+		LPDIRECTDRAWSURFACE7 surface =
+			surfaces[i];
+		if (!surface)
+			continue;
+
+		void** vtable =
+			0;
+		__try
+		{
+			vtable =
+				*(void***)surface;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			vtable =
+				0;
+		}
+
+		if (!vtable)
+			continue;
+
+		void* current =
+			vtable[bltIndex];
+		if (current ==
+			(void*)&SpideyCompatD3D7SurfaceBlt)
+		{
+			++patched;
+			continue;
+		}
+
+		// IDirectDrawSurface7 vtable slot 5 is Blt. Both retail main
+		// surfaces use the same implementation in the supported executable.
+		// Refuse to chain a second, unknown implementation into the shared
+		// trampoline rather than risking recursion.
+		if (gSpideyRetailD3D7SurfaceBltOriginal &&
+			current !=
+				(void*)gSpideyRetailD3D7SurfaceBltOriginal)
+		{
+			FILE* f = fopen(
+				"spidey-decomp-draw.log",
+				"a");
+			if (f)
+			{
+				fprintf(
+					f,
+					"surface_hook NOT installed surface=0x%08lX vtable=0x%08lX blt=0x%08lX expected=0x%08lX\n",
+					(unsigned long)surface,
+					(unsigned long)vtable,
+					(unsigned long)current,
+					(unsigned long)gSpideyRetailD3D7SurfaceBltOriginal);
+				fclose(f);
+			}
+			continue;
+		}
+
+		DWORD oldProtect =
+			0;
+		if (!VirtualProtect(
+				&vtable[bltIndex],
+				sizeof(void*),
+				PAGE_EXECUTE_READWRITE,
+				&oldProtect))
+		{
+			continue;
+		}
+
+		if (!gSpideyRetailD3D7SurfaceBltOriginal)
+		{
+			gSpideyRetailD3D7SurfaceBltOriginal =
+				(SpideyRetailD3D7SurfaceBltFn)current;
+		}
+
+		vtable[bltIndex] =
+			(void*)&SpideyCompatD3D7SurfaceBlt;
+
+		DWORD ignoredProtect =
+			0;
+		VirtualProtect(
+			&vtable[bltIndex],
+			sizeof(void*),
+			oldProtect,
+			&ignoredProtect);
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			&vtable[bltIndex],
+			sizeof(void*));
+
+		++patched;
+
+		FILE* f = fopen(
+			"spidey-decomp-draw.log",
+			"a");
+		if (f)
+		{
+			fprintf(
+				f,
+				"surface_hook installed surface=0x%08lX vtable=0x%08lX method=Blt index=5 original=0x%08lX wrapper=0x%08lX\n",
+				(unsigned long)surface,
+				(unsigned long)vtable,
+				(unsigned long)gSpideyRetailD3D7SurfaceBltOriginal,
+				(unsigned long)&SpideyCompatD3D7SurfaceBlt);
+			fclose(f);
+		}
+	}
+
+	return patched;
+}
+
+
 static void SpideyInstallRetailD3D7DrawProbe(void)
 {
 	LPDIRECT3DDEVICE7 device =
@@ -7636,6 +7980,8 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	if (!vtable)
 		return;
 
+	const int beginSceneIndex = 5;
+	const int endSceneIndex = 6;
 	const int setRenderTargetIndex = 8;
 	const int clearIndex = 10;
 	const int setViewportIndex = 13;
@@ -7647,6 +7993,8 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	const int alreadyInstalled =
 		device == gSpideyRetailD3D7DrawProbeDevice &&
 		vtable == gSpideyRetailD3D7DrawProbeVtable &&
+		vtable[beginSceneIndex] == (void*)&SpideyCompatD3D7BeginScene &&
+		vtable[endSceneIndex] == (void*)&SpideyCompatD3D7EndScene &&
 		vtable[setRenderTargetIndex] == (void*)&SpideyShadowD3D7SetRenderTarget &&
 		vtable[clearIndex] == (void*)&SpideyShadowD3D7Clear &&
 		vtable[setViewportIndex] == (void*)&SpideyShadowD3D7SetViewport &&
@@ -7656,7 +8004,26 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 		vtable[setTextureStageStateIndex] == (void*)&SpideyShadowD3D7SetTextureStageState;
 
 	if (alreadyInstalled)
+	{
+		SpideyInstallRetailD3D7SurfaceCompat();
 		return;
+	}
+
+	const int beginSceneOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			beginSceneIndex,
+			(void*)&SpideyCompatD3D7BeginScene,
+			(void**)&gSpideyRetailD3D7BeginSceneOriginal,
+			"BeginScene");
+
+	const int endSceneOk =
+		SpideyPatchRetailD3D7VtableMethod(
+			vtable,
+			endSceneIndex,
+			(void*)&SpideyCompatD3D7EndScene,
+			(void**)&gSpideyRetailD3D7EndSceneOriginal,
+			"EndScene");
 
 	const int renderTargetOk =
 		SpideyPatchRetailD3D7VtableMethod(
@@ -7714,7 +8081,12 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 			(void**)&gSpideyRetailD3D7SetTextureStageStateOriginal,
 			"SetTextureStageState");
 
-	if (!renderTargetOk ||
+	const int surfaceHooks =
+		SpideyInstallRetailD3D7SurfaceCompat();
+
+	if (!beginSceneOk ||
+		!endSceneOk ||
+		!renderTargetOk ||
 		!clearOk ||
 		!viewportOk ||
 		!renderStateOk ||
@@ -7729,16 +8101,19 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 		{
 			fprintf(
 				f,
-				"draw_probe partial device=0x%08lX vtable=0x%08lX target=%d clear=%d viewport=%d renderstate=%d draw=%d texture=%d texstate=%d\n",
+				"draw_probe partial device=0x%08lX vtable=0x%08lX begin=%d end=%d target=%d clear=%d viewport=%d renderstate=%d draw=%d texture=%d texstate=%d surface_blt=%d\n",
 				(unsigned long)device,
 				(unsigned long)vtable,
+				beginSceneOk,
+				endSceneOk,
 				renderTargetOk,
 				clearOk,
 				viewportOk,
 				renderStateOk,
 				drawOk,
 				textureOk,
-				textureStateOk);
+				textureStateOk,
+				surfaceHooks);
 			fclose(f);
 		}
 		return;
@@ -7759,13 +8134,14 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	{
 		fprintf(
 			f,
-			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX draw_index=%d getcaps_hr=0x%08lX max_tex=%lux%lu state_hooks=7 shadow_state_valid=%d\n",
+			"draw_probe installed device_slot=0x006B791C device=0x%08lX vtable=0x%08lX draw_index=%d getcaps_hr=0x%08lX max_tex=%lux%lu state_hooks=9 surface_blt=%d dx11_authoritative=1 shadow_state_valid=%d\n",
 			(unsigned long)device,
 			(unsigned long)vtable,
 			drawPrimitiveIndex,
 			(unsigned long)capsHr,
 			(unsigned long)caps.dwMaxTextureWidth,
 			(unsigned long)caps.dwMaxTextureHeight,
+			surfaceHooks,
 			gSpideyRetailShadowStateValid);
 		fclose(f);
 	}
@@ -8960,30 +9336,36 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	const int windowedCompat =
 		*(DWORD*)0x006B78F4 ? 1 : 0;
 
-	// In the compatibility/windowed path, retail DXPOLY_Flip blits the
-	// scene into the legacy DirectDraw primary before our direct HWND
-	// presenter copies the same scene again. Runtime logs show that legacy
-	// primary at 1920x1080 while the borderless client is 2560x1440. Letting
-	// both presentation paths race can expose stale/foreign primary content
-	// between our copies. Use the direct scene->HWND presenter as the sole
-	// windowed presentation path; preserve untouched retail Flip behavior
-	// for the original non-windowed path.
+	// DX11 is now the sole visible presenter whenever the authoritative
+	// replay is ready. This applies equally to windowed, borderless and true
+	// DXGI exclusive modes. Retail Flip remains only as a pre-authoritative
+	// fallback while the DX11 replay warms up.
 	int compatPresentPath =
 		0;
+	const int dx11Authoritative =
+		SpideyDx11AuthoritativeActive();
 
-	if (!windowedCompat)
-	{
-		retailFlip();
-	}
-	else if (((gSpideyShadowPreviewEnabled &&
-			   gSpideyShadowPreviewReady) ||
-			  shadowReferenceDelay) &&
+	if (((gSpideyShadowPreviewEnabled &&
+		  gSpideyShadowPreviewReady) ||
+		 shadowReferenceDelay) &&
 		SpideyRenderer11PresentShadow(
 			1,
 			0))
 	{
 		compatPresentPath =
 			4;
+	}
+	else if (dx11Authoritative)
+	{
+		// Never fall back to a potentially lost DirectDraw display surface
+		// after DX11 has taken ownership. Keep the frame alive and make the
+		// failure visible in telemetry instead.
+		compatPresentPath =
+			-4;
+	}
+	else if (!windowedCompat)
+	{
+		retailFlip();
 	}
 	else
 	{
@@ -9007,8 +9389,10 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 				"present_path frame=%lu windowed=%d retail_flip=%d dx11=%d dx11_shadow=%d dx11_pixels=%d dx11_hdc=%d direct_hwnd=%d shadow_preview=%d shadow_ready=%d compat_result=%d\n",
 				frame,
 				windowedCompat,
-				windowedCompat ? 0 : 1,
-				compatPresentPath >= 2 ? 1 : 0,
+				(!windowedCompat && !dx11Authoritative &&
+				 compatPresentPath == 0) ? 1 : 0,
+				(compatPresentPath >= 2 ||
+				 compatPresentPath == -4) ? 1 : 0,
 				compatPresentPath == 4 ? 1 : 0,
 				compatPresentPath == 3 ? 1 : 0,
 				compatPresentPath == 2 ? 1 : 0,
