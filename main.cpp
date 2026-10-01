@@ -9277,6 +9277,16 @@ static int SpideyCompatPresentSceneToWindow(
 	return copyOk ? 1 : 0;
 }
 
+// @Ok
+static int SpideyRetailMovieBlocksDx11Takeover()
+{
+	return
+		*(void**)0x00AC0BA4 ||
+		*(void**)0x00AC0A3C ?
+			1 :
+			0;
+}
+
 typedef void (__cdecl *SpideyRetailFlipFn)(void);
 
 static void __cdecl SpideyDiagDXPOLYFlip(void)
@@ -9393,7 +9403,11 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		SpideyRenderer11ShadowSetContinuous(0);
 	}
 
-	if (!gSpideyShadowPreviewEnabled)
+	const int retailMovieBlocksTakeover =
+		SpideyRetailMovieBlocksDx11Takeover();
+
+	if (!gSpideyShadowPreviewEnabled ||
+		retailMovieBlocksTakeover)
 	{
 		gSpideyShadowPreviewReady =
 			0;
@@ -9401,11 +9415,39 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	else if (!shadowPreviewToggledOn &&
 		shadowFrameResult)
 	{
-		// Enabling at this Flip is intentionally a one-frame warmup: the
-		// just-finished frame may have been sampled rather than captured
-		// continuously. The next frame is fully captured before previewing.
+		// ShadowEndFrame now reports success only for a complete non-empty
+		// replay. Retail Bink/DirectDraw movie surfaces remain compatibility
+		// producers until the movie ends, so they also block takeover.
 		gSpideyShadowPreviewReady =
 			1;
+	}
+
+	static int lastMovieTakeoverBlock =
+		-1;
+	if (frame <= 5 ||
+		retailMovieBlocksTakeover !=
+			lastMovieTakeoverBlock)
+	{
+		FILE* gateLog = fopen(
+			"spidey-decomp-present.log",
+			"a");
+		if (gateLog)
+		{
+			fprintf(
+				gateLog,
+				"dx11_takeover_gate frame=%lu shadow_result=%d movie_blocks=%d movie=0x%08lX movie_surface=0x%08lX ready=%d deferred=%d\n",
+				frame,
+				shadowFrameResult,
+				retailMovieBlocksTakeover,
+				(unsigned long)*(void**)0x00AC0BA4,
+				(unsigned long)*(void**)0x00AC0A3C,
+				gSpideyShadowPreviewReady,
+				gSpideyRenderer11ExclusiveDeferred);
+			fclose(gateLog);
+		}
+
+		lastMovieTakeoverBlock =
+			retailMovieBlocksTakeover;
 	}
 
 	if (gSpideyShadowPreviewReady &&
@@ -9769,6 +9811,82 @@ static void SpideyInstallMovieStopCompat()
 			f,
 			"movie_stop_compat patched_calls=%d\n",
 			patched);
+		fclose(f);
+	}
+}
+
+typedef int (__cdecl *SpideyRetailNextMovieFrameFn)(void);
+
+// @Ok
+static int __cdecl SpideyCompatNextMovieFrame()
+{
+	// Retail Bink still renders through a lockable DirectDraw surface and
+	// blits that surface into g_pDDS_Scene before DXPOLY_Flip. Never let
+	// DXGI exclusive ownership invalidate those compatibility surfaces.
+	SpideyReleaseRendererExclusiveForCompatRebuild(
+		"movie_frame");
+	gSpideyRenderer11ExclusiveDeferred =
+		1;
+	gSpideyShadowPreviewReady =
+		0;
+
+	SpideyRetailNextMovieFrameFn retail =
+		(SpideyRetailNextMovieFrameFn)0x0050B5A0;
+	return retail();
+}
+
+// @Ok
+static void SpideyInstallMovieFrameCompat()
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	const unsigned long retailNextMovieFrame =
+		0x0050B5A0;
+
+	int patched =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		const long rel =
+			*(long*)(p + 1);
+		const unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != retailNextMovieFrame)
+			continue;
+
+		const long newRel =
+			(long)(
+				(unsigned char*)&SpideyCompatNextMovieFrame -
+				(p + 5));
+
+		*(long*)(p + 1) =
+			newRel;
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+		++patched;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-present.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"movie_frame_compat patched_calls=%d retail=0x0050B5A0 wrapper=0x%08lX\n",
+			patched,
+			(unsigned long)&SpideyCompatNextMovieFrame);
 		fclose(f);
 	}
 }
@@ -10442,6 +10560,7 @@ void game_patches(void)
 	SpideyInstall2DPolyProvenanceCompat();
 	SpideyInstallTimingTelemetry();
 	SpideyInstallPresentProbe();
+	SpideyInstallMovieFrameCompat();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
