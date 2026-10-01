@@ -459,6 +459,7 @@ $inputLog = Join-Path $gameDir "spidey-decomp-input.log"
 $renderer11Log = Join-Path $gameDir "spidey-renderer11.log"
 $input11Log = Join-Path $gameDir "spidey-input11.log"
 $cameraLog = Join-Path $gameDir "spidey-decomp-camera.log"
+$audioLog = Join-Path $gameDir "spidey-decomp-audio.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 
 if (Test-Path $crashLog) {
@@ -490,6 +491,9 @@ if (Test-Path $input11Log) {
 }
 if (Test-Path $cameraLog) {
     Remove-Item -LiteralPath $cameraLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $audioLog) {
+    Remove-Item -LiteralPath $audioLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $runtimeLog) {
     Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
@@ -567,6 +571,12 @@ if (Test-Path $cameraLog) {
     Copy-Item -LiteralPath $cameraLog -Destination (Join-Path $sessionDir "spidey-decomp-camera.log") -Force
     Write-Host "[CAMERA] Passive camera telemetry captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-camera.log"))
+}
+
+if (Test-Path $audioLog) {
+    Copy-Item -LiteralPath $audioLog -Destination (Join-Path $sessionDir "spidey-decomp-audio.log") -Force
+    Write-Host "[AUDIO] Audio device-selection log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-audio.log"))
 }
 
 if (Test-Path $runtimeLog) {
