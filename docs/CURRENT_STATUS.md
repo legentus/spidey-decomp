@@ -6946,3 +6946,150 @@ Expected new log evidence:
 - no post-back-out `frontend_text_scale ... effective=256 frontend=0` while shell remains active;
 - on actual transition to gameplay:
   `frontend_lifecycle ... active=0` after `pshell_cleanup_post`.
+
+
+## Runtime: frontend scale fixed; gameplay/pause UI still retail-density — gameplay UI scaling implementation (2026-10-01)
+
+Latest Drive log:
+- Drive Logs file: `spidey-decomp.log`
+- file ID: `156DWlCKknurrXEr6WLx9C8Fq2ksdO6lq`
+- modified: 2026-10-01T05:16:11.724Z
+- tested revision: `0b2d306b48beadfb1d0de6dc45a8dad4f4fb3faf`
+- process exit code: 0
+
+User result:
+- frontend/main-menu text now stays at the correct resolution-aware size;
+- gameplay UI text remains at retail density;
+- pause menu remains visually retail-sized;
+- gameplay HUD/widgets do not follow the compact high-resolution UI density policy.
+
+### Log evidence
+
+The shell lifecycle fix is working:
+- lifecycle hook install patched 3 PShell initialise call sites and 3 cleanup call sites;
+- frontend remains active through menu navigation at 2560x1440;
+- actual gameplay transition occurs only at `PShell_Cleanup`.
+
+At gameplay transition the old typography policy explicitly reverted to retail scale:
+`frontend_text_scale reason=pshell_cleanup_post requested=256 effective=256 frontend=0 logical=2560x1440`.
+
+This directly explains gameplay/pause text remaining large.
+
+Gameplay DX11 rendering itself is healthy and already uses the selected logical canvas:
+- steady gameplay samples show `modern=1 logical=2560x1440`;
+- thousands of 3D draws are DX11-authoritative;
+- ordinary sampled gameplay frames have `missing=0` and `shadow_skip=0`;
+- gameplay 2D draws already span the modern canvas (for example x roughly 75..2410 and y 78..1338 in steady HUD frames);
+- pause/menu-like gameplay frames raise 2D draw counts substantially (200+ 2D draws), confirming the pause UI is flowing through the gameplay 2D path.
+
+### Gameplay/pause text fix
+
+Commit:
+- `563fdd671d89904a4f59bb910ab798a7c8615776` — **ui: scale gameplay and pause text with resolution**
+
+Change:
+- `Mess_SetScale` compatibility no longer limits resolution-aware scaling to PShell/frontend mode;
+- modern-resolution UI text now uses the same density policy in frontend, gameplay, pause menus, mission text, and HUD text;
+- policy remains based on the 640x480 baseline:
+  `effective = requested * 480 / logical_height`;
+- at 2560x1440, requested scale 256 -> effective ~85;
+- at 1920x1080, requested scale 256 -> effective ~113;
+- telemetry renamed to `ui_text_scale ... scope=frontend_gameplay_pause`.
+
+This preserves the user-approved high-resolution frontend density while extending it to gameplay/pause typography.
+
+### Grounded gameplay widget RE
+
+The gameplay panel system has an existing retail resolution scaler.
+
+Reference globals:
+- `Xres = 512`
+- `Yres = 240`
+- set by retail `M3dInit_InitAtStart @ 0x00453200`.
+
+Retail panel draw functions:
+- `DCPanel_DrawTexturedPoly_1 @ 0x004624A0`
+- `DCPanel_DrawTexturedPoly_0 @ 0x004626A0`
+- `DCPanel_DrawTexturedPoly @ 0x00462930`
+
+Assembly proves these functions multiply panel `POLY_FT4` coordinates by:
+- live logical width / 512;
+- live logical height / 240;
+before submitting through `PCGfx_DrawQPoly2D @ 0x00507910`.
+
+Therefore the gameplay panel already preserves the same *relative* size at higher resolutions. That is why it still looks like the original UI density instead of becoming compact like the newly fixed text.
+
+Panel rectangle setup:
+- `Panel_SetStretchedScreenCoords(SAnimFrame*) @ 0x00462C30`
+- `Panel_SetStretchedScreenCoords(Texture*) @ 0x00462CD0`.
+
+Known panel users:
+- Timer: `Panel_DisplayTimer @ 0x00461D00`
+- Compass: `Panel_DisplayCompass @ 0x00463860`
+- Boss/extra health: `Panel_DisplayHealthBar @ 0x00464270`
+- broad composite gameplay panel routine is the previously unnamed `sub_4658C0`, which calls Timer/Compass and then multiple player-HUD rectangle setups before the health-bar path.
+
+The six player-HUD setup calls inside `sub_4658C0` include:
+- 0x004659C1
+- 0x00465D70
+- 0x00465FA0
+- 0x004661D7
+- 0x004663FB
+- 0x00466623
+
+The panel helper path is therefore a safe UI-specific place to apply compact density. Do **not** globally scale arbitrary DX11 2D primitives or SlicedImage2 objects; those paths also include effects/fonts/cursor/full-screen content and would risk double-scaling.
+
+### Gameplay HUD/widget compact-density fix
+
+Commit:
+- `d680f800c244ab13dfcc805ceb9225b08a657115` — **ui: scale gameplay HUD widgets with resolution**
+
+Implementation:
+- patches direct retail calls to:
+  - `0x00462C30` (SAnimFrame rectangle setup)
+  - `0x00462CD0` (Texture rectangle setup)
+- leaves the retail function entries untouched; wrappers call retail first, then compact the resulting `POLY_FT4`;
+- only applies while actual PShell/frontend is inactive;
+- only applies above the 640x480 baseline;
+- density:
+  - X = `640 / logical_width`
+  - Y = `480 / logical_height`
+- at 2560x1440 this is X=0.25, Y=0.333333;
+- because retail panel rendering later expands from 512x240 to the modern canvas, this inverse density produces baseline-like pixel density instead of proportionally enlarging the HUD with resolution;
+- each rectangle is anchored to left/center/right and top/center/bottom based on its original position, so compacting does not collapse all HUD elements toward the upper-left;
+- full-screen non-panel 2D effects are untouched;
+- frontend shell UI is untouched by this panel transform;
+- all known timer/compass/health/player panel consumers share the policy consistently.
+
+New telemetry:
+- `gameplay_ui_scale_install ... frame_calls=... texture_calls=...`
+- first 16 compacted rectangles:
+  `gameplay_ui_scale source=... logical=... density=... anchor=... before=... after=...`.
+
+Static audit at `d680f80`:
+- main.cpp brace/paren/bracket balance clean;
+- one install call in game_patches;
+- both panel wrappers present;
+- validator `// @Ok` metadata added to all new helpers;
+- text scaling scope includes frontend/gameplay/pause.
+
+### Next runtime test
+
+Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Focused checks:
+1. main menu text remains correct;
+2. enter gameplay at 2560x1440;
+3. inspect Spider-Man HUD widgets (health/web/icon etc.) for compact high-resolution density;
+4. pause:
+   - pause text should now use the compact modern scale;
+   - inspect any pause-menu chrome/background/highlight elements and note anything still oversized;
+5. optionally compare at 1920x1080 vs 2560x1440 to confirm UI density changes consistently with resolution;
+6. exit normally.
+
+Put the new single `spidey-decomp.log` in the Drive `Logs` folder and tell the assistant the run is complete. Pull it directly from Drive.
+
+Expected log:
+- `[COMPAT] ui_text_scale ... requested=256 effective=85 ... logical=2560x1440 ... scope=frontend_gameplay_pause` during gameplay/pause;
+- `[COMPAT] gameplay_ui_scale_install ... frame_calls=>0 texture_calls=>0`;
+- `[COMPAT] gameplay_ui_scale ... density=0.250000,0.333333 ...` for 2560x1440.
