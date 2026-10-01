@@ -1,80 +1,118 @@
 # Spider-Man 2000 PC Modernization — New Chat Handoff
 
-**Date:** 2026-09-30  
+**Date:** 2026-10-01  
 **Active repository:** https://github.com/legentus/spidey-decomp  
 **Active branch:** `dev`  
-**Live source of truth:** `dev` + `docs/CURRENT_STATUS.md`  
-**Current implementation frontier:** `201fc404605746f2fe5811f692d1c39b7fa6bcc6`  
-**Current documentation frontier:** live `dev`; passive modern-input/action/camera/mouse telemetry is documented and the next boundary is one combined runtime test.
+**Live source of truth:** live `dev` + `docs/CURRENT_STATUS.md`  
+**Implementation frontier before this handoff refresh:** `7826aec4b1fb6adb2d2afcf14284ed807b4ae188`  
+**Recovery/documentation frontier before this handoff refresh:** `5cc8533cd2a38a503b4f3ebca5ca654050eccf56`
 
-> **CURRENT OVERRIDE:** Later Phase 3C sections in this file are historical context. The actual pending user-facing test is now Phase 3D live Apply + frontend mouse return. Phase 3E F9 D3D7-draw suppression is implemented but defaults OFF and should only be exercised after the Phase 3D checks pass. Modern Input Phase 0 and passive camera ownership telemetry are also implemented; both are observation-only.
+> **CURRENT OVERRIDE — READ BEFORE THE HISTORICAL SECTIONS BELOW:** The older Phase 3D/3E combined test in this file is no longer the immediate priority. The user has explicitly reprioritized five issues: proper Hor+ widescreen, correct menu mouse hit-testing, frame-rate-independent/fixed-step timing, modern audio-output selection, and uncapped main-menu rendering. F9 D3D7-raster isolation is postponed until these are addressed or becomes directly useful.
 
-### Current combined runtime test
+## Exact current priority order
 
-Run `UPDATE_AND_TEST_LATEST_BUILD.bat`.
+1. **Proper widescreen / Hor+**
+   - Current visible 16:9 still looks like stretched 4:3.
+   - Do not solve this with another final blit/stretch factor.
+   - `M3d_RenderSetup @ 0x00472DC0` is confirmed upstream 3D projection code.
+   - Aspect scalar `0x00550064` is consumed inside that projection math.
+   - Retail also has separate PSX-style pixel-aspect state (`PixelAspectX/Y`), so distinguish:
+     - 3D camera/projection/FOV;
+     - engine pixel-aspect/internal geometry coordinates;
+     - DX11 replay viewport/target;
+     - 2D shell/HUD safe-area/layout.
+   - Target: preserve vertical FOV and expand horizontal FOV (Hor+) while keeping 2D/UI non-stretched.
 
-The normal/default path must be tested first; F9 stays OFF until the normal checks pass.
+2. **Frontend/menu mouse hit-testing**
+   - User reports cursor moves normally but hover/click target is vertically offset, especially after returning from a level.
+   - Root cause was statically identified and a new fix is on `dev`:
+     `4381062061b7a625c036dff7d851a3fac9430818` — `input: unify menu mouse hotspot coordinate space`.
+   - Retail shell hit rectangles use live DX dimensions, while retail hotspot scaling used stale gameplay logical dimensions.
+   - At 1440p, a nominal 15px vertical hotspot could become 45px, matching the need to hover above an item.
+   - **This fix has not yet received the user's runtime validation.**
 
-1. Confirm the updater builds:
-   - matching proxy;
-   - `spidey_renderer11.dll`;
-   - `spidey_input11.dll`;
-   - 32-bit `spidey_input11_probe.exe`.
-2. Confirm input preflight prints:
-   `abi=1 expected=1 backend=spidey_input11/xinput-dynamic probe=1`.
-3. Display Options at 2560x1440:
-   - 16:9 -> 4:3 -> Apply, with no restart;
-   - confirm immediate centered 4:3 content;
-   - 4:3 -> 16:9 -> Apply;
-   - confirm immediate full 2560x1440 content.
-4. Enter gameplay and return to main menu:
-   - mouse must move, hover and click normally.
-5. If an XInput-compatible controller is available, leave it connected and move:
-   - left stick;
-   - right stick;
-   - triggers;
-   - several face/shoulder buttons.
-   Retail gameplay controls are still authoritative in this passive phase; modern state is only logged.
-6. During ordinary gameplay, move the mouse enough to generate camera-intent telemetry. Camera must NOT respond yet.
-7. Exercise a representative mix of:
-   - floor movement;
-   - wall/ceiling traversal if convenient;
-   - swing/fall;
-   - pause/menu transitions;
-   - any lookaround/special camera encountered naturally.
-8. After all normal checks pass, optionally press F9 once in steady gameplay:
-   - play/move/pause for a short period;
-   - watch for missing geometry/effects or behavioral changes;
-   - F10 must still provide complete D3D7 reference behavior;
-   - press F9 again to disable suppression if anything looks wrong.
-9. Exit normally and provide the complete generated log set.
+3. **High-FPS speed / timing**
+   - Do not assume DX11 itself fixes gameplay speed.
+   - Retail `Pause @ 0x004E5D60` is a busy-wait on the 60 Hz virtual `Vblanks` clock.
+   - `PlayAway @ 0x004559D0` snapshots Vblanks, runs one Logic/render pass, and calls `Pause(1)` only if no vblank elapsed; retail gameplay is explicitly capped at **at most one simulation update per 60 Hz engine tick**.
+   - `Logic @ 0x00455400` increments gameplay/frame counters per call.
+   - Preferred direction: preserve fixed-step simulation and decouple rendering/presentation, rather than globally injecting delta-time into fixed-point/per-frame gameplay.
+   - Instrument/validate actual modern Logic cadence before changing simulation semantics.
 
-New expected evidence:
-- `spidey-input11.log`;
-- `spidey-decomp-camera.log`;
-- `input11_bridge loaded ... passive=1`;
-- `input11_state ... move=... camera=... triggers=... legacy_analog=...`;
-- 11 `retail_action_map ...` rows containing the game's own action labels;
-- `camera_state ... mode=... mode_name=... input_camera=... input_mouse=... passive=1`;
-- `retail_input event=frontend_bounds_sync ...`;
-- `logical_render_resolution ... selected=... content=... aspect=...`;
-- if F9 is used: `d3d7_suppressed` / `d3d7_fallback`.
+4. **Audio output modernization**
+   - User reports audio effectively sticks to headset instead of following desired Windows output.
+   - Implementation survived the interruption:
+     - `ea594c7ce6e8349a46ca29b4d4e5d834b5eb6b24` — persisted output-device selection backend;
+     - `4aa5d59a4000c03ab5a9c3c80ae775058dfe4379` — collect audio-device log in test sessions;
+     - `7826aec4b1fb6adb2d2afcf14284ed807b4ae188` — Audio-menu output row + safe shell restart.
+   - Backend dynamically resolves `DirectSoundCreate8` / `DirectSoundEnumerateA`.
+   - Row 0 is `(System Default)`.
+   - Manual selection persists by GUID in `spidey-modern-audio.ini`.
+   - Audio menu is extended to six rows; row 5 is `Output: <device name>`.
+   - Shell-only device switching does controlled DirectSound shutdown/recreate, calls retail `DXSOUND_Init @ 0x005039F0`, then re-spools the `menu` SFX bank.
+   - Manual-device creation failure falls back to `(System Default)`.
+   - **This audio implementation has not yet received the user's runtime validation.**
 
-### Next renderer-isolation experiment after those checks
-- F9 toggles guarded suppression of already-DX11-accepted main-scene D3D7 draws.
-- Default is OFF.
-- F10 remains the complete D3D7 reference path.
-- Inspect `d3d7_suppressed` / `d3d7_fallback` telemetry and visual behavior before making suppression permanent.
+5. **Uncap main-menu FPS without speeding menu logic**
+   - `Shell_MainMenu @ 0x00493990` contains two one-vblank waits per normal loop:
+     - one conditional `Pause(1)` when rendering finishes before the next tick;
+     - one unconditional `Pause(1)`.
+   - With the 60 Hz virtual-vblank clock this deliberately produces roughly 30 menu loops/FPS.
+   - Do not simply NOP both waits: menu animation/input may be loop-count based.
+   - Preferred design: preserve ~30 Hz shell logical update cadence initially, allow render/present to run independently at high/uncapped cadence, interpolate visual state where necessary.
 
-### Modern input/camera design document
-- `docs/MODERN_INPUT_CAMERA.md`
-- Passive camera telemetry: `spidey-decomp-camera.log`; mode 3 / `CAMERAMODE_DEMO` is now statically grounded as the ordinary gameplay camera baseline.
-- includes retail input hook anchors, normalized input architecture, dynamic glyph/remapping plan, and a two-stage camera plan that can progress to a dedicated modern camera rather than being constrained by legacy camera behavior.
+## Interruption recovery result
 
-### New major modernization goals
-- full modern controller support with remapping and dynamic glyph UI;
-- modern mouse/right-stick camera;
-- the final camera is **not required** to remain constrained by the original camera system. Existing camera functions are RE anchors and scripted-transition helpers, but a dedicated modern gameplay camera may replace ordinary legacy camera ownership if that produces the desired feel.\n\n## READ THIS FIRST
+The Sep-30/Oct-1 input-stream interruption did **not** lose substantive implementation.
+
+Surviving implementation chain:
+- `4381062061b7a625c036dff7d851a3fac9430818` — mouse hotspot/hit-test coordinate fix;
+- `e497ed897cfb6aeca55a08d5a5b39a4ad0e973b7` — fixed-step timing documentation;
+- `ea594c7ce6e8349a46ca29b4d4e5d834b5eb6b24` — audio device backend;
+- `4aa5d59a4000c03ab5a9c3c80ae775058dfe4379` — audio log collection;
+- `7826aec4b1fb6adb2d2afcf14284ed807b4ae188` — Audio-menu device row/restart;
+- `5cc8533cd2a38a503b4f3ebca5ca654050eccf56` — recovery documentation.
+
+What did **not** make it into implementation before the interruption:
+- final proper Hor+ widescreen patch;
+- gameplay/shell fixed-step render interpolation;
+- main-menu FPS uncap patch;
+- runtime validation of the new mouse-coordinate fix;
+- runtime validation of the new audio-output UI/backend.
+
+## Next-chat mandatory first actions
+
+1. Fetch live `dev` HEAD; never trust the commit IDs in this handoff over a newer live repo.
+2. Read the tail of `docs/CURRENT_STATUS.md`.
+3. Read this handoff and `docs/DX11_MIGRATION.md`.
+4. Read `docs/MODERN_INPUT_CAMERA.md` for the later controller/camera roadmap, but **do not let controller/camera work displace the five current priorities**.
+5. Inspect the user-provided interruption transcript included in the handoff ZIP.
+6. Continue static RE on proper widescreen + timing/audio validation before asking for unnecessary tests.
+7. Ask the user for a runtime build only at a meaningful combined boundary.
+
+## Mandatory disconnect-safe workflow
+
+This user specifically requires live durable checkpoints:
+
+- **Repo is the checkpoint; chat is not.**
+- Fetch current `dev` before editing.
+- Fetch current file SHA immediately before every GitHub write.
+- Update `docs/CURRENT_STATUS.md` **during** substantial work, not only at the end.
+- Make small meaningful implementation commits frequently.
+- Push documentation checkpoints separately when useful.
+- Never hold a long RE result only in chat.
+- Record dead ends/risky experiments in docs.
+- On `error in input stream`, next chat must inspect:
+  1. live `dev`;
+  2. recent commit ancestry;
+  3. `docs/CURRENT_STATUS.md`;
+  4. `docs/NEW_CHAT_HANDOFF.md`;
+  5. latest uploaded logs/transcript;
+  then determine exactly what survived before doing new work.
+
+---
+
+## READ THIS FIRST
 
 This project has frequent ChatGPT "error in input stream" interruptions. **Do not trust stale chat text over the repo.**
 
