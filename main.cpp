@@ -4179,7 +4179,17 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	int remappedLegacyBacking =
 		0;
 
-	if (!frontendLegacy)
+	int seededSelectedOutput =
+		0;
+
+	// Retail calls DXINIT_SetDisplayOptions internally for gameplay/shell
+	// transitions. Those calls describe only the compatibility producer and
+	// must never replace the modern user-facing DX11 output selected through
+	// our Display -> Apply path. Seed from retail only as an emergency when
+	// no valid modern selection exists yet.
+	if (!frontendLegacy &&
+		(gSpideySelectedOutputWidth < 640 ||
+		 gSpideySelectedOutputHeight < 480))
 	{
 		gSpideySelectedOutputWidth =
 			requestedWidth;
@@ -4187,6 +4197,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			requestedHeight;
 		gSpideySelectedOutputBpp =
 			32;
+		seededSelectedOutput =
+			1;
 	}
 
 	// The old shell asks retail DirectDraw to fall back to 640x480x16 on
@@ -4307,7 +4319,10 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	{
 		fprintf(
 			f,
-			"display_options selected=%lux%lux%lu physical=%lux%lux%lu option4=%d option5=%d frontend_legacy=%d legacy_backing_remap=%d preserve_selected=1\n",
+			"display_options requested=%lux%lux%lu selected=%lux%lux%lu physical=%lux%lux%lu option4=%d option5=%d frontend_legacy=%d legacy_backing_remap=%d selection_seeded=%d preserve_selected=1\n",
+			(unsigned long)requestedWidth,
+			(unsigned long)requestedHeight,
+			(unsigned long)requestedBpp,
 			(unsigned long)gSpideySelectedOutputWidth,
 			(unsigned long)gSpideySelectedOutputHeight,
 			(unsigned long)gSpideySelectedOutputBpp,
@@ -4317,7 +4332,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			option4,
 			option5,
 			frontendLegacy,
-			remappedLegacyBacking);
+			remappedLegacyBacking,
+			seededSelectedOutput);
 		fclose(f);
 	}
 
