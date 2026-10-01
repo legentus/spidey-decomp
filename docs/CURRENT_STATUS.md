@@ -5416,3 +5416,63 @@ Implementation:
   `mouse_coordinate_compat mouse_over=1 hotspot=1 ... basis=live_dx_canvas`.
 
 This is intentionally separate from the existing frontend bounds/reacquire fix: bounds control where the cursor may move; this patch fixes where the shell believes the cursor's clickable hotspot actually is.
+
+
+### Timing / main-menu cap RE — fixed-step evidence — 2026-09-30
+
+Retail timing is now grounded enough to reject a blind global delta-time conversion.
+
+#### Engine vblank clock
+
+`PCTIMER_Init` creates a multimedia timer (nominal 16 ms) and converts real milliseconds into a 60 Hz virtual-vblank clock:
+`gTimerMsInterval = timer_ms * 60 / 1000`.
+
+The timer callback advances `gTimerVblankRelated` and calls `MyVSync` until retail `Vblanks @ 0x006B4CA0` catches up.
+
+Retail `Pause @ 0x004E5D60` is confirmed machine-code busy-wait:
+- target = `Vblanks + Time`;
+- spin until `Vblanks >= target`.
+
+#### Gameplay cadence
+
+`PlayAway @ 0x004559D0` contains the normal gameplay loop.
+
+Per loop:
+1. snapshot `Vblanks`;
+2. run `Logic @ 0x00455400`;
+3. run display/render work;
+4. if the current `Vblanks` still equals the snapshot, call `Pause(1)`;
+5. begin the next gameplay loop.
+
+Therefore normal retail gameplay is explicitly constrained to **at most one simulation/update pass per 60 Hz engine vblank**.
+
+`Logic` also increments multiple gameplay/frame counters once per call, reinforcing that large parts of the game are authored as fixed-step/per-update code.
+
+Current implication:
+- do not retrofit global delta-time multipliers through gameplay/physics as the first modernization;
+- first measure whether modern runtime is actually executing Logic faster than the intended 60 Hz cadence;
+- preferred architecture is fixed-step simulation at the retail-authored cadence plus independent rendering/interpolation, rather than changing thousands of fixed-point/per-frame constants.
+
+#### Main menu 30 FPS cap — exact mechanism
+
+`Shell_MainMenu @ 0x00493990` has a distinct pacing sequence near `0x00494150`:
+
+- compare current `Vblanks` to the loop's saved starting vblank;
+- if no vblank elapsed during update/render, call `Pause(1)`;
+- then unconditionally call a second `Pause(1)`.
+
+On the 60 Hz engine clock this deliberately produces approximately **30 menu loops/frames per second**.
+
+This confirms the user's observed 30 FPS menu cap.
+
+Important:
+- simply NOPing both waits would make the shell loop run as fast as possible and can accelerate loop-count-based menu animation;
+- the correct uncapping design should separate shell simulation/update cadence from render/presentation cadence, just as gameplay modernization should separate fixed simulation from rendering.
+
+Current timing direction:
+- gameplay: preserve 60 Hz fixed simulation unless runtime telemetry proves another intended cadence;
+- shell/menu: preserve 30 Hz logical update semantics initially;
+- render/present: allow independent high/uncapped cadence;
+- interpolate visual state between fixed logical updates where useful/feasible.
+
+This approach is safer than global delta-time conversion for this 2000 fixed-point engine and directly addresses the user's request to avoid physics/gameplay speed changes at high FPS.
