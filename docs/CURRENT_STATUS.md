@@ -6830,3 +6830,119 @@ Static audit:
 - main.cpp structural delimiter balance remains clean.
 
 **Do not regress this.** Historical documentation may mention uploading several logs, but those instructions are superseded by this policy.
+
+
+## Google Drive log retrieval + Display Options back-out text regression — 2026-10-01
+
+### Permanent Google Drive runtime-log location
+
+Project Drive root:
+- https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+
+Runtime Logs folder:
+- https://drive.google.com/drive/folders/1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s
+
+The assistant has verified that the connected Google Drive can list and read this folder directly.
+
+**Future test workflow:**
+- user puts the newest runtime log in this `Logs` folder;
+- assistant should read the newest log directly from Drive;
+- do not ask the user to upload it into chat;
+- after the single-log migration, the normal runtime artifact is only `spidey-decomp.log`;
+- historical split logs currently in the folder are from pre-consolidation sessions and may still be read when diagnosing those sessions.
+
+### Runtime session analyzed from Drive
+
+Drive session identity:
+- revision `b0c4910d007d7c3562552cceaed45dfb196c10bf`
+- started 2026-10-01 00:54:12 -04:00.
+
+User-visible behavior:
+- applying/changing resolution initially corrected the frontend text size;
+- backing out of Display Options immediately made frontend text large again;
+- mouse was not tested in this session.
+
+### Exact text-scale trace
+
+At shell/frontend entry:
+- `frontend_text_scale ... requested=256 effective=113 frontend=1 logical=1920x1080`.
+
+After selecting/applying 2560x1440:
+- the compatibility display rebuild temporarily logged gameplay classification:
+  `frontend_text_scale reason=display_options_gameplay requested=256 effective=256 frontend=0 logical=2560x1440`.
+- the explicit post-Apply restore then correctly fixed it:
+  `frontend_text_scale reason=display_apply_frontend_restore requested=256 effective=85 frontend=1 logical=2560x1440`.
+
+Immediately after backing out of Display Options:
+- another retail display-options transition occurred at the already-selected 2560x1440 mode;
+- that transition again classified the still-live shell as gameplay;
+- text scale returned to:
+  `requested=256 effective=256 frontend=0 logical=2560x1440`.
+
+Therefore Apply itself was fixed; the remaining bug was the frontend/gameplay **classification policy** inside `SpideyCompatSetDisplayOptions`.
+
+### Root-cause correction
+
+Previous code inferred frontend ownership from:
+1. an exact `640x480x16 option4=0` DirectDraw request, and in one Apply path;
+2. `0x006B78F4`.
+
+Static source review corrected a mistaken assumption:
+- `0x006B78F4` is the retail DirectDraw/windowed option flag (`gDxOptionRelated`);
+- it is **not** a shell/frontend lifecycle flag.
+
+The real shell code provides lifecycle boundaries:
+- retail `PShell_Initialise = 0x0048D790`;
+- retail `PShell_Cleanup = 0x0048D880`;
+- reconstructed shell sets `gShellInitialized=1` at the end of `PShell_Initialise`;
+- it clears `gShellInitialized=0` in `PShell_Cleanup`.
+
+### Fix
+
+Commit:
+- `02077c1218251814dcecfa7f02881a12f0752178` — **frontend: drive text scaling from shell lifecycle**
+
+Implementation:
+- adds independent `gSpideyFrontendUiActive`;
+- patches all direct retail CALLs targeting `PShell_Initialise @ 0x0048D790` and `PShell_Cleanup @ 0x0048D880` to lifecycle wrappers while leaving the original function entries untouched;
+- shell initialise wrapper marks frontend active **before** calling retail so `PShell_NormalFont/Mess_SetScale` inside initialization already sees frontend policy;
+- reasserts frontend active after initialization;
+- cleanup wrapper calls retail then marks frontend inactive and immediately restores non-frontend text scale;
+- exact `640x480x16 option4=0` shell request remains only as an early-entry fallback signal;
+- modern resolution display rebuilds while the shell is active can no longer set frontend ownership false;
+- Display Apply now gets its `liveFrontend` state from actual frontend ownership, not `0x006B78F4`;
+- resolution-aware typography predicate follows actual frontend ownership;
+- display-options telemetry now distinguishes:
+  - `frontend_active=`
+  - `frontend_legacy_request=`
+- lifecycle install telemetry reports how many direct init/cleanup call sites were patched;
+- lifecycle transitions log `frontend_lifecycle reason=... active=...`.
+
+Static audit after implementation:
+- source delimiters balanced;
+- no remaining use of `0x006B78F4` as the Display Apply frontend signal;
+- lifecycle installer is called from `game_patches()`;
+- old request signature is retained only for compatibility-backing behavior / early fallback, not ownership revocation.
+
+### Next test
+
+Use normal updater/build.
+
+Test only:
+1. enter Display Options;
+2. change resolution and Apply;
+3. verify text becomes/stays resolution-appropriate;
+4. back out to parent Options menu;
+5. verify text **remains** resolution-appropriate;
+6. move through a few other frontend menus to ensure scale persists;
+7. optionally test the mouse if convenient.
+
+After exit, place the single new `spidey-decomp.log` into the Drive `Logs` folder. The assistant should pull it from Drive directly.
+
+Expected new log evidence:
+- `[COMPAT] frontend_lifecycle_install ... initialise_calls=>0 ... cleanup_calls=>0`;
+- while navigating frontend menus:
+  `frontend_active=1` even when display options request modern 2560x1440;
+- no post-back-out `frontend_text_scale ... effective=256 frontend=0` while shell remains active;
+- on actual transition to gameplay:
+  `frontend_lifecycle ... active=0` after `pshell_cleanup_post`.
