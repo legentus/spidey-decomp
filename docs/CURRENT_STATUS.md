@@ -5371,3 +5371,48 @@ Immediate investigation plan:
 - trace frame timer/update loop and identify where 30 Hz assumptions enter simulation;
 - trace DirectSound device creation and existing sound options/menu;
 - trace frontend 30 FPS limiter and determine whether it shares the same timer path as gameplay.
+
+
+### Frontend mouse hover/click coordinate bug — root cause fixed — 2026-09-30
+
+User symptom:
+- cursor motion itself is responsive;
+- after returning from gameplay, visible menu items often do not highlight/click at the visible cursor position;
+- moving the cursor slightly **above** the intended option makes selection work.
+
+Static retail/source RE found an exact coordinate-space mismatch:
+
+`PCSHELL_IsMouseOver` converts shell/DC hit rectangles into PC pixels using:
+- live DX width `gDxResolutionX @ 0x006B78E4`;
+- live DX height `gDxResolutionY @ 0x006B78E8`.
+
+But retail:
+- `PCINPUT_IsMouseOver @ 0x0050A820`;
+- `PCINPUT_GetMouseHotspotPosition @ 0x0050A770`
+
+scale the cursor hotspot using:
+- gameplay logical width `0x00568154`;
+- gameplay logical height `0x00568158`.
+
+After gameplay at 2560x1440, the frontend can be back on its proven 640x480 canvas while the gameplay logical dimensions remain 2560x1440. A nominal 15-pixel Y hotspot therefore becomes:
+
+`15 * 1440 / 480 = 45`
+
+instead of 15 pixels.
+
+That moves the effective hit-test point about 30 pixels below the visible cursor, which directly explains why hovering above an item can select it.
+
+Fix commit:
+- `4381062061b7a625c036dff7d851a3fac9430818` — `input: unify menu mouse hotspot coordinate space`.
+
+Implementation:
+- replaces retail `PCINPUT_IsMouseOver @ 0x0050A820`;
+- replaces retail `PCINPUT_GetMouseHotspotPosition @ 0x0050A770`;
+- hotspot scaling now uses the same live DX canvas dimensions as `PCSHELL_CoordsDCtoPC`;
+- preserves retail strict `>` / `<` hitbox semantics;
+- preserves cursor movement/acquisition behavior;
+- byte-verifies the expected retail entry bytes before installing either replacement;
+- logs:
+  `mouse_coordinate_compat mouse_over=1 hotspot=1 ... basis=live_dx_canvas`.
+
+This is intentionally separate from the existing frontend bounds/reacquire fix: bounds control where the cursor may move; this patch fixes where the shell believes the cursor's clickable hotspot actually is.
