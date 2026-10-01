@@ -3,640 +3,272 @@
 **Date:** 2026-10-01  
 **Active repository:** https://github.com/legentus/spidey-decomp  
 **Active branch:** `dev`  
-**Live source of truth:** live `dev` + `docs/CURRENT_STATUS.md`  
-**Implementation frontier before this handoff refresh:** `7826aec4b1fb6adb2d2afcf14284ed807b4ae188`  
-**Recovery/documentation frontier before this handoff refresh:** `5cc8533cd2a38a503b4f3ebca5ca654050eccf56`
+**Google Drive game-files folder:** https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx  
+**Live source of truth:** live `dev` + `docs/CURRENT_STATUS.md`
 
-> **CURRENT OVERRIDE — READ BEFORE THE HISTORICAL SECTIONS BELOW:** The older Phase 3D/3E combined test in this file is no longer the immediate priority. The user has explicitly reprioritized five issues: proper Hor+ widescreen, correct menu mouse hit-testing, frame-rate-independent/fixed-step timing, modern audio-output selection, and uncapped main-menu rendering. F9 D3D7-raster isolation is postponed until these are addressed or becomes directly useful.
+> **MANDATORY STARTUP RULE:** Do not trust this file over a newer live repo. First fetch `dev`, inspect recent commits, and read the tail of `docs/CURRENT_STATUS.md`. The project has suffered repeated stream interruptions, so GitHub is the checkpoint and chat text is not.
 
-## Exact current priority order
+## Exact current frontier
+
+The latest frontend/audio/display batch is implemented and statically audited. It is now ready for a combined runtime validation pass.
+
+Important recent commits, newest implementation chain first:
+
+- `85e45c41841093d4e489eb5dda12d4b107cb8ee9` — `audio: align stereo value with six-row layout`
+- `c296af57c6af30c64f2db3f0941b0c68f485ea24` — `display: preserve selected window mode during startup`
+- `e04f9b9e2d677152ebcb0b8448c4c4afde9a3a59` — `audio display: harden live fallback and mode transitions`
+- `5c3b1340f3a1ce436fd4068f8680bd67cdc46234` — `display: stabilize mode transitions and menu sizing`
+- `cb0d64ad3754bccec48817b9135b0b7d29bbdce8` — `renderer11: correct exclusive mode transition order`
+- `e7d9500b270fba9218ce5ded408f52dc3fcfbb8f` — `display: connect window modes to DX11 swap chain`
+- `c1c6c3a630677225dd13468a62fe0b8717f3eef7` — `renderer11: bump ABI for window mode control`
+- `b8853c19d5ccf66d09f2352905719a4c110c98c4` — `display: add persistent fullscreen borderless windowed setting`
+- `b0eb4f66df689fa75001e418766b9d12b6618de7` — `audio: align six-row text sliders and hit regions`
+- `117b6b0fa6b03084943d1c827fd1dfd00bdf8b22` — `audio: apply output device live without invalidating Bink`
+- `685b00ff9a95c034612951e96b88863a5c4b2a3d` — `frontend: unify modern canvas and remove audio row offset`
+
+Documentation checkpoint before this refresh:
+- `f5ff403c3ae4568ddd821353cb0d3f771bae5a72` — `docs: checkpoint frontend settings test batch`
+
+## User requirements that are authoritative now
 
 1. **Proper widescreen / Hor+**
-   - Current visible 16:9 still looks like stretched 4:3.
-   - Do not solve this with another final blit/stretch factor.
-   - `M3d_RenderSetup @ 0x00472DC0` is confirmed upstream 3D projection code.
-   - Aspect scalar `0x00550064` is consumed inside that projection math.
-   - Retail also has separate PSX-style pixel-aspect state (`PixelAspectX/Y`), so distinguish:
-     - 3D camera/projection/FOV;
-     - engine pixel-aspect/internal geometry coordinates;
-     - DX11 replay viewport/target;
-     - 2D shell/HUD safe-area/layout.
-   - Target: preserve vertical FOV and expand horizontal FOV (Hor+) while keeping 2D/UI non-stretched.
+   - Current widescreen work must be true widescreen, not stretched 4:3.
+   - Earlier moving-background warp/distortion is confirmed fixed.
+   - Hor+ side-plane culling synchronization is implemented.
+   - Remaining visual validation / 2D layout work should continue after the current frontend/audio/display batch is validated.
 
-2. **Frontend/menu mouse hit-testing**
-   - User reports cursor moves normally but hover/click target is vertically offset, especially after returning from a level.
-   - Root cause was statically identified and a new fix is on `dev`:
-     `4381062061b7a625c036dff7d851a3fac9430818` — `input: unify menu mouse hotspot coordinate space`.
-   - Retail shell hit rectangles use live DX dimensions, while retail hotspot scaling used stale gameplay logical dimensions.
-   - At 1440p, a nominal 15px vertical hotspot could become 45px, matching the need to hover above an item.
-   - **This fix has not yet received the user's runtime validation.**
+2. **Mouse**
+   - User explicitly confirmed the post-level menu mouse-location / hover bug is fixed.
+   - Preserve that behavior. Do not regress the coordinate fix.
 
-3. **High-FPS speed / timing**
-   - Do not assume DX11 itself fixes gameplay speed.
-   - Retail `Pause @ 0x004E5D60` is a busy-wait on the 60 Hz virtual `Vblanks` clock.
-   - `PlayAway @ 0x004559D0` snapshots Vblanks, runs one Logic/render pass, and calls `Pause(1)` only if no vblank elapsed; retail gameplay is explicitly capped at **at most one simulation update per 60 Hz engine tick**.
-   - `Logic @ 0x00455400` increments gameplay/frame counters per call.
-   - Preferred direction: preserve fixed-step simulation and decouple rendering/presentation, rather than globally injecting delta-time into fixed-point/per-frame gameplay.
-   - Instrument/validate actual modern Logic cadence before changing simulation semantics.
+3. **High-FPS game speed**
+   - Higher FPS still feels sped up.
+   - Gameplay `Logic` vs present-rate telemetry is implemented.
+   - The prior crash session never reached gameplay, so no gameplay timing conclusion is valid yet.
+   - Preferred architecture remains fixed-step simulation + independent render/interpolation unless runtime evidence disproves it.
 
-4. **Audio output modernization**
-   - User reports audio effectively sticks to headset instead of following desired Windows output.
-   - Implementation survived the interruption:
-     - `ea594c7ce6e8349a46ca29b4d4e5d834b5eb6b24` — persisted output-device selection backend;
-     - `4aa5d59a4000c03ab5a9c3c80ae775058dfe4379` — collect audio-device log in test sessions;
-     - `7826aec4b1fb6adb2d2afcf14284ed807b4ae188` — Audio-menu output row + safe shell restart.
-   - Backend dynamically resolves `DirectSoundCreate8` / `DirectSoundEnumerateA`.
-   - Row 0 is `(System Default)`.
-   - Manual selection persists by GUID in `spidey-modern-audio.ini`.
-   - Audio menu is extended to six rows; row 5 is `Output: <device name>`.
-   - Shell-only device switching does controlled DirectSound shutdown/recreate, calls retail `DXSOUND_Init @ 0x005039F0`, then re-spools the `menu` SFX bank.
-   - Manual-device creation failure falls back to `(System Default)`.
-   - **This audio implementation has not yet received the user's runtime validation.**
+4. **Audio output**
+   - Output selection must apply **live without restarting the game**.
+   - `(System Default)` remains the default policy.
+   - The old live restart could leave Bink with a stale DirectSound backend and caused a crash path inside `binkw32_.DLL`.
+   - New implementation retains the old DirectSound object for Bink while the game SFX path switches, then safely rebinds Bink when no movie handle is active.
+   - This live-safe implementation now needs runtime validation.
 
-5. **Uncap main-menu FPS without speeding menu logic**
-   - `Shell_MainMenu @ 0x00493990` contains two one-vblank waits per normal loop:
-     - one conditional `Pause(1)` when rendering finishes before the next tick;
-     - one unconditional `Pause(1)`.
-   - With the 60 Hz virtual-vblank clock this deliberately produces roughly 30 menu loops/FPS.
-   - Do not simply NOP both waits: menu animation/input may be loop-count based.
-   - Preferred design: preserve ~30 Hz shell logical update cadence initially, allow render/present to run independently at high/uncapped cadence, interpolate visual state where necessary.
+5. **Main-menu FPS**
+   - Retail main menu is intentionally ~30 logical FPS.
+   - User wants uncapped/high-refresh menu rendering.
+   - Do not simply run old shell logic uncapped; preserve logical cadence and decouple rendering/interpolate visual state.
 
-## Interruption recovery result
+6. **Frontend/settings resolution**
+   - User does not want a visible/logical 640x480 frontend underneath the selected modern resolution.
+   - The selected modern logical resolution is now authoritative for frontend coordinates.
+   - The hidden D3D7 producer may still use a compatibility backing where retail D3D7 cannot create the selected size (runtime-proven 2560x1440 D3D7 failure); that hidden backing must never define visible menu/text/slider/mouse coordinates.
 
-The Sep-30/Oct-1 input-stream interruption did **not** lose substantive implementation.
+7. **Display modes**
+   - Display Settings must expose:
+     - Fullscreen Exclusive
+     - Borderless
+     - Windowed
+   - This is implemented as a fifth-row Display menu with Display Mode on row 3 and Apply on row 4.
+   - Fullscreen Exclusive uses real DXGI `SetFullscreenState(TRUE)`, not fake borderless fullscreen.
+   - WindowMode persists in `spidey-modern-video.ini`.
+   - Needs runtime validation.
 
-Surviving implementation chain:
-- `4381062061b7a625c036dff7d851a3fac9430818` — mouse hotspot/hit-test coordinate fix;
-- `e497ed897cfb6aeca55a08d5a5b39a4ad0e973b7` — fixed-step timing documentation;
-- `ea594c7ce6e8349a46ca29b4d4e5d834b5eb6b24` — audio device backend;
-- `4aa5d59a4000c03ab5a9c3c80ae775058dfe4379` — audio log collection;
-- `7826aec4b1fb6adb2d2afcf14284ed807b4ae188` — Audio-menu device row/restart;
-- `5cc8533cd2a38a503b4f3ebca5ca654050eccf56` — recovery documentation.
+## Audio settings screenshot regression and fix
 
-What did **not** make it into implementation before the interruption:
-- final proper Hor+ widescreen patch;
-- gameplay/shell fixed-step render interpolation;
-- main-menu FPS uncap patch;
-- runtime validation of the new mouse-coordinate fix;
-- runtime validation of the new audio-output UI/backend.
+The user's screenshot showed:
+- menu text shifted upward;
+- sliders/arrows still at their old hard-coded Y positions;
+- Stereo value independently offset;
+- Output row still too low/off-screen.
 
-## Next-chat mandatory first actions
+Root cause:
+- the first six-row workaround moved only `CMenu::mY`;
+- `DrawSlider`, slider mouse logic, and the separately drawn Stereo/Mono value use independent hard-coded positions.
 
-1. Fetch live `dev` HEAD; never trust the commit IDs in this handoff over a newer live repo.
-2. Read the tail of `docs/CURRENT_STATUS.md`.
-3. Read this handoff and `docs/DX11_MIGRATION.md`.
-4. Read `docs/MODERN_INPUT_CAMERA.md` for the later controller/camera roadmap, but **do not let controller/camera work displace the five current priorities**.
-5. Inspect the user-provided interruption transcript included in the handoff ZIP.
-6. Continue static RE on proper widescreen + timing/audio validation before asking for unnecessary tests.
-7. Ask the user for a runtime build only at a meaningful combined boundary.
+Current correction moves the entire authored Audio layout consistently by one 20-unit row:
+- CMenu rows: -20
+- all three slider draw calls: -20
+- slider mouse hit logic: -20
+- standalone Stereo/Mono value: -20
 
-## Mandatory disconnect-safe workflow
+Relevant commits:
+- `b0eb4f66...`
+- `85e45c4...`
 
-This user specifically requires live durable checkpoints:
+Do not reintroduce a text-only offset.
 
-- **Repo is the checkpoint; chat is not.**
-- Fetch current `dev` before editing.
-- Fetch current file SHA immediately before every GitHub write.
-- Update `docs/CURRENT_STATUS.md` **during** substantial work, not only at the end.
-- Make small meaningful implementation commits frequently.
-- Push documentation checkpoints separately when useful.
-- Never hold a long RE result only in chat.
-- Record dead ends/risky experiments in docs.
-- On `error in input stream`, next chat must inspect:
-  1. live `dev`;
-  2. recent commit ancestry;
-  3. `docs/CURRENT_STATUS.md`;
-  4. `docs/NEW_CHAT_HANDOFF.md`;
-  5. latest uploaded logs/transcript;
-  then determine exactly what survived before doing new work.
+## Frontend logical-canvas correction
 
----
+Commit:
+- `685b00ff9a95c034612951e96b88863a5c4b2a3d`
 
-## READ THIS FIRST
+Behavior:
+- shell's old 640x480x16 request no longer becomes the active visible/logical frontend canvas when a modern mode is selected;
+- frontend mouse bounds/canvas helpers prefer the modern logical width/height;
+- selected modern dimensions remain authoritative;
+- retail D3D7 2560x1440 remains a verified dead end and may be remapped internally to 1920x1440 as a hidden producer only.
 
-This project has frequent ChatGPT "error in input stream" interruptions. **Do not trust stale chat text over the repo.**
+## Live-safe audio switching
 
-On entering a new chat:
+Key retail facts:
+- `G_PDS @ 0x006B7920`
+- `PCMOVIE_Init @ 0x0050B0F0`
+- Bink initialized flag `0x00AC0BA0`
+- active Bink handle `0x00AC0BA4`
+- `shutdownDirectSound8 @ 0x005000F0`
+- `DXSOUND_Init @ 0x005039F0`
+- `Shell_SFXMusic @ 0x004977D0`
 
-1. Open/fetch the live `dev` HEAD.
-2. Read the tail of `docs/CURRENT_STATUS.md`.
-3. Read this file.
-4. Read `docs/DX11_MIGRATION.md` for architecture.
-5. Determine which commits actually landed before any interruption.
-6. Continue from the repo frontier; do not redo already committed work.
-7. **Live-update `docs/CURRENT_STATUS.md` while working**, not just at the end.
-8. Push small commits to `dev` every few meaningful steps.
-9. If a stream dies, the next chat must be able to recover from the repo alone.
+New behavior:
+- selected endpoint is applied in-session;
+- old DirectSound receives a temporary retained reference before retail shutdown if Bink is initialized;
+- game DirectSound/SFX is rebuilt on the selected endpoint;
+- if Bink is active, old backend remains valid;
+- at a safe no-active-Bink point, retail `PCMOVIE_Init` rebinds Bink to current `G_PDS`, then retained old DirectSound is released;
+- if endpoint creation + System Default fallback both fail, prior working DirectSound and prior selected-device index are restored.
 
-The user explicitly requires this disconnect-safe workflow.
+## Display-mode implementation
 
----
+Display menu is now:
+1. Resolution
+2. Aspect Ratio
+3. Brightness
+4. Display Mode
+5. Apply
+
+Modes:
+- Fullscreen Exclusive
+- Borderless
+- Windowed
+
+Renderer:
+- ABI is now **8**.
+- `SpideyRenderer11_SetFullscreenState` is declared, implemented, resolved, and mandatory.
+- Leaving exclusive occurs before retail compatibility-producer rebuild.
+- Renderer shutdown exits exclusive before releasing the swap chain.
+- Persisted WindowMode is loaded before early renderer startup.
+- Old unconditional startup force-to-borderless behavior is removed.
+
+## Widescreen and renderer facts that must not be lost
+
+- Moving/background warp bug is confirmed fixed. Do not reopen old UV/RHW investigation unless it regresses.
+- `M3d_RenderSetup @ 0x00472DC0` is the upstream 3D projection path.
+- aspect scalar global: `0x00550064`
+- 16:9 scalar: 0.75
+- Hor+ side-plane culling sync commit:
+  - `e59539d4a501cc1269cf0b23988c15ede041bd80`
+- exact 2D provenance:
+  - `PCGfx_DrawQuad2D @ 0x00507470`
+  - `PCGfx_DrawQPoly2D @ 0x00507910`
+  - `PCGfx_DrawQPoly3D @ 0x00508550`
+  - `DXPOLY_DrawPoly @ 0x00503100`
+- 2D sidecar/provenance commits:
+  - `a3421ff...`
+  - `fe6f93a...`
+  - `63f7e9b...`
+- renderer shadow state carries exact `drawClass`.
+- separate 2D/3D coordinate-range telemetry exists.
+
+## Timing facts
+
+Retail timing:
+- `Vblanks @ 0x006B4CA0`
+- `Pause @ 0x004E5D60`
+- `PlayAway @ 0x004559D0`
+- `Logic @ 0x00455400`
+- gameplay Logic call site: `0x00455A8B -> 0x00455400`
+- `Shell_MainMenu @ 0x00493990`
+
+Telemetry:
+- `spidey-decomp-timing.log`
+- logs `timing_logic ... hz=`
+- logs `timing_present ... hz=`
+
+Previous crash session was frontend-only. Do not infer gameplay simulation rate from it.
+
+## Next runtime test — exact requested validation
+
+Run the normal update/build/test workflow and verify all of the following in one session:
+
+1. Audio screen:
+   - text/sliders/Stereo value/Output row are vertically aligned;
+   - Output row is fully visible.
+
+2. Audio live switching:
+   - changing Output Device moves audio to the selected endpoint **without restarting the game**;
+   - try more than one endpoint if practical;
+   - return to System Default;
+   - no Bink crash.
+
+3. Stereo/Mono:
+   - Stereo -> Mono -> Stereo remains stable.
+
+4. Frontend/settings:
+   - menu/settings use the selected modern logical resolution;
+   - no visible/logical 640x480 frontend fallback;
+   - settings and mouse hit regions line up.
+
+5. Display Mode:
+   - cycle and Apply Fullscreen Exclusive / Borderless / Windowed;
+   - each mode visibly behaves as expected;
+   - return to preferred mode;
+   - relaunch and verify persistence.
+
+6. Mouse:
+   - post-level mouse alignment remains fixed.
+
+7. Gameplay timing:
+   - enter gameplay long enough for `timing_logic` and `timing_present` samples;
+   - report whether gameplay still feels sped up.
+
+Do not use F9. F10 is unnecessary for this test.
+
+## After this batch validates
+
+Resume the still-open priorities:
+1. true Hor+ visual validation / remaining 2D layout work;
+2. gameplay Logic Hz vs Present Hz analysis;
+3. fixed-step/interpolation game-speed correction;
+4. uncapped/high-refresh main-menu rendering while preserving shell logical cadence.
+
+## Mandatory live-document / disconnect-safe protocol
+
+This is a user requirement, not optional process advice.
+
+During substantial work:
+1. fetch live `dev` before editing;
+2. read the tail of `docs/CURRENT_STATUS.md`;
+3. update `docs/CURRENT_STATUS.md` **while working**, not only at the end;
+4. commit meaningful source changes in small, descriptive commits;
+5. add documentation checkpoints after major RE findings / before long risky work;
+6. do not hold 20–30 minutes of irreplaceable RE only in chat context;
+7. document rejected hypotheses and dead ends so they are not repeated;
+8. prefer fewer, larger meaningful runtime tests rather than asking the user to test every small patch;
+9. if a stream/input error occurs:
+   - fetch live `dev`;
+   - inspect recent commits;
+   - read `CURRENT_STATUS.md`;
+   - identify exactly what survived;
+   - reconstruct only the unsaved tail;
+   - checkpoint it immediately;
+   - then continue.
+
+**Rule:** repo is the checkpoint; chat is not.
+
+## User workflow
+
+Normal user-side flow is BAT-first:
+- `UPDATE_AND_TEST_LATEST_BUILD.bat` for current combined update/build/install/test workflow.
+- Supporting build documentation: `docs/BUILD_AND_INSTALL.md`.
 
 ## Project links
 
-- Active decomp/modernization repo: https://github.com/legentus/spidey-decomp
-- Active `dev` branch: https://github.com/legentus/spidey-decomp/tree/dev
-- Live status: https://github.com/legentus/spidey-decomp/blob/dev/docs/CURRENT_STATUS.md
-- DX11 migration notes: https://github.com/legentus/spidey-decomp/blob/dev/docs/DX11_MIGRATION.md
-- This handoff: https://github.com/legentus/spidey-decomp/blob/dev/docs/NEW_CHAT_HANDOFF.md
+- Active repo: https://github.com/legentus/spidey-decomp
+- Dev branch: https://github.com/legentus/spidey-decomp/tree/dev
+- Current status: https://github.com/legentus/spidey-decomp/blob/dev/docs/CURRENT_STATUS.md
+- This live handoff: https://github.com/legentus/spidey-decomp/blob/dev/docs/NEW_CHAT_HANDOFF.md
+- DX11 migration: https://github.com/legentus/spidey-decomp/blob/dev/docs/DX11_MIGRATION.md
+- Modern input/camera design: https://github.com/legentus/spidey-decomp/blob/dev/docs/MODERN_INPUT_CAMERA.md
 - Upstream decomp: https://github.com/krystalgamer/spidey-decomp
-- Upstream tools: https://github.com/krystalgamer/spidey-tools
-- User orchestration repo: https://github.com/legentus/Spiderman-2000
-- Retail game Google Drive: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
-- Retail/docs Google Drive: https://drive.google.com/drive/folders/1Py0hitNzvKJ5xFU3kSyFUAgpX3F7_uf-
-
-User local paths:
-- Project: `F:\Spider-Man 2000 Recomp\project main`
-- Game: `C:\Program Files (x86)\Activision\Spider-Man`
-- Matching VC6-era toolchain: `C:\Users\alh60\AppData\Local\Spidey2000Dev\MatchingVS`
-- User test/update entrypoint: `UPDATE_AND_TEST_LATEST_BUILD.bat`
-
----
-
-## Retail EXE fingerprint — do not patch other builds blindly
-
-Verified retail `SpideyPC.exe`:
-- SHA-256: `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
-- size: `1507328`
-- machine: `0x014C`
-- timestamp: `0x3B7A3167`
-- entrypoint RVA: `0x0012B46F`
-- image base: `0x00400000`
-- size of image: `0x02A0D000`
-
----
-
-## Current architecture
-
-This is still a **retail-host proxy**, not yet a standalone native EXE.
-
-1. `SpideyPC.exe` loads `binkw32.dll`.
-2. Rebuilt `spider.dll` is installed as proxy `binkw32.dll`.
-3. Retail Bink remains `binkw32_.dll`.
-4. The proxy forwards Bink exports and patches selected retail functions/calls.
-5. Modern renderer is a separate `spidey_renderer11.dll` built with VS2022 x86/Win32.
-6. Legacy proxy talks to renderer11 through a stable C ABI.
-7. Renderer ABI is currently **6**.
-8. D3D7 still exists for compatibility/state/resource plumbing and still executes original draws in the background.
-9. **DX11 geometry is the default visible renderer.**
-10. F10 remains an A/B switch to the old D3D7-rendered reference image.
-
-Do not describe the project as fully standalone or fully free of D3D7 yet.
-
----
-
-## Major verified milestones
-
-### Alt+Tab/input — fixed
-- Retail DirectInput polling is wrapped.
-- Devices reacquire correctly after foreground return.
-- User confirmed Alt+Tab no longer permanently kills controls.
-- Important commit: `92f0d4add60dfdd6c7a9b50decc6b35a8bf01507`.
-
-### Double-present/menu flashing — fixed
-- Only one visible presenter owns the HWND in compatibility mode.
-- Rapid stale building/city imagery in menus is gone.
-
-### Whole-screen black flashing — fixed
-- Presenter clears only bars, not the whole HWND before each blit.
-
-### Texture/caps issues — fixed
-- Correct retail D3DDEVICEDESC7 base is `0x006B5780`.
-- Texture hash table base is `0x006AB934`.
-
-### DX11 Phase 0 — passed
-- Modern DLL builds/loads.
-- Hardware D3D11 probe succeeds.
-- User GPU log showed feature level 11.1 on RTX 4070 SUPER.
-
-### DX11 Phase 1 — passed
-- DX11/DXGI owns final presentation.
-- Legacy D3D7 scene was transferred into DX11.
-- User booted, started a new game, and played normally.
-
-### DX11 Phase 2A — passed
-- Normal frame transfer changed from HDC/GDI to:
-  D3D7 scene lock -> BGRA8 D3D11 upload texture -> shader draw -> DXGI Present.
-- HDC and direct-HWND fallback paths remain for safety.
-
-### DX11 Phase 2B — passed
-- Game textures are mirrored to per-ID DX11 sidecar resources.
-- Existing 0..1023 texture IDs remain canonical.
-
-### DX11 Phase 2C1 — passed
-Retail DrawPrimitive stream was intercepted and replayed offscreen in DX11.
-
-Observed stream over a real gameplay run:
-- 100% triangle fans;
-- 100% FVF `0x144`;
-- XYZRHW + diffuse + UV;
-- sampled frame replay had `queued == submitted == rendered`;
-- zero sampled state-cache mismatches;
-- zero sampled shadow render skips;
-- transient surfaces were recovered into synthetic IDs 1024+;
-- DX11 shadow target contained real non-black scene pixels.
-
-### DX11 Phase 2C2 — passed visually
-F10 switched the visible image to the independently reconstructed DX11 geometry renderer.
-User reported:
-- everything looked correct;
-- DX11 may have looked slightly better.
-
-Representative runtime frame:
-- retail calls: 5,007;
-- DX11 shadow submit: 5,007;
-- renderer queued/submitted/rendered: 5,007/5,007/5,007;
-- zero skipped renders;
-- zero missing textures.
-
-D3D7/DX11 exact sampled pixels are close but not bit-identical:
-- median absolute per-channel difference about 1 level;
-- mean about 2.78 levels in the measured sample set;
-- no visual problem reported.
-
-### DX11 Phase 2C3 — passed
-DX11 geometry was promoted to **default visible**.
-User tested:
-- normal boot;
-- frontend/gameplay;
-- F10 reference/DX11 switching;
-- everything looked clean.
-
-Small frametime hitches roughly every 0.5–1 second were noticed on a frametime graph, but user reports they existed before this DX11 work and occur regardless of renderer. Treat as a separate later profiling task unless evidence ties it to current changes.
-
----
-
-## Why 2560x1440 needs a compatibility split
-
-D3D7 physical 2560x1440 is a verified dead end:
-- scene surface creation can succeed;
-- `IDirect3D7::CreateDevice` rejects a 2560x1440 scene surface;
-- HRESULT: `0x88760082 = DDERR_INVALIDOBJECT`;
-- failure occurs before the first splash when 2560x1440 is restored directly through old D3D7.
-
-Therefore modern output and legacy backing must be separate concepts.
-
-Current target for selected 2560x1440:
-- **user-selected/output:** 2560x1440x32
-- **DX11 target/swap output:** 2560x1440
-- **hidden safe D3D7 backing:** 1920x1440x32
-- **frontend canvas:** still intentionally 640x480 / 4:3 for now
-
-Do not re-enable physical D3D7 2560x1440.
-
----
-
-## Phase 3A — native logical gameplay resolution
-
-Implemented architecture:
-1. physical D3D7 compatibility surface;
-2. logical game resolution;
-3. actual DX11 render/output resolution.
-
-The project can now make the game's logical gameplay dimensions different from the D3D7 physical backing.
-
-Intended 2560x1440 configuration:
-- D3D7 physical: 1920x1440;
-- logical gameplay: 2560x1440;
-- DX11 color/depth target: 2560x1440;
-- DXGI output: 2560x1440.
-
-Per-frame geometry telemetry was added to prove whether the retail software projection naturally produces true Hor+ vertices beyond the old 1920-wide physical viewport. If not, a narrow projection/FOV hook is the next step after settings persistence works.
-
----
-
-## Phase 3B test result — settings visible, but persistence/apply was broken
-
-Tested revision:
-`91ffd2884f2591eab48374386c342fbcdb1c30e6`
-
-User result:
-- Screen Size and Aspect Ratio rows appeared;
-- aspect values could be cycled;
-- 2560x1440 appeared while scrolling Screen Size;
-- settings did not actually commit;
-- reopening the menu reverted Screen Size;
-- pressing Enter on 2560x1440 could immediately change it back to an odd/older resolution;
-- user requested an explicit **Apply** row so display settings can be applied without restarting.
-
-Runtime evidence from that test:
-- all Phase 3B aspect call patches installed successfully;
-- aspect log reached `16:9 scalar=0.750000`;
-- committed output stayed `1920x1440`;
-- modern mode table had 24 entries and explicitly exposed 2560x1440;
-- renderer11 already initialized at 2560x1440;
-- therefore the remaining bug was **retail Display Options transaction semantics**, not DX11 capability.
-
-Important discovered retail behavior:
-- Screen Size uses saved width/height globals as its temporary working variables.
-- Pressing Enter anywhere in the original menu calls `DXINIT_SetDisplayOptions`.
-- Original Color Depth changes also call next/previous-resolution searches to pick a resolution compatible with the new bpp.
-- After Color Depth was repurposed as Aspect Ratio, those compatibility searches were still mutating Screen Size.
-
-This explains the user's exact symptom.
-
----
-
-## Phase 3C — CURRENT UNTESTED FRONTIER
-
-**This is the next runtime test. Do not assume it passed.**
-
-The Display Options screen has been converted to a transaction model.
-
-### New rows
-1. Screen Size
-2. Aspect Ratio
-3. Brightness
-4. **Apply**
-
-### Pending vs committed settings
-
-Screen Size and Aspect Ratio now edit **pending** state only.
-
-Committed:
-- `gSpideySelectedOutputWidth/Height`
-- `gSpideyAspectMode`
-
-Pending:
-- separate width/height
-- separate aspect mode
-
-Screen Size text reads pending resolution.
-Aspect Ratio text reads pending aspect.
-
-Retail resolution stepping algorithms are still reused, but they receive temporary local values rather than the committed saved globals.
-
-### Aspect modes
-- AUTO
-- 4:3
-- 5:4
-- 16:9
-- 16:10
-- 21:9
-- 32:9
-
-Aspect/projection scalar runtime VA:
-`0x00550064`
-
-Explicit scalars:
-- 4:3 = 1.0
-- 5:4 = 1.06667
-- 16:9 = 0.75
-- 16:10 = 0.83333
-- 21:9 = 0.57143
-- 32:9 = 0.375
-
-AUTO:
-`(4 * height) / (3 * width)`
-
-Aspect selection is persisted in:
-`spidey-modern-video.ini`
-beside `SpideyPC.exe`.
-
-### Obsolete Color Depth coupling disabled
-
-The old post-color-depth resolution searches are now no-ops:
-- `0x0050DDFB -> 0x00500E20`
-- `0x0050DE1F -> 0x00500F40`
-
-Changing Aspect Ratio must no longer change Screen Size.
-
-### Apply semantics
-
-Pressing Enter on rows 0–2 no longer commits/rebuilds display state.
-
-Pressing Enter on **Apply**:
-1. commits pending resolution/aspect;
-2. writes saved width/height/bpp globals;
-3. applies the aspect scalar;
-4. preserves the frontend's known-good 640x480 canvas when currently in frontend;
-5. immediately calls retail `SPIDEYDX_SaveSettings @ 0x00515850`;
-6. resets pending state to the committed selection.
-
-Back/Escape without Apply should discard pending resolution/aspect changes.
-
-### Retail save routine verified
-
-Retained retail bytes for `SPIDEYDX_SaveSettings` were disassembled.
-It serializes the exact relevant globals:
-- width: `0x02E096F8`
-- height: `0x02E0970C`
-- bpp: `0x02E098E4`
-- brightness: `0x00562D60`
-
-### Exact byte-verified menu patch sites
-
-Retail function:
-- `PCSHELL_DoDisplayOptions = 0x0050D9B0`
-- size: 1476 bytes
-
-Relevant patches:
-- `0x0050DA72 -> 0x0043FFF0`: intercept third AddEntry and append Apply
-- `0x0050DB56 -> 0x00529F90`: Screen Size formatter -> pending formatter
-- `0x0050DBBB -> 0x00529F90`: Aspect Ratio formatter
-- `0x0050DCF8 -> 0x00500250`: Enter/confirm -> Apply-only handler
-- `0x0050DDAB -> 0x005010C0`: Aspect previous
-- `0x0050DDCE -> 0x00501060`: Aspect next
-- `0x0050DDFB -> 0x00500E20`: disable old aspect/color-depth compatibility resolution step
-- `0x0050DE1F -> 0x00500F40`: disable fallback compatibility resolution step
-- `0x0050DE71 -> 0x00500F40`: previous Screen Size operates on pending state
-- `0x0050DE88 -> 0x00500E20`: next Screen Size operates on pending state
-
-Row-1 label pointer:
-- `0x0054BBD4` -> "Aspect Ratio"
-
-Every direct-call patch verifies:
-- opcode is `E8`;
-- original target matches expected address;
-- otherwise patch is refused and logged.
-
-### Critical install-order fix
-
-The Apply-specific `0x0050DCF8` hook must install **before** the generic display-options compatibility scan, because the generic installer rewrites remaining direct calls to `0x00500250`.
-
-Correct install order:
-1. modern-mode reinit compatibility;
-2. transactional Display Options / Apply hooks;
-3. generic display-options compatibility for remaining retail callers.
-
-Expected:
-- generic `display_options_compat patched_calls=3` now, not 4.
-
-Source correction commit:
-`016b7438fd7008d8e6075105c0b4f2e9201d5703`
-
-Documentation commits immediately afterward:
-- `10b4ec705ba631a7abb8a0a1d8e95af97a1999b4`
-- `2f14244f05ad2c1946a6668b89fe60064ca9b409`
-
----
-
-## EXACT NEXT USER TEST
-
-The next chat should ask the user to run:
-
-`UPDATE_AND_TEST_LATEST_BUILD.bat`
-
-Then:
-
-1. Open Options -> Display Options.
-2. Verify four rows:
-   - Screen Size
-   - Aspect Ratio
-   - Brightness
-   - Apply
-3. Set Screen Size = **2560x1440**.
-4. Set Aspect Ratio = **16:9**.
-5. Move to **Apply** and press Enter.
-6. Confirm the menu remains usable and Screen Size still displays 2560x1440.
-7. Back out.
-8. Reopen Display Options.
-9. Verify 2560x1440 + 16:9 are still selected.
-10. Start gameplay **without restarting the process**.
-11. Inspect:
-    - whether gameplay fills 16:9;
-    - whether it is Hor+ rather than stretched;
-    - HUD placement;
-    - frontend stability;
-    - level transitions.
-12. Exit normally and upload the full generated log set.
-
-Expected new log markers:
-- `display_menu_mod ... rows=4 ... applyentry=1 applyconfirm=1`
-- `display_pending_reset reason=menu_open ...`
-- while cycling:
-  `display_pending_resolution ... value=2560x1440 committed=1920x1440`
-- aspect:
-  `display_pending_aspect ... value=16:9 ...`
-- Apply:
-  `display_aspect reason=display_menu_apply_commit ...`
-  `display_apply committed=1 selected=2560x1440x32 aspect=16:9 ... saved_now=1`
-- reopen:
-  `display_pending_reset reason=menu_open selected=2560x1440 aspect=16:9`
-- gameplay:
-  `display_options selected=2560x1440x32 physical=1920x1440x32 ... legacy_backing_remap=1`
-  `logical_render_resolution ... logical=2560x1440 physical=1920x1440 selected=2560x1440`
-- renderer11:
-  native 2560x1440 shadow target / presentation.
-
-If this test fails:
-- inspect the logs first;
-- confirm install markers for every Display Options patch;
-- confirm the Apply hook owned `0x0050DCF8`;
-- compare pending vs committed logs;
-- do not reopen D3D7 2560x1440 experiments.
-
----
-
-## Important retail addresses
-
-Rendering:
-- `DXINIT_DirectX8 = 0x004FDE90`
-- RealWinMain DX init call = `0x00515BAD`
-- argument push = `0x00515BA9`
-- `DXPOLY_Flip = 0x00502990`
-- `DXPOLY_EndScene = 0x00502A40`
-- EndScene -> Flip call = `0x00502D41`
-
-Globals:
-- windowed flag = `0x006B78F4`
-- HWND = `0x006B58D0`
-- primary surface = `0x006B7904`
-- scene surface = `0x006B7908`
-- gRect = `0x006B5958`
-- live DX width = `0x006B78E4`
-- live DX height = `0x006B78E8`
-- live bpp = `0x006B78EC`
-- logical game width = `0x00568154`
-- logical game height = `0x00568158`
-- saved width = `0x02E096F8`
-- saved height = `0x02E0970C`
-- saved bpp = `0x02E098E4`
-- brightness = `0x00562D60`
-- projection/aspect scalar = `0x00550064`
-- D3DDEVICEDESC7 base = `0x006B5780`
-- texture hash table = `0x006AB934`
-- D3D7 device pointer slot = `0x006B791C`
-
-Display menu:
-- `PCSHELL_DoDisplayOptions = 0x0050D9B0`
-- row-1 label slot = `0x0054BBD4`
-- retail save routine = `SPIDEYDX_SaveSettings = 0x00515850`
-
-DirectInput:
-- `DXINPUT_Initialize = 0x005013D0`
-- `DXINPUT_Release = 0x00501440`
-- `DXINPUT_SetupKeyboard = 0x00501590`
-- `DXINPUT_SetupMouse = 0x00501710`
-- `DXINPUT_PollKeyboard = 0x00501B80`
-- `DXINPUT_PollMouse = 0x00501CC0`
-- `DXINPUT_PollController = 0x00501E50`
-
----
-
-## Known-good / do not regress
-
-- Alt+Tab input recovery.
-- Startup movies/audio.
-- No rapid building/city menu flashes.
-- No whole-screen black presenter flashes.
-- White/missing menu textures remain fixed.
-- D3D7 2560x1440 remains physically quarantined.
-- DX11 geometry remains default visible renderer.
-- F10 remains a working D3D7-reference A/B switch.
-- Texture mirroring/transient recovery remains intact.
-- Frontend compatibility canvas stays 640x480 until intentionally modernized.
-
----
-
-## Future roadmap after Phase 3C passes
-
-Immediate:
-1. Prove Apply/persistence.
-2. Prove selected 2560x1440 drives logical 2560x1440 DX11 gameplay.
-3. Check geometry-range telemetry for true Hor+.
-4. If projection is still 4:3, hook only the upstream projection/FOV constant/math.
-5. Modernize HUD safe-area/layout.
-6. Decide how to modernize frontend while preserving original menu behavior.
-
-Renderer:
-- controlled suppression of original main-scene D3D7 `DrawPrimitive` once DX11 remains authoritative;
-- keep state/resource plumbing initially;
-- eventually remove D3D7 scene/device dependency.
-
-Later:
-- frame-time hitch profiling;
-- modern XInput/controller backend;
-- mod/plugin APIs;
-- editor/dev tooling ("Spidey Studio" concept);
-- progressively more standalone/native ownership.
-
----
-
-## REQUIRED WORKING STYLE FOR THE NEXT CHAT
-
-The user expects active engineering, not just advice.
-
-When asked to continue:
-- inspect live repo state;
-- implement the next bounded batch;
-- update `docs/CURRENT_STATUS.md` **during the work**;
-- push small commits every few changes;
-- include exact commit hashes in progress notes;
-- only ask the user to test at a meaningful runtime boundary;
-- do not make them retest tiny changes one at a time if a larger safe batch can be statically grounded;
-- do not fabricate reverse-engineering facts;
-- preserve a known-good fallback when crossing risky renderer/device boundaries.
-
-### Disconnect protocol
-
-If the chat errors:
-1. inspect live `dev` HEAD;
-2. inspect the latest commits;
-3. read the tail of `docs/CURRENT_STATUS.md`;
-4. compare it with this handoff;
-5. identify what landed and what did not;
-6. immediately document recovery;
-7. continue from the committed frontier.
-
-**The repo is the checkpoint. Chat text is not the checkpoint.**
+- Google Drive full game/files: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
