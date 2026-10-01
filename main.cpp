@@ -2623,6 +2623,57 @@ static void __fastcall SpideyAudioAddOutputDevice(
 		0,
 		gSpideyAudioOutputMenuLabel);
 
+	// The retail screen was authored for five rows. Keep all six rows within
+	// the same vertical composition by shifting the CMenu text one line up.
+	// Matching wrappers below shift slider graphics AND slider hit regions by
+	// the exact same amount, so all Audio controls remain aligned.
+	if (menu &&
+		menu->mNumLines >= 6)
+	{
+		menu->mY -=
+			menu->mLineSep;
+	}
+}
+
+typedef void (__cdecl *SpideyRetailDrawSliderFn)(
+		int,
+		int,
+		int,
+		int);
+typedef int (__cdecl *SpideyRetailSliderMouseLogicFn)(
+		int,
+		int,
+		int);
+
+static const int gSpideyAudioExtraRowShift =
+	20;
+
+static void __cdecl SpideyAudioDrawSliderShifted(
+		int x,
+		int y,
+		int selected,
+		int value)
+{
+	SpideyRetailDrawSliderFn retail =
+		(SpideyRetailDrawSliderFn)0x00498060;
+	retail(
+		x,
+		y - gSpideyAudioExtraRowShift,
+		selected,
+		value);
+}
+
+static int __cdecl SpideyAudioSliderMouseLogicShifted(
+		int x,
+		int y,
+		int value)
+{
+	SpideyRetailSliderMouseLogicFn retail =
+		(SpideyRetailSliderMouseLogicFn)0x00497F80;
+	return retail(
+		x,
+		y - gSpideyAudioExtraRowShift,
+		value);
 }
 
 static void __fastcall SpideyAudioMenuUpdate(
@@ -2764,6 +2815,31 @@ static void SpideyInstallAudioMenuCompat()
 			(void*)&SpideyAudioSetStereoModeCompat,
 			"audio_stereo_mode_telemetry");
 
+	const int sliderOneInstalled =
+		SpideyPatchDirectCall(
+			0x00497978,
+			0x00498060,
+			(void*)&SpideyAudioDrawSliderShifted,
+			"audio_slider_1_shift");
+	const int sliderTwoInstalled =
+		SpideyPatchDirectCall(
+			0x00497998,
+			0x00498060,
+			(void*)&SpideyAudioDrawSliderShifted,
+			"audio_slider_2_shift");
+	const int sliderThreeInstalled =
+		SpideyPatchDirectCall(
+			0x004979B8,
+			0x00498060,
+			(void*)&SpideyAudioDrawSliderShifted,
+			"audio_slider_3_shift");
+	const int sliderMouseInstalled =
+		SpideyPatchDirectCall(
+			0x00497BE9,
+			0x00497F80,
+			(void*)&SpideyAudioSliderMouseLogicShifted,
+			"audio_slider_mouse_shift");
+
 	FILE* f = fopen(
 		"spidey-decomp-audio.log",
 		"a");
@@ -2771,10 +2847,15 @@ static void SpideyInstallAudioMenuCompat()
 	{
 		fprintf(
 			f,
-			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d stereo_telemetry=%d controls=retail_left_right device_apply=live retained_bink_backend=1 recenter_rows=0 compact_label=1\n",
+			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d stereo_telemetry=%d controls=retail_left_right device_apply=live retained_bink_backend=1 full_layout_shift=%d slider_draws=%d,%d,%d slider_mouse=%d compact_label=1\n",
 			addEntryInstalled,
 			updateInstalled,
-			stereoModeInstalled);
+			stereoModeInstalled,
+			gSpideyAudioExtraRowShift,
+			sliderOneInstalled,
+			sliderTwoInstalled,
+			sliderThreeInstalled,
+			sliderMouseInstalled);
 		fclose(f);
 	}
 }
