@@ -9272,83 +9272,17 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		{
 			fprintf(
 				previewLog,
-				"shadow_default frame=%lu enabled=%d mode=dx11_geometry key=F10_reference_toggle\n",
+				"shadow_default frame=%lu enabled=%d mode=dx11_authoritative debug_reference_toggle=disabled\n",
 				frame,
 				gSpideyShadowPreviewEnabled);
 			fclose(previewLog);
 		}
 	}
 
-	if (GetAsyncKeyState(VK_F9) & 1)
-	{
-		gSpideyD3D7MainDrawSuppressionEnabled =
-			gSpideyD3D7MainDrawSuppressionEnabled ? 0 : 1;
-		d3d7SuppressionToggled =
-			1;
-
-		FILE* suppressionLog = fopen(
-			"spidey-decomp-present.log",
-			"a");
-		if (suppressionLog)
-		{
-			fprintf(
-				suppressionLog,
-				"d3d7_main_draw_suppression frame=%lu enabled=%d effective=%d dx11=%d ready=%d key=F9\n",
-				frame,
-				gSpideyD3D7MainDrawSuppressionEnabled,
-				gSpideyD3D7MainDrawSuppressionEnabled &&
-					gSpideyShadowPreviewEnabled &&
-					gSpideyShadowPreviewReady,
-				gSpideyShadowPreviewEnabled,
-				gSpideyShadowPreviewReady);
-			fclose(suppressionLog);
-		}
-	}
-
-	if (GetAsyncKeyState(VK_F10) & 1)
-	{
-		gSpideyShadowPreviewEnabled =
-			gSpideyShadowPreviewEnabled ? 0 : 1;
-		gSpideyShadowPreviewReady =
-			0;
-		shadowPreviewToggled =
-			1;
-		shadowPreviewToggledOn =
-			gSpideyShadowPreviewEnabled ? 1 : 0;
-
-		if (gSpideyShadowPreviewEnabled)
-		{
-			SpideyRenderer11ShadowSetContinuous(1);
-			SpideyApplyLogicalRenderResolution(
-				1,
-				"f10_dx11");
-		}
-		else
-		{
-			// The frame that just finished drawing still used the modern
-			// logical viewport. Keep that completed DX11 frame visible once,
-			// switch game projection back to the physical D3D7 aspect for
-			// the next frame, then enter reference mode cleanly.
-			shadowReferenceDelay =
-				1;
-			SpideyApplyLogicalRenderResolution(
-				0,
-				"f10_d3d7_reference");
-		}
-
-		FILE* previewLog = fopen(
-			"spidey-decomp-present.log",
-			"a");
-		if (previewLog)
-		{
-			fprintf(
-				previewLog,
-				"shadow_preview_toggle frame=%lu enabled=%d key=F10\n",
-				frame,
-				gSpideyShadowPreviewEnabled);
-			fclose(previewLog);
-		}
-	}
+	// F9/F10 used to switch between the DX11 preview and a D3D7 reference
+	// path. DX11 is now authoritative, so falling back to the legacy display
+	// surface is intentionally disabled. Keep the local transition flags at
+	// zero for the existing telemetry/presentation bookkeeping.
 
 	// DXPOLY_Flip runs after retail EndScene. Transient texture surfaces are
 	// no longer actively bound for drawing here, so this is the safe point
