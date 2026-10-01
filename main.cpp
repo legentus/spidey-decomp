@@ -997,6 +997,10 @@ static void SpideyInjectModernVideoModes()
 }
 
 
+static void SpideyApplySelectedWindowStyle(
+		HWND hwnd,
+		const char* reason);
+
 static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
 {
 	if (!hwnd)
@@ -1076,7 +1080,9 @@ static void __cdecl SpideyCompatInitDirectDraw7(
 
 	retail(hwnd);
 	SpideyInjectModernVideoModes();
-	SpideyKeepBorderlessMonitorWindow(hwnd);
+	SpideyApplySelectedWindowStyle(
+		hwnd,
+		"directdraw_init");
 }
 
 static void SpideyInstallModernModeReinitCompat()
@@ -1146,6 +1152,18 @@ static unsigned long gSpideyPendingOutputWidth = 640;
 static unsigned long gSpideyPendingOutputHeight = 480;
 static int gSpideyAspectMode = 0;
 static int gSpideyPendingAspectMode = 0;
+
+enum SpideyWindowMode
+{
+	SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE = 0,
+	SPIDEY_WINDOW_BORDERLESS = 1,
+	SPIDEY_WINDOW_WINDOWED = 2
+};
+
+static int gSpideyWindowMode =
+	SPIDEY_WINDOW_BORDERLESS;
+static int gSpideyPendingWindowMode =
+	SPIDEY_WINDOW_BORDERLESS;
 static CMenu* gSpideyDisplayMenu = 0;
 
 static const char* const gSpideyAspectLabels[] =
@@ -1160,6 +1178,14 @@ static const char* const gSpideyAspectLabels[] =
 };
 static char gSpideyAspectRatioMenuLabel[] =
 	"Aspect Ratio";
+static const char* const gSpideyWindowModeLabels[] =
+{
+	"Fullscreen Exclusive",
+	"Borderless",
+	"Windowed"
+};
+static char gSpideyDisplayModeMenuLabel[96] =
+	"Display Mode: Borderless";
 static char gSpideyDisplayApplyMenuLabel[] =
 	"Apply";
 static char gSpideyModernVideoIniPath[MAX_PATH];
@@ -1223,6 +1249,150 @@ static const char* SpideyGetModernVideoIniPath()
 
 	return gSpideyModernVideoIniPath;
 }
+
+static void SpideyUpdateDisplayModeMenuLabel()
+{
+	if (gSpideyPendingWindowMode <
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE ||
+		gSpideyPendingWindowMode >
+			SPIDEY_WINDOW_WINDOWED)
+	{
+		gSpideyPendingWindowMode =
+			SPIDEY_WINDOW_BORDERLESS;
+	}
+
+	sprintf(
+		gSpideyDisplayModeMenuLabel,
+		"Display Mode: %s",
+		gSpideyWindowModeLabels[
+			gSpideyPendingWindowMode]);
+}
+
+static void SpideyApplySelectedWindowStyle(
+		HWND hwnd,
+		const char* reason)
+{
+	if (!hwnd)
+		return;
+
+	int mode =
+		gSpideyWindowMode;
+	if (mode < SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE ||
+		mode > SPIDEY_WINDOW_WINDOWED)
+	{
+		mode =
+			SPIDEY_WINDOW_BORDERLESS;
+	}
+
+	const int screenWidth =
+		GetSystemMetrics(0);
+	const int screenHeight =
+		GetSystemMetrics(1);
+
+	LONG style =
+		0;
+	int left =
+		0;
+	int top =
+		0;
+	int outerWidth =
+		(int)gSpideySelectedOutputWidth;
+	int outerHeight =
+		(int)gSpideySelectedOutputHeight;
+
+	if (mode ==
+		SPIDEY_WINDOW_WINDOWED)
+	{
+		style =
+			WS_OVERLAPPEDWINDOW |
+			WS_VISIBLE;
+
+		RECT rect;
+		rect.left =
+			0;
+		rect.top =
+			0;
+		rect.right =
+			outerWidth;
+		rect.bottom =
+			outerHeight;
+
+		if (AdjustWindowRect(
+				&rect,
+				style,
+				FALSE))
+		{
+			outerWidth =
+				rect.right -
+				rect.left;
+			outerHeight =
+				rect.bottom -
+				rect.top;
+		}
+
+		if (screenWidth > 0)
+			left =
+				(screenWidth - outerWidth) / 2;
+		if (screenHeight > 0)
+			top =
+				(screenHeight - outerHeight) / 2;
+	}
+	else
+	{
+		style =
+			WS_POPUP |
+			WS_VISIBLE;
+
+		if (mode ==
+				SPIDEY_WINDOW_BORDERLESS &&
+			screenWidth > 0 &&
+			screenHeight > 0)
+		{
+			outerWidth =
+				screenWidth;
+			outerHeight =
+				screenHeight;
+		}
+	}
+
+	SetWindowLongA(
+		hwnd,
+		GWL_STYLE,
+		style);
+
+	SetWindowPos(
+		hwnd,
+		HWND_TOP,
+		left,
+		top,
+		outerWidth,
+		outerHeight,
+		SWP_FRAMECHANGED |
+		SWP_SHOWWINDOW);
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"window_style reason=%s mode=%d label=%s rect=%d,%d,%dx%d selected=%lux%lu\n",
+			reason ? reason : "unknown",
+			mode,
+			gSpideyWindowModeLabels[mode],
+			left,
+			top,
+			outerWidth,
+			outerHeight,
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight);
+		fclose(f);
+	}
+}
+
+static void SpideyApplyRendererWindowMode(
+		const char* reason);
 
 struct SpideyAudioDeviceInfo
 {
@@ -1843,6 +2013,17 @@ static void SpideySaveModernVideoSettings()
 		"AspectMode",
 		value,
 		SpideyGetModernVideoIniPath());
+
+	sprintf(
+		value,
+		"%d",
+		gSpideyWindowMode);
+
+	WritePrivateProfileStringA(
+		"Video",
+		"WindowMode",
+		value,
+		SpideyGetModernVideoIniPath());
 }
 
 static void SpideyLoadModernVideoSettings()
@@ -1863,6 +2044,26 @@ static void SpideyLoadModernVideoSettings()
 			0;
 	}
 
+	gSpideyWindowMode =
+		GetPrivateProfileIntA(
+			"Video",
+			"WindowMode",
+			SPIDEY_WINDOW_BORDERLESS,
+			SpideyGetModernVideoIniPath());
+
+	if (gSpideyWindowMode <
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE ||
+		gSpideyWindowMode >
+			SPIDEY_WINDOW_WINDOWED)
+	{
+		gSpideyWindowMode =
+			SPIDEY_WINDOW_BORDERLESS;
+	}
+
+	gSpideyPendingWindowMode =
+		gSpideyWindowMode;
+	SpideyUpdateDisplayModeMenuLabel();
+
 	gSpideyPendingAspectMode =
 		gSpideyAspectMode;
 }
@@ -1876,6 +2077,9 @@ static void SpideyResetPendingDisplaySettings(
 		gSpideySelectedOutputHeight;
 	gSpideyPendingAspectMode =
 		gSpideyAspectMode;
+	gSpideyPendingWindowMode =
+		gSpideyWindowMode;
+	SpideyUpdateDisplayModeMenuLabel();
 
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
@@ -1884,11 +2088,12 @@ static void SpideyResetPendingDisplaySettings(
 	{
 		fprintf(
 			f,
-			"display_pending_reset reason=%s selected=%lux%lu aspect=%s\n",
+			"display_pending_reset reason=%s selected=%lux%lu aspect=%s window_mode=%s\n",
 			reason ? reason : "unknown",
 			gSpideyPendingOutputWidth,
 			gSpideyPendingOutputHeight,
-			gSpideyAspectLabels[gSpideyPendingAspectMode]);
+			gSpideyAspectLabels[gSpideyPendingAspectMode],
+			gSpideyWindowModeLabels[gSpideyPendingWindowMode]);
 		fclose(f);
 	}
 }
@@ -2099,10 +2304,16 @@ static void __fastcall SpideyDisplayAddBrightnessAndApply(
 	SpideyRetailMenuAddEntryFn retailAdd =
 		(SpideyRetailMenuAddEntryFn)0x0043FFF0;
 
+	SpideyUpdateDisplayModeMenuLabel();
+
 	retailAdd(
 		menu,
 		0,
 		brightnessLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyDisplayModeMenuLabel);
 	retailAdd(
 		menu,
 		0,
@@ -2113,6 +2324,93 @@ static void __fastcall SpideyDisplayAddBrightnessAndApply(
 
 	SpideyResetPendingDisplaySettings(
 		"menu_open");
+}
+
+static void __fastcall SpideyDisplayMenuUpdate(
+		CMenu* menu,
+		void*)
+{
+	typedef void (__fastcall *RetailUpdateFn)(
+			CMenu*,
+			void*);
+	typedef u8 (__cdecl *CheckTriggersFn)(
+			u32,
+			i32,
+			i32);
+
+	RetailUpdateFn retailUpdate =
+		(RetailUpdateFn)0x00440600;
+	retailUpdate(
+		menu,
+		0);
+
+	if (!menu ||
+		menu->mLine != 3)
+	{
+		return;
+	}
+
+	CheckTriggersFn checkTriggers =
+		(CheckTriggersFn)0x0050C180;
+
+	int delta =
+		0;
+	if (checkTriggers(
+			0x00008008,
+			1,
+			1))
+	{
+		delta =
+			1;
+	}
+	else if (checkTriggers(
+			0x00004004,
+			1,
+			1))
+	{
+		delta =
+			-1;
+	}
+
+	if (!delta)
+		return;
+
+	gSpideyPendingWindowMode +=
+		delta;
+
+	if (gSpideyPendingWindowMode >
+			SPIDEY_WINDOW_WINDOWED)
+	{
+		gSpideyPendingWindowMode =
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE;
+	}
+	else if (gSpideyPendingWindowMode <
+			 SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
+	{
+		gSpideyPendingWindowMode =
+			SPIDEY_WINDOW_WINDOWED;
+	}
+
+	SpideyUpdateDisplayModeMenuLabel();
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_pending_window_mode direction=%s mode=%d label=%s committed=%s\n",
+			delta > 0 ?
+				"next" :
+				"prev",
+			gSpideyPendingWindowMode,
+			gSpideyWindowModeLabels[
+				gSpideyPendingWindowMode],
+			gSpideyWindowModeLabels[
+				gSpideyWindowMode]);
+		fclose(f);
+	}
 }
 
 static void __cdecl SpideyDisplayConfirmOrApply(
@@ -2963,6 +3261,13 @@ static void SpideyInstallDisplayAspectCompat()
 			(void*)&SpideyDisplayConfirmOrApply,
 			"apply_confirm");
 
+	const int menuUpdateInstalled =
+		SpideyPatchDirectCall(
+			0x0050DCA0,
+			0x00440600,
+			(void*)&SpideyDisplayMenuUpdate,
+			"display_mode_update");
+
 	FILE* f = fopen(
 		"spidey-decomp-compat.log",
 		"a");
@@ -2970,7 +3275,7 @@ static void SpideyInstallDisplayAspectCompat()
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=4 row1=Aspect_Ratio row3=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=5 row1=Aspect_Ratio row3=Display_Mode row4=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
@@ -2981,7 +3286,8 @@ static void SpideyInstallDisplayAspectCompat()
 			resolutionPrevInstalled,
 			resolutionNextInstalled,
 			applyEntryInstalled,
-			applyConfirmInstalled);
+			applyConfirmInstalled,
+			menuUpdateInstalled);
 		fclose(f);
 	}
 }
@@ -3873,8 +4179,9 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			"display_options_gameplay");
 
 	SpideyInjectModernVideoModes();
-	SpideyKeepBorderlessMonitorWindow(
-		*(HWND*)0x006B58D0);
+	SpideyApplySelectedWindowStyle(
+		*(HWND*)0x006B58D0,
+		"display_options");
 
 	SpideyRefreshModernLogicalResolution();
 	SpideyApplyLogicalRenderResolution(
@@ -3927,8 +4234,8 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 {
 	const int onApply =
 		gSpideyDisplayMenu &&
-		gSpideyDisplayMenu->mNumLines >= 4 &&
-		gSpideyDisplayMenu->mLine == 3;
+		gSpideyDisplayMenu->mNumLines >= 5 &&
+		gSpideyDisplayMenu->mLine == 4;
 
 	if (!onApply)
 	{
@@ -3981,6 +4288,8 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 		32;
 	gSpideyAspectMode =
 		gSpideyPendingAspectMode;
+	gSpideyWindowMode =
+		gSpideyPendingWindowMode;
 
 	*(DWORD*)0x02E096F8 =
 		(DWORD)gSpideySelectedOutputWidth;
@@ -4006,6 +4315,12 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 		option4,
 		option5);
 
+	SpideyApplySelectedWindowStyle(
+		*(HWND*)0x006B58D0,
+		"display_apply");
+	SpideyApplyRendererWindowMode(
+		"display_apply");
+
 	// Save immediately; Apply must not depend on exiting the menu or game.
 	SpideyRetailSaveSettingsFn retailSave =
 		(SpideyRetailSaveSettingsFn)0x00515850;
@@ -4021,12 +4336,13 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 	{
 		fprintf(
 			f,
-			"display_apply committed=1 selected=%lux%lux%lu aspect=%s scalar=%.6f live_before=%lux%lux%lu frontend=%d brightness=%d saved_now=1\n",
+			"display_apply committed=1 selected=%lux%lux%lu aspect=%s scalar=%.6f window_mode=%s live_before=%lux%lux%lu frontend=%d brightness=%d saved_now=1\n",
 			gSpideySelectedOutputWidth,
 			gSpideySelectedOutputHeight,
 			gSpideySelectedOutputBpp,
 			gSpideyAspectLabels[gSpideyAspectMode],
 			(double)*(float*)0x00550064,
+			gSpideyWindowModeLabels[gSpideyWindowMode],
 			(unsigned long)liveWidth,
 			(unsigned long)liveHeight,
 			(unsigned long)liveBpp,
