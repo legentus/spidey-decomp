@@ -1,3 +1,35 @@
+# TRAINING-PASS / LEVEL-TRANSITION FIX FRONTIER — READ FIRST (2026-10-01)
+
+Runtime revision `8afcffd25e907f4fc34f8f2aaa8154e9a924e60a` now boots and plays training successfully. Two transition bugs remain and have been fixed in source:
+
+1. **Normal-level start crash**
+   - main DX11 gameplay is healthy;
+   - fatal path is legacy PCMovie/DXinit touching a DirectDraw scene surface that had been lost by an earlier Exclusive interval;
+   - previous restore helper returned early whenever current mode was no longer Exclusive.
+   - Fix: `9c8a2c30696d2fcbfaa4af435168ae1202590cc9` always repairs lost legacy primary/scene surfaces before compatibility producers, independent of current window mode.
+
+2. **Cursor horizontal floor after returning from training**
+   - user had applied 2560x1440 Windowed;
+   - internal retail display transition later overwrote selected output to 1920x1440 while pending modern selection stayed 2560x1440;
+   - 16:9 logical canvas therefore collapsed to 1920x1080 and the existing mouse-bound sync clamped there.
+   - Fix: `d7ef76af697d4c7cf9ac64e1a24bbbecd4123892` prevents retail compatibility transitions from owning the modern selected DX11 output.
+
+Cleanup:
+- `d8edc7e24bfa341145f100fbb4d3a09f3d51a494` removes a false PCTex D3D diagnostic caused by treating COM `Release()` refcount 1 as an HRESULT.
+
+**NEXT ACTION:** normal updater/build, then:
+- boot;
+- use desired 2560x1440 mode;
+- enter training;
+- return to menu and check full cursor movement + hover alignment;
+- launch the same normal level that crashed;
+- if it enters, play 30-60 seconds;
+- collect compat/present/draw/dxerror/input/renderer11 logs.
+
+Do not undo DX11-authoritative rendering. Training runtime proves the main renderer works. The current fixes are ownership/lifecycle fixes for remaining legacy compatibility producers and selected-output state.
+
+---
+
 # STARTUP-CRASH FIX FRONTIER — READ FIRST (2026-10-01)
 
 The first DX11-authoritative runtime at revision `5411665738851098256555b12c3b3ac048b12cfa` crashed during the first splash movie.
