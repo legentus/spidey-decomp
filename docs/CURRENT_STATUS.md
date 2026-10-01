@@ -5629,3 +5629,73 @@ Decision:
 - derive the 2D/3D split from higher-level call provenance or an exact retail 2D submission hook instead.
 
 This dead end is recorded so a later recovery does not rediscover and accidentally ship the same unsafe heuristic.
+
+
+## Stream-recovery tail reconstruction — 2026-10-01
+
+A second stream-recovery audit was performed after the user supplied the visible interrupted transcript.
+
+Live branch state at recovery:
+- `dev` HEAD = `d86a2e63ad20c086b79e1960a534d2828979a771`
+- parent = `4e64a99039ce08403ab645c4823b3d07f772eb1b`
+- no implementation commit exists after `d86a2e63`; therefore no committed source change was lost.
+
+The only missing state was uncommitted static analysis performed after `d86a2e63`. It has now been reconstructed below.
+
+### Exact higher-level 2D entrypoints
+
+The repo's authoritative `tools/names.json` identifies:
+- `PCGfx_DrawQuad2D @ 0x00507470`
+- `PCGfx_DrawQPoly2D @ 0x00507910`
+- `PCGfx_DrawQPoly3D @ 0x00508550`
+- `DXPOLY_DrawPoly @ 0x00503100`
+
+The retail dump for `PCGfx_DrawQuad2D` is 1181 bytes and its structure matches the decompiled source signature/body. This provides a grounded higher-level 2D provenance point and is preferable to classifying flattened D3D7 draws by screen-space heuristics.
+
+Do not install the 2D safe-area hook yet merely because this entrypoint is known. The user's more important symptom is camera-dependent level-background distortion, which must be separated from HUD/frontend layout first.
+
+### Background-system check
+
+`CBackground` in `backgrnd.cpp` is a `CBody`/model-backed object and not simply a fullscreen 2D backdrop. Therefore the reported moving-background distortion can plausibly be part of the transformed 3D path and should not automatically be grouped with HUD/menu stretching.
+
+### 3D texture-coordinate preparation — high-priority hypothesis
+
+Retail `PCGfx_DrawQPoly3D @ 0x00508550` was disassembled from the repo dump.
+
+For each transformed vertex it:
+- computes RHW into vertex offset `+0x0C` from `0x00568184 / depth`;
+- computes normalized Z into `+0x08`;
+- tests global `0x006B78F8`;
+- when that global is nonzero, multiplies texture U and V at offsets `+0x14/+0x18` by the computed RHW.
+
+This occurs for all four quad vertices at retail addresses around:
+- `0x0050889F`
+- `0x005088F9`
+- `0x00508953`
+- `0x005089B0`
+
+The current DX11 replay shader also performs:
+- `uvOverW = input.uv * rhw`
+- then interpolates and resolves `uv = uvOverW / rhw` in the pixel shader.
+
+This creates a **possible double perspective-preparation path** if the captured retail U/V values are already RHW-weighted when `0x006B78F8` is active. Such a mismatch would be consistent with camera-dependent texture/background warping.
+
+Important: this is a strong hypothesis, **not yet a committed fix**. Before changing the shader, determine the exact semantics/runtime value of `0x006B78F8` and confirm whether the D3D7 draw stream presented to the hook contains already-weighted or raw U/V.
+
+### DXPOLY_Init clue
+
+Retail `DXPOLY_Init @ 0x00502220` also reads `0x006B78F8`:
+- on entry it conditionally calls `0x00515270` when the global is nonzero;
+- later it uses the same global to choose Direct3D render-state value 1 vs 3 for state ID `0x16`.
+
+The same initializer explicitly sets render-state ID `0x04` to 1.
+
+Do not name `0x006B78F8` or infer its purpose until the old Direct3D render-state IDs and call semantics are fully resolved. The immediate next RE step is to map those state IDs and follow all reads/writes to `0x006B78F8`.
+
+### Recovery conclusion
+
+Nothing substantive needs to be redone:
+- both documentation checkpoints survived;
+- no source implementation after them was lost;
+- the interrupted analysis frontier is reconstructed here;
+- next work should continue from the `PCGfx_DrawQPoly3D` / DXPOLY perspective-coordinate investigation before touching the 2D safe-area hook or requesting another runtime test.
