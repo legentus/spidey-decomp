@@ -3340,6 +3340,11 @@ static void SpideyInstallDisplayAspectCompat()
 
 static void SpideyRestoreSavedRenderResolution()
 {
+	// Load aspect + window-mode policy before the early DirectX/renderer
+	// bootstrap so a persisted Windowed or Exclusive choice is not
+	// overwritten by the old borderless-only startup behavior.
+	SpideyLoadModernVideoSettings();
+
 	DWORD requestedWidth =
 		*(DWORD*)0x02E096F8;
 	DWORD requestedHeight =
@@ -3418,9 +3423,9 @@ static void SpideyRestoreSavedRenderResolution()
 	*(DWORD*)0x006B78EC =
 		physicalBpp;
 
-	// The logical game viewport follows the selected output. Retail frontend
-	// code may temporarily switch this back to 640x480 later; gameplay mode
-	// restores the selected dimensions through the display-options wrapper.
+	// The logical game/frontend viewport follows the selected output. Any
+	// lower-resolution D3D7 surface is compatibility-producer plumbing only
+	// and must not become the frontend layout coordinate basis.
 	*(DWORD*)0x00568154 =
 		requestedWidth;
 	*(DWORD*)0x00568158 =
@@ -7768,7 +7773,9 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 		options | 1);
 
 	SpideyInjectModernVideoModes();
-	SpideyKeepBorderlessMonitorWindow(hwnd);
+	SpideyApplySelectedWindowStyle(
+		hwnd,
+		"early_directx_init");
 
 	// Phase 2B needs the DX11 device alive before PCTex starts creating game
 	// textures. Initialize the modern swap chain immediately after the retail
