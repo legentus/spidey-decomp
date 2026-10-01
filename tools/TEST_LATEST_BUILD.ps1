@@ -460,6 +460,7 @@ $renderer11Log = Join-Path $gameDir "spidey-renderer11.log"
 $input11Log = Join-Path $gameDir "spidey-input11.log"
 $cameraLog = Join-Path $gameDir "spidey-decomp-camera.log"
 $audioLog = Join-Path $gameDir "spidey-decomp-audio.log"
+$timingLog = Join-Path $gameDir "spidey-decomp-timing.log"
 $runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
 
 if (Test-Path $crashLog) {
@@ -494,6 +495,9 @@ if (Test-Path $cameraLog) {
 }
 if (Test-Path $audioLog) {
     Remove-Item -LiteralPath $audioLog -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $timingLog) {
+    Remove-Item -LiteralPath $timingLog -Force -ErrorAction SilentlyContinue
 }
 if (Test-Path $runtimeLog) {
     Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
@@ -577,6 +581,12 @@ if (Test-Path $audioLog) {
     Copy-Item -LiteralPath $audioLog -Destination (Join-Path $sessionDir "spidey-decomp-audio.log") -Force
     Write-Host "[AUDIO] Audio device-selection log captured:"
     Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-audio.log"))
+}
+
+if (Test-Path $timingLog) {
+    Copy-Item -LiteralPath $timingLog -Destination (Join-Path $sessionDir "spidey-decomp-timing.log") -Force
+    Write-Host "[TIMING] Gameplay logic/present-rate log captured:"
+    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-timing.log"))
 }
 
 if (Test-Path $runtimeLog) {
