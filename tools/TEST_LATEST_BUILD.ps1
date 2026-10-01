@@ -449,150 +449,79 @@ if (Test-Path $linkMap) {
     Write-Host ("  " + (Join-Path $sessionDir "proxy-link-map.txt"))
 }
 
-$crashLog = Join-Path $gameDir "spidey-decomp-crash.log"
-$dxErrorLog = Join-Path $gameDir "spidey-decomp-dxerror.log"
-$compatLog = Join-Path $gameDir "spidey-decomp-compat.log"
-$presentLog = Join-Path $gameDir "spidey-decomp-present.log"
-$textureLog = Join-Path $gameDir "spidey-decomp-texture.log"
-$drawLog = Join-Path $gameDir "spidey-decomp-draw.log"
-$inputLog = Join-Path $gameDir "spidey-decomp-input.log"
-$renderer11Log = Join-Path $gameDir "spidey-renderer11.log"
-$input11Log = Join-Path $gameDir "spidey-input11.log"
-$cameraLog = Join-Path $gameDir "spidey-decomp-camera.log"
-$audioLog = Join-Path $gameDir "spidey-decomp-audio.log"
-$timingLog = Join-Path $gameDir "spidey-decomp-timing.log"
-$runtimeLog = Join-Path $gameDir "spidey-decomp-runtime.log"
+$consolidatedLog = Join-Path $gameDir "spidey-decomp.log"
 
-if (Test-Path $crashLog) {
-    Remove-Item -LiteralPath $crashLog -Force -ErrorAction SilentlyContinue
+# Remove both the new consolidated log and all legacy split logs so every
+# test starts from a clean slate. The runtime no longer writes the split
+# files, but cleaning them prevents stale files from being mistaken for
+# current-session diagnostics.
+$legacyLogNames = @(
+    "spidey-decomp-crash.log",
+    "spidey-decomp-dxerror.log",
+    "spidey-decomp-compat.log",
+    "spidey-decomp-present.log",
+    "spidey-decomp-texture.log",
+    "spidey-decomp-draw.log",
+    "spidey-decomp-input.log",
+    "spidey-renderer11.log",
+    "spidey-input11.log",
+    "spidey-decomp-camera.log",
+    "spidey-decomp-audio.log",
+    "spidey-decomp-timing.log",
+    "spidey-decomp-runtime.log"
+)
+
+if (Test-Path $consolidatedLog) {
+    Remove-Item -LiteralPath $consolidatedLog -Force -ErrorAction SilentlyContinue
 }
-if (Test-Path $dxErrorLog) {
-    Remove-Item -LiteralPath $dxErrorLog -Force -ErrorAction SilentlyContinue
+
+foreach ($legacyLogName in $legacyLogNames) {
+    $legacyLog = Join-Path $gameDir $legacyLogName
+    if (Test-Path $legacyLog) {
+        Remove-Item -LiteralPath $legacyLog -Force -ErrorAction SilentlyContinue
+    }
 }
-if (Test-Path $compatLog) {
-    Remove-Item -LiteralPath $compatLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $presentLog) {
-    Remove-Item -LiteralPath $presentLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $textureLog) {
-    Remove-Item -LiteralPath $textureLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $drawLog) {
-    Remove-Item -LiteralPath $drawLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $inputLog) {
-    Remove-Item -LiteralPath $inputLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $renderer11Log) {
-    Remove-Item -LiteralPath $renderer11Log -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $input11Log) {
-    Remove-Item -LiteralPath $input11Log -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $cameraLog) {
-    Remove-Item -LiteralPath $cameraLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $audioLog) {
-    Remove-Item -LiteralPath $audioLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $timingLog) {
-    Remove-Item -LiteralPath $timingLog -Force -ErrorAction SilentlyContinue
-}
-if (Test-Path $runtimeLog) {
-    Remove-Item -LiteralPath $runtimeLog -Force -ErrorAction SilentlyContinue
-}
+
+# Seed the one uploadable log with the build/session identity that previously
+# lived in a separate test-session attachment.
+@(
+    "[SESSION] revision=$revision",
+    "[SESSION] proxy_sha256=$hash",
+    "[SESSION] renderer11_sha256=$renderer11Hash",
+    "[SESSION] input11_sha256=$input11Hash",
+    "[SESSION] game=$gameExe",
+    ("[SESSION] exe_sha256=" + $peInfo.Sha256),
+    ("[SESSION] pe_timestamp=0x{0:X8}" -f $peInfo.TimeDateStamp),
+    ("[SESSION] image_size=0x{0:X8}" -f $peInfo.SizeOfImage),
+    "[SESSION] started=$(Get-Date -Format o)"
+) | Set-Content -Path $consolidatedLog -Encoding ASCII
 
 Write-Host ""
 Write-Host "[RUN] $gameExe"
-Write-Host "[LOG] $sessionDir"
+Write-Host "[LOG] $consolidatedLog"
 $gameProcess = Start-Process -FilePath $gameExe -WorkingDirectory $gameDir -PassThru
 
 Write-Host ""
 Write-Host "[OK] Latest dev build installed and launched." -ForegroundColor Green
-Write-Host "[INFO] Waiting for Spider-Man to exit so crash diagnostics can be collected."
+Write-Host "[INFO] All runtime diagnostics now append to one consolidated log."
+Write-Host "[INFO] Waiting for Spider-Man to exit so the log can be archived."
 Write-Host ""
 
 $gameProcess.WaitForExit()
 $exitCode = $gameProcess.ExitCode
 Write-Host ("[INFO] Spider-Man exited with code " + $exitCode + ".")
 
-if (Test-Path $crashLog) {
-    Copy-Item -LiteralPath $crashLog -Destination (Join-Path $sessionDir "spidey-decomp-crash.log") -Force
-    Write-Host "[CRASH] Native crash log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-crash.log"))
-}
+@(
+    "[SESSION] exit_code=$exitCode",
+    "[SESSION] ended=$(Get-Date -Format o)"
+) | Add-Content -Path $consolidatedLog -Encoding ASCII
 
-if (Test-Path $dxErrorLog) {
-    Copy-Item -LiteralPath $dxErrorLog -Destination (Join-Path $sessionDir "spidey-decomp-dxerror.log") -Force
-    Write-Host "[DXERR] DirectX error log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-dxerror.log"))
-}
-
-if (Test-Path $compatLog) {
-    Copy-Item -LiteralPath $compatLog -Destination (Join-Path $sessionDir "spidey-decomp-compat.log") -Force
-    Write-Host "[COMPAT] DirectDraw compatibility log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-compat.log"))
-}
-
-if (Test-Path $presentLog) {
-    Copy-Item -LiteralPath $presentLog -Destination (Join-Path $sessionDir "spidey-decomp-present.log") -Force
-    Write-Host "[PRESENT] DirectDraw presentation log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-present.log"))
-}
-
-if (Test-Path $textureLog) {
-    Copy-Item -LiteralPath $textureLog -Destination (Join-Path $sessionDir "spidey-decomp-texture.log") -Force
-    Write-Host "[TEXTURE] Texture conversion log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-texture.log"))
-}
-
-if (Test-Path $drawLog) {
-    Copy-Item -LiteralPath $drawLog -Destination (Join-Path $sessionDir "spidey-decomp-draw.log") -Force
-    Write-Host "[DRAW] Retail D3D7 draw probe log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-draw.log"))
-}
-
-if (Test-Path $inputLog) {
-    Copy-Item -LiteralPath $inputLog -Destination (Join-Path $sessionDir "spidey-decomp-input.log") -Force
-    Write-Host "[INPUT] DirectInput focus/reacquire log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-input.log"))
-}
-
-if (Test-Path $renderer11Log) {
-    Copy-Item -LiteralPath $renderer11Log -Destination (Join-Path $sessionDir "spidey-renderer11.log") -Force
-    Write-Host "[DX11] Direct3D 11 renderer log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-renderer11.log"))
-}
-
-if (Test-Path $input11Log) {
-    Copy-Item -LiteralPath $input11Log -Destination (Join-Path $sessionDir "spidey-input11.log") -Force
-    Write-Host "[INPUT11] Modern input helper log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-input11.log"))
-}
-
-if (Test-Path $cameraLog) {
-    Copy-Item -LiteralPath $cameraLog -Destination (Join-Path $sessionDir "spidey-decomp-camera.log") -Force
-    Write-Host "[CAMERA] Passive camera telemetry captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-camera.log"))
-}
-
-if (Test-Path $audioLog) {
-    Copy-Item -LiteralPath $audioLog -Destination (Join-Path $sessionDir "spidey-decomp-audio.log") -Force
-    Write-Host "[AUDIO] Audio device-selection log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-audio.log"))
-}
-
-if (Test-Path $timingLog) {
-    Copy-Item -LiteralPath $timingLog -Destination (Join-Path $sessionDir "spidey-decomp-timing.log") -Force
-    Write-Host "[TIMING] Gameplay logic/present-rate log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-timing.log"))
-}
-
-if (Test-Path $runtimeLog) {
-    Copy-Item -LiteralPath $runtimeLog -Destination (Join-Path $sessionDir "spidey-decomp-runtime.log") -Force
-    Write-Host "[RUNTIME] Runtime assertion log captured:"
-    Write-Host ("  " + (Join-Path $sessionDir "spidey-decomp-runtime.log"))
+$archivedConsolidatedLog = Join-Path $sessionDir "spidey-decomp.log"
+if (Test-Path $consolidatedLog) {
+    Copy-Item -LiteralPath $consolidatedLog -Destination $archivedConsolidatedLog -Force
+    Write-Host "[LOG] Consolidated runtime log captured:"
+    Write-Host ("  " + $archivedConsolidatedLog)
+    Write-Host "[UPLOAD] For ChatGPT testing, attach ONLY spidey-decomp.log." -ForegroundColor Green
 }
 
 if ($exitCode -eq -1073741819) {
