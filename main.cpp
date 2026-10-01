@@ -2047,6 +2047,137 @@ static void SpideySyncFrontendMouseBounds(
 	}
 }
 
+static i32 SpideyMouseCanvasWidth()
+{
+	i32 width =
+		*(i32*)0x006B78E4;
+	if (width < 1)
+		width = 640;
+	return width;
+}
+
+static i32 SpideyMouseCanvasHeight()
+{
+	i32 height =
+		*(i32*)0x006B78E8;
+	if (height < 1)
+		height = 480;
+	return height;
+}
+
+static void __cdecl SpideyCompatGetMouseHotspotPosition(
+		i32* pX,
+		i32* pY)
+{
+	const i32 width =
+		SpideyMouseCanvasWidth();
+	const i32 height =
+		SpideyMouseCanvasHeight();
+
+	if (pX)
+	{
+		*pX =
+			*(i32*)0x00AC0900 +
+			(*(i32*)0x00AC0A04 * width) /
+				640;
+	}
+
+	if (pY)
+	{
+		*pY =
+			*(i32*)0x00AC0904 +
+			(*(i32*)0x00AC0A08 * height) /
+				480;
+	}
+}
+
+static i32 __cdecl SpideyCompatIsMouseOver(
+		i32 left,
+		i32 top,
+		i32 right,
+		i32 bottom)
+{
+	i32 mouseX =
+		0;
+	i32 mouseY =
+		0;
+
+	SpideyCompatGetMouseHotspotPosition(
+		&mouseX,
+		&mouseY);
+
+	// Preserve the retail strict-boundary behavior exactly. The only change
+	// is that the hotspot now uses the same live PC-pixel canvas as
+	// PCSHELL_CoordsDCtoPC instead of stale gameplay logical dimensions.
+	return mouseX > left &&
+		mouseX < right &&
+		mouseY > top &&
+		mouseY < bottom;
+}
+
+static void SpideyInstallMouseCoordinateCompat()
+{
+	const unsigned char expectedMouseOver[6] =
+	{
+		0x8B, 0x0D, 0x54, 0x81, 0x56, 0x00
+	};
+	const unsigned char expectedHotspot[6] =
+	{
+		0x8B, 0x0D, 0x54, 0x81, 0x56, 0x00
+	};
+
+	unsigned char* mouseOver =
+		(unsigned char*)0x0050A820;
+	unsigned char* hotspot =
+		(unsigned char*)0x0050A770;
+
+	int mouseOverPatched =
+		0;
+	int hotspotPatched =
+		0;
+
+	if (!memcmp(
+			mouseOver,
+			expectedMouseOver,
+			sizeof(expectedMouseOver)))
+	{
+		PATCH_PUSH_RET(
+			0x0050A820,
+			SpideyCompatIsMouseOver);
+		mouseOverPatched =
+			1;
+	}
+
+	if (!memcmp(
+			hotspot,
+			expectedHotspot,
+			sizeof(expectedHotspot)))
+	{
+		PATCH_PUSH_RET(
+			0x0050A770,
+			SpideyCompatGetMouseHotspotPosition);
+		hotspotPatched =
+			1;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-input.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"mouse_coordinate_compat mouse_over=%d hotspot=%d mouse_over_addr=0x0050A820 hotspot_addr=0x0050A770 canvas=%dx%d gameplay=%lux%lu basis=live_dx_canvas\n",
+			mouseOverPatched,
+			hotspotPatched,
+			SpideyMouseCanvasWidth(),
+			SpideyMouseCanvasHeight(),
+			(unsigned long)*(DWORD*)0x00568154,
+			(unsigned long)*(DWORD*)0x00568158);
+		fclose(f);
+	}
+}
+
 static void SpideyFitLogicalCanvasToSelectedAspect(
 		unsigned long* pWidth,
 		unsigned long* pHeight)
@@ -7453,6 +7584,7 @@ void game_patches(void)
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
+	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallCleanup503AF0Compat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
