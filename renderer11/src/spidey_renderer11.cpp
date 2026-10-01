@@ -2478,7 +2478,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         if (frame <= 5 || (frame % 120) == 0 || skippedSubmit)
         {
             Log(
-                "shadow_frame frame=%lu target=%lux%lu queued=0 submitted=%lu skipped_submit=%lu rendered=0 skipped_render=0 vertices=0",
+                "shadow_frame frame=%lu target=%lux%lu queued=0 submitted=%lu skipped_submit=%lu rendered=0 skipped_render=0 vertices=0 presentable=0",
                 frame,
                 sceneWidth,
                 sceneHeight,
@@ -2487,7 +2487,10 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         }
 
         resetFrame();
-        return 1;
+        // An empty command stream is not a presentable DX11 frame. Returning
+        // success here previously let the proxy seize exclusive ownership
+        // before any shadow render target/SRV existed.
+        return 0;
     }
 
     const bool replayThisFrame =
@@ -2511,7 +2514,8 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         }
 
         resetFrame();
-        return 1;
+        // No replay means no newly completed presentable frame.
+        return 0;
     }
 
     const size_t requiredBytes =
@@ -2742,7 +2746,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
         rendered != queuedCommands)
     {
         Log(
-            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu sampled=%d sample_hash=0x%08lX nonblack=%lu samples=%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX",
+            "shadow_frame frame=%lu target=%lux%lu replay=1 queued=%llu submitted=%lu skipped_submit=%lu rendered=%lu skipped_render=%lu vertices=%llu sampled=%d sample_hash=0x%08lX nonblack=%lu samples=%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX,%06lX presentable=%d",
             frame,
             sceneWidth,
             sceneHeight,
@@ -2763,11 +2767,21 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
             samplePixels[5],
             samplePixels[6],
             samplePixels[7],
-            samplePixels[8]);
+            samplePixels[8],
+            (rendered > 0 &&
+             rendered == queuedCommands &&
+             skippedSubmit == 0 &&
+             skippedRender == 0) ? 1 : 0);
     }
 
+    const int presentable =
+        rendered > 0 &&
+        rendered == queuedCommands &&
+        skippedSubmit == 0 &&
+        skippedRender == 0 ? 1 : 0;
+
     resetFrame();
-    return 1;
+    return presentable;
 }
 
 extern "C" __declspec(dllexport)
