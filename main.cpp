@@ -5358,6 +5358,143 @@ static void SpideyInstall2DPolyProvenanceCompat()
 	}
 }
 
+
+typedef void (__cdecl *SpideyRetailLogicFn)(void);
+
+static unsigned long gSpideyTimingLogicWindowStart = 0;
+static unsigned long gSpideyTimingLogicTicks = 0;
+static unsigned long gSpideyTimingPresentWindowStart = 0;
+static unsigned long gSpideyTimingPresentFrames = 0;
+
+static void SpideyLogTimingWindow(
+		const char* kind,
+		unsigned long elapsed,
+		unsigned long count)
+{
+	if (!kind ||
+		!elapsed)
+	{
+		return;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-timing.log",
+		"a");
+	if (!f)
+		return;
+
+	const double hz =
+		((double)count * 1000.0) /
+		(double)elapsed;
+
+	fprintf(
+		f,
+		"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu\n",
+		kind,
+		elapsed,
+		count,
+		hz,
+		gSpideyFrontendLegacyMode,
+		(long)*(volatile long*)0x006B4CA0,
+		gSpideyPresentFrame,
+		gSpideyModernLogicalWidth,
+		gSpideyModernLogicalHeight,
+		gSpideyLegacyPhysicalWidth,
+		gSpideyLegacyPhysicalHeight);
+	fclose(f);
+}
+
+static void __cdecl SpideyCompatLogicTiming()
+{
+	SpideyRetailLogicFn retail =
+		(SpideyRetailLogicFn)0x00455400;
+
+	retail();
+
+	const unsigned long now =
+		(unsigned long)GetTickCount();
+
+	if (!gSpideyTimingLogicWindowStart)
+	{
+		gSpideyTimingLogicWindowStart =
+			now;
+		gSpideyTimingLogicTicks =
+			0;
+	}
+
+	++gSpideyTimingLogicTicks;
+
+	const unsigned long elapsed =
+		now -
+		gSpideyTimingLogicWindowStart;
+
+	if (elapsed >= 1000)
+	{
+		SpideyLogTimingWindow(
+			"logic",
+			elapsed,
+			gSpideyTimingLogicTicks);
+		gSpideyTimingLogicWindowStart =
+			now;
+		gSpideyTimingLogicTicks =
+			0;
+	}
+}
+
+static void SpideyRecordPresentTiming()
+{
+	const unsigned long now =
+		(unsigned long)GetTickCount();
+
+	if (!gSpideyTimingPresentWindowStart)
+	{
+		gSpideyTimingPresentWindowStart =
+			now;
+		gSpideyTimingPresentFrames =
+			0;
+	}
+
+	++gSpideyTimingPresentFrames;
+
+	const unsigned long elapsed =
+		now -
+		gSpideyTimingPresentWindowStart;
+
+	if (elapsed >= 1000)
+	{
+		SpideyLogTimingWindow(
+			"present",
+			elapsed,
+			gSpideyTimingPresentFrames);
+		gSpideyTimingPresentWindowStart =
+			now;
+		gSpideyTimingPresentFrames =
+			0;
+	}
+}
+
+static void SpideyInstallTimingTelemetry()
+{
+	const int logicInstalled =
+		SpideyPatchDirectCall(
+			0x00455A8B,
+			0x00455400,
+			SpideyCompatLogicTiming,
+			"gameplay_logic_timing");
+
+	FILE* f = fopen(
+		"spidey-decomp-timing.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"timing_install logic=%d call=0x00455A8B retail=0x00455400 engine_vblanks=0x006B4CA0\n",
+			logicInstalled);
+		fclose(f);
+	}
+}
+
 static int gSpideyModernRangeValid = 0;
 static float gSpideyModernMinX = 0.0f;
 static float gSpideyModernMaxX = 0.0f;
@@ -7566,6 +7703,7 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 {
 	const unsigned long frame =
 		++gSpideyPresentFrame;
+	SpideyRecordPresentTiming();
 
 	// Modern input Phase 0 is observation-only. Poll once per completed game
 	// frame so connection/axis telemetry is available without changing retail
@@ -8771,6 +8909,7 @@ void game_patches(void)
 	SpideyInstallDisplayOptionsCompat();
 	SpideyInstallHorPlusCullCompat();
 	SpideyInstall2DPolyProvenanceCompat();
+	SpideyInstallTimingTelemetry();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
