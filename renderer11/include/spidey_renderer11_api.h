@@ -7,7 +7,7 @@ typedef void* HWND;
 typedef void* HDC;
 #endif
 
-#define SPIDEY_RENDERER11_ABI_VERSION 6UL
+#define SPIDEY_RENDERER11_ABI_VERSION 7UL
 
 typedef struct SpideyRenderer11ShadowVertex
 {
@@ -50,6 +50,7 @@ typedef struct SpideyRenderer11ShadowState
     unsigned long addressV;
     unsigned long magFilter;
     unsigned long minFilter;
+    unsigned long drawClass;
 } SpideyRenderer11ShadowState;
 
 #ifdef __cplusplus
