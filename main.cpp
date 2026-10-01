@@ -5186,6 +5186,10 @@ static unsigned long gSpideyRenderer11Height = 0;
 static int gSpideyRenderer11AppliedWindowMode = -1;
 static unsigned long gSpideyRenderer11AppliedModeWidth = 0;
 static unsigned long gSpideyRenderer11AppliedModeHeight = 0;
+// A persisted Exclusive setting must not seize the display before the first
+// fully replayable DX11 frame exists. Keep DXGI windowed through warmup, then
+// enter true exclusive at the first authoritative shadow frame.
+static int gSpideyRenderer11ExclusiveDeferred = 1;
 
 static void SpideyApplyRendererWindowMode(
 		const char* reason)
@@ -5196,9 +5200,14 @@ static void SpideyApplyRendererWindowMode(
 		return;
 	}
 
-	const int exclusive =
+	const int wantsExclusive =
 		gSpideyWindowMode ==
 			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE ?
+			1 :
+			0;
+	const int exclusive =
+		wantsExclusive &&
+		!gSpideyRenderer11ExclusiveDeferred ?
 			1 :
 			0;
 
@@ -5207,7 +5216,8 @@ static void SpideyApplyRendererWindowMode(
 	const unsigned long height =
 		gSpideySelectedOutputHeight;
 
-	if (gSpideyRenderer11AppliedWindowMode ==
+	if (!gSpideyRenderer11ExclusiveDeferred &&
+		gSpideyRenderer11AppliedWindowMode ==
 			gSpideyWindowMode &&
 		gSpideyRenderer11AppliedModeWidth ==
 			width &&
@@ -5225,12 +5235,27 @@ static void SpideyApplyRendererWindowMode(
 
 	if (result)
 	{
-		gSpideyRenderer11AppliedWindowMode =
-			gSpideyWindowMode;
-		gSpideyRenderer11AppliedModeWidth =
-			width;
-		gSpideyRenderer11AppliedModeHeight =
-			height;
+		if (!wantsExclusive ||
+			exclusive)
+		{
+			gSpideyRenderer11AppliedWindowMode =
+				gSpideyWindowMode;
+			gSpideyRenderer11AppliedModeWidth =
+				width;
+			gSpideyRenderer11AppliedModeHeight =
+				height;
+		}
+		else
+		{
+			// Deliberately leave the requested mode unapplied so the first
+			// authoritative DX11 frame retries this transition.
+			gSpideyRenderer11AppliedWindowMode =
+				-1;
+			gSpideyRenderer11AppliedModeWidth =
+				0;
+			gSpideyRenderer11AppliedModeHeight =
+				0;
+		}
 	}
 
 	FILE* f = fopen(
@@ -5240,12 +5265,14 @@ static void SpideyApplyRendererWindowMode(
 	{
 		fprintf(
 			f,
-			"renderer11_window_mode reason=%s mode=%d label=%s exclusive=%d selected=%lux%lu result=%d\n",
+			"renderer11_window_mode reason=%s mode=%d label=%s exclusive=%d requested_exclusive=%d deferred=%d selected=%lux%lu result=%d\n",
 			reason ? reason : "unknown",
 			gSpideyWindowMode,
 			gSpideyWindowModeLabels[
 				gSpideyWindowMode],
 			exclusive,
+			wantsExclusive,
+			gSpideyRenderer11ExclusiveDeferred,
 			width,
 			height,
 			result);
@@ -9220,6 +9247,15 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		// continuously. The next frame is fully captured before previewing.
 		gSpideyShadowPreviewReady =
 			1;
+	}
+
+	if (gSpideyShadowPreviewReady &&
+		gSpideyRenderer11ExclusiveDeferred)
+	{
+		gSpideyRenderer11ExclusiveDeferred =
+			0;
+		SpideyApplyRendererWindowMode(
+			"dx11_authoritative_ready");
 	}
 
 	if ((frame <= 5 ||
