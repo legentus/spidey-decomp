@@ -2304,7 +2304,11 @@ static void __fastcall SpideyDisplayAddBrightnessAndApply(
 	SpideyRetailMenuAddEntryFn retailAdd =
 		(SpideyRetailMenuAddEntryFn)0x0043FFF0;
 
-	SpideyUpdateDisplayModeMenuLabel();
+	// Let AddEntry measure the longest possible mode label once so cycling
+	// to Fullscreen Exclusive cannot overflow a box sized for Borderless.
+	strcpy(
+		gSpideyDisplayModeMenuLabel,
+		"Display Mode: Fullscreen Exclusive");
 
 	retailAdd(
 		menu,
@@ -2318,6 +2322,8 @@ static void __fastcall SpideyDisplayAddBrightnessAndApply(
 		menu,
 		0,
 		gSpideyDisplayApplyMenuLabel);
+
+	SpideyUpdateDisplayModeMenuLabel();
 
 	gSpideyDisplayMenu =
 		menu;
@@ -4179,9 +4185,27 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			"display_options_gameplay");
 
 	SpideyInjectModernVideoModes();
+
+	// Leave DXGI exclusive ownership before changing to a normal Win32
+	// borderless/windowed style. For exclusive entry, establish the popup
+	// window first and let DXGI take ownership immediately afterward.
+	if (gSpideyWindowMode !=
+		SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
+	{
+		SpideyApplyRendererWindowMode(
+			"display_options_leave_exclusive");
+	}
+
 	SpideyApplySelectedWindowStyle(
 		*(HWND*)0x006B58D0,
 		"display_options");
+
+	if (gSpideyWindowMode ==
+		SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE)
+	{
+		SpideyApplyRendererWindowMode(
+			"display_options_enter_exclusive");
+	}
 
 	SpideyRefreshModernLogicalResolution();
 	SpideyApplyLogicalRenderResolution(
