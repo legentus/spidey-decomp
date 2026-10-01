@@ -6341,3 +6341,27 @@ If this first DX11-authoritative runtime pass is stable:
 4. **Remove the D3D7 device/init path.**
    - only after no remaining game/resource code requires real D3D7 COM rendering objects.
 
+
+
+### DX11-authoritative hardening after initial checkpoint
+
+Two additional commits close pre-runtime edge cases:
+
+- `f4385217703d0a4e5669e17cd0ea95dbd337d76a` — **meta: tag DX11 migration helpers**
+  - adds the repository status metadata to the new migration helper functions; no runtime behavior change.
+
+- `4c726ebd6f4ecf0c1996bc64512596935228fc18` — **renderer: isolate legacy rebuilds from DXGI exclusive**
+  - if DXGI Exclusive is already active and retail needs to rebuild its temporary compatibility device/surfaces, DXGI exclusive is explicitly released first;
+  - the retail compatibility rebuild runs without competing exclusive ownership;
+  - the replacement D3D7 device/main surfaces receive all interception hooks;
+  - only then may DX11 reacquire true Exclusive.
+  - This also covers the edge case of changing resolution while already in Exclusive, not only Windowed/Borderless -> Exclusive.
+
+Final source-level audit at `4c726eb`:
+- balanced braces/parentheses/brackets;
+- `draw_frame` telemetry: 51 printf format fields / 51 supplied values;
+- no F9/F10 reference-toggle key handlers remain;
+- compatibility probe installation is ordered before `display_options_enter_exclusive`;
+- the explicit `renderer11_release_exclusive_for_compat` path is present.
+
+**Runtime-test frontier:** `4c726ebd6f4ecf0c1996bc64512596935228fc18` plus the status/handoff-only commits that follow it.
