@@ -1,3 +1,42 @@
+# GAMEPLAY / PAUSE UI SCALING FRONTIER — READ FIRST (2026-10-01)
+
+Latest Drive session tested revision:
+`0b2d306b48beadfb1d0de6dc45a8dad4f4fb3faf`
+
+Result:
+- frontend/main-menu resolution-aware text is now correct and persists;
+- gameplay/pause text remained retail density;
+- gameplay HUD widgets remained original relative size instead of using compact high-resolution density.
+
+Fixes now implemented:
+- `563fdd671d89904a4f59bb910ab798a7c8615776` — **ui: scale gameplay and pause text with resolution**
+- `d680f800c244ab13dfcc805ceb9225b08a657115` — **ui: scale gameplay HUD widgets with resolution**
+
+Grounding:
+- retail gameplay panel renders in a 512x240 reference space and already expands panel quads to live logical resolution;
+- new wrapper applies the inverse high-resolution density before that existing retail transform;
+- at 2560x1440 density is X=0.25 / Y=0.333333;
+- rectangles retain nearest edge/center anchoring;
+- frontend and non-panel full-screen effects are excluded.
+
+NEXT TEST:
+1. updater/build;
+2. confirm main menu text still correct;
+3. gameplay: inspect Spider-Man HUD widgets and text;
+4. pause: inspect pause text and menu graphics;
+5. optionally compare 1920x1080 and 2560x1440;
+6. put only new `spidey-decomp.log` into Drive Logs folder.
+
+Drive Logs:
+https://drive.google.com/drive/folders/1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s
+
+Expected:
+- gameplay `ui_text_scale requested=256 effective=85` at 2560x1440;
+- `gameplay_ui_scale_install` has nonzero patched call counts;
+- sampled `gameplay_ui_scale density=0.250000,0.333333`.
+
+---
+
 # DRIVE LOG WORKFLOW + SHELL-LIFECYCLE TEXT FIX — READ FIRST (2026-10-01)
 
 Google Drive project root:
