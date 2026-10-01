@@ -6473,3 +6473,122 @@ Success indicators:
 - no PCMovie D3D error / no `DDERR_SURFACELOST` abort
 
 If boot reaches the menu, continue the existing Windowed/Borderless/Exclusive and gameplay validation from the prior handoff.
+
+
+## Runtime result: training stable, normal-level transition crash + post-training cursor floor — 2026-10-01
+
+Tested revision:
+- `8afcffd25e907f4fc34f8f2aaa8154e9a924e60a`
+
+### User-visible result
+
+- Game now boots successfully through the startup movies.
+- User could enter and play the training level.
+- Returning from training to the menu exposed a cursor clamp/floor: the cursor could not move below a horizontal Y boundary.
+- Starting a normal level then exited/crashed during the transition.
+
+This is a meaningful improvement over the previous startup failure: the DX11-authoritative main renderer survived a full training gameplay session.
+
+### DX11 gameplay evidence
+
+Sampled gameplay frames show the main renderer is not the failure:
+- thousands of D3D7 main-scene draws are successfully captured, submitted to DX11, and suppressed from the legacy renderer;
+- `missing=0`;
+- `shadow_skip=0`;
+- `d3d7_fallback=0`;
+- `fallback_scene_begins=0`;
+- sampled shadow frames are `presentable=1`.
+
+Therefore do **not** roll back the DX11-authoritative main-scene path because of this level-transition crash.
+
+### Fatal transition path
+
+The new D3D error log contains:
+- `PCTex.cpp:1740 error=0x00000001`;
+- `PCMovie.cpp:897 error=0x887601C2 == DDERR_SURFACELOST`;
+- `DXinit.cpp:1105 error=0x887601C2 == DDERR_SURFACELOST`.
+
+Static source inspection separates the first entry from the fatal errors:
+- reconstructed PCTex code stored `pTempSurf->Release()` into an `HRESULT` and passed the returned COM reference count into `D3D_ERROR_LOG_AND_QUIT`;
+- a return count of `1` is not a failed HRESULT, so this line was diagnostic noise, not the process-exit cause.
+
+The real PCMovie path is:
+```
+movie surface Lock/Copy/Unlock
+  -> g_pDDS_Scene->Blt(movie surface)
+  -> DXPOLY_Flip
+```
+
+The scene/primary DirectDraw surfaces had already been invalidated by an earlier DXGI-exclusive interval. The previous movie fix only attempted restoration when DXGI was **currently** Exclusive. In this test the user later switched to Windowed, so by the time the next level movie started the helper returned early even though the old DirectDraw scene surface remained `DDERR_SURFACELOST`. PCMovie then blitted into the dead scene surface and the retail fatal-error path exited.
+
+### Cursor-floor root cause
+
+The same session also exposed an ownership bug in the display wrapper.
+
+The user explicitly applied:
+- selected output = `2560x1440`;
+- window mode = Windowed.
+
+A later **internal retail** `DXINIT_SetDisplayOptions` request then changed:
+- selected output from `2560x1440` to `1920x1440`;
+- while pending menu selection still remained `2560x1440`.
+
+That produced:
+- selected = `1920x1440`;
+- 16:9 logical content = `1920x1080`;
+- physical compatibility backing = `1920x1440`.
+
+The existing confirmed-good post-level mouse sync then correctly clamped to that now-wrong logical `1920x1080` domain, yielding bounds `0,0,1888,1048`. Visually, inside the taller output/window, that appears as the reported horizontal cursor floor.
+
+The mouse conversion itself is not being reverted. The ownership bug is that retail compatibility transitions were allowed to overwrite the modern selected output.
+
+### Fix commits
+
+- `d7ef76af697d4c7cf9ac64e1a24bbbecd4123892` — **display: preserve modern output across retail transitions**
+  - internal retail display requests may change only the hidden compatibility producer;
+  - they no longer overwrite `gSpideySelectedOutputWidth/Height`;
+  - the modern selection is seeded from retail only if no valid modern selection exists yet;
+  - modern Display -> Apply remains the owner of the user-facing DX11 resolution;
+  - display telemetry now logs requested vs selected vs physical dimensions and whether selection was seeded.
+  - This should keep a user-selected 2560x1440 output at 2560x1440 through training -> menu -> level transitions and therefore keep the previously validated mouse domain intact.
+
+- `9c8a2c30696d2fcbfaa4af435168ae1202590cc9` — **renderer: always restore legacy compatibility surfaces**
+  - DXGI Exclusive release remains conditional on actual exclusive ownership;
+  - **primary/scene DirectDraw `IsLost/Restore` checks now run unconditionally** whenever the compatibility helper is invoked;
+  - this covers surfaces invalidated by an earlier exclusive interval even if the current visible mode is Windowed or Borderless;
+  - movie-frame compatibility therefore repairs `g_pDDS_Scene` before the retail movie Blt;
+  - display-option/rebuild compatibility receives the same protection;
+  - telemetry now records `had_exclusive`, release result, lost-state HRESULTs and restore HRESULTs separately.
+
+- `d8edc7e24bfa341145f100fbb4d3a09f3d51a494` — **pctex: stop treating Release refcount as HRESULT**
+  - removes the false `D3D error=0x00000001` diagnostic from texture staging cleanup;
+  - does not change the actual texture data/mirroring path.
+
+### Static audit
+
+At `d8edc7e`:
+- `main.cpp` braces/parentheses/brackets balanced;
+- `PCTex.cpp` braces/parentheses/brackets balanced;
+- unconditional legacy-surface repair is present;
+- modern-output seed guard is present;
+- the PCTex `Release()` HRESULT misuse is gone.
+
+### Next runtime test
+
+Use the normal updater/build.
+
+Focused pass:
+1. boot through splash movies;
+2. keep/apply 2560x1440 in the desired window mode;
+3. enter training;
+4. return to the menu;
+5. verify cursor can reach the full intended menu area and hover/click alignment remains correct;
+6. start the same normal level that crashed this session;
+7. if it enters, play for ~30-60 seconds.
+
+Most important log evidence:
+- display transition should show retail `requested=1920x1440...` (if retail still asks for it) while modern `selected=2560x1440...` remains unchanged;
+- post-training frontend mouse sync should therefore use 2560x1440 rather than 1920x1080;
+- movie-frame compatibility should show `scene_lost=DDERR_SURFACELOST` followed by successful `scene_restore=0x00000000` when needed;
+- no fatal `PCMovie.cpp:897` / `DXinit.cpp:1105` surface-lost entries;
+- DX11 gameplay should continue with `missing=0`, `shadow_skip=0`, `d3d7_fallback=0`.
