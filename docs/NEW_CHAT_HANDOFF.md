@@ -1,3 +1,27 @@
+# FRONTEND CURSOR + RESOLUTION-AWARE TEXT FRONTIER — READ FIRST (2026-10-01)
+
+Runtime revision `78cfba2b22fa6a4dc079f4ddd14f9ca1793e5f8e` did **not crash**. The normal-level transition regression is fixed.
+
+Remaining user-visible issues from that runtime:
+- post-level shell cursor still hit a horizontal lower bound;
+- Audio Output text/row was still cut off;
+- Display Mode values Fullscreen Exclusive / Windowed / Borderless were too large/clipped;
+- user explicitly wants frontend text to shrink appropriately at higher resolution.
+
+Implementation:
+- `8ed74f4a8a54b8b884434813969e099d8ff817f5` — raw mouse bounds use live client size; visible cursor, hotspot, and hit tests share client->logical mapping.
+- `ef7df27e9b24349ef4a7413464d50e99ec69d498` — frontend Mess_SetScale becomes resolution-aware relative to the 640x480 PC baseline, including text measurement/menu width calculations; gameplay scale is unchanged.
+
+Expected examples:
+- requested scale 256 at logical 1920x1080 -> ~113;
+- requested scale 256 at logical 2560x1440 -> ~85.
+
+**NEXT ACTION:** updater/build; validate Audio Output visibility, all Display Mode strings, then enter/leave a level and verify full downward cursor movement plus preserved hover/click alignment. Collect input + compat logs if anything remains wrong.
+
+Do not undo DX11-authoritative rendering or the now-working level-transition compatibility fixes.
+
+---
+
 # TRAINING-PASS / LEVEL-TRANSITION FIX FRONTIER — READ FIRST (2026-10-01)
 
 Runtime revision `8afcffd25e907f4fc34f8f2aaa8154e9a924e60a` now boots and plays training successfully. Two transition bugs remain and have been fixed in source:
