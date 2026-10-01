@@ -1224,6 +1224,516 @@ static const char* SpideyGetModernVideoIniPath()
 	return gSpideyModernVideoIniPath;
 }
 
+struct SpideyAudioDeviceInfo
+{
+	GUID guid;
+	int hasGuid;
+	char name[128];
+};
+
+static const int kSpideyMaxAudioDevices =
+	32;
+static SpideyAudioDeviceInfo gSpideyAudioDevices[kSpideyMaxAudioDevices];
+static int gSpideyAudioDeviceCount =
+	0;
+static int gSpideySelectedAudioDevice =
+	0;
+static int gSpideyAudioSettingsLoaded =
+	0;
+static char gSpideyModernAudioIniPath[MAX_PATH];
+
+typedef HRESULT (WINAPI *SpideyRealDirectSoundCreate8Fn)(
+		LPCGUID,
+		LPDIRECTSOUND8*,
+		LPUNKNOWN);
+typedef HRESULT (WINAPI *SpideyRealDirectSoundEnumerateAFn)(
+		LPDSENUMCALLBACKA,
+		LPVOID);
+
+static SpideyRealDirectSoundCreate8Fn gSpideyRealDirectSoundCreate8 =
+	0;
+static SpideyRealDirectSoundEnumerateAFn gSpideyRealDirectSoundEnumerateA =
+	0;
+static HMODULE gSpideyDirectSoundModule =
+	0;
+
+static const char* SpideyGetModernAudioIniPath()
+{
+	if (gSpideyModernAudioIniPath[0])
+		return gSpideyModernAudioIniPath;
+
+	DWORD length =
+		GetModuleFileNameA(
+			0,
+			gSpideyModernAudioIniPath,
+			MAX_PATH);
+
+	if (!length ||
+		length >= MAX_PATH)
+	{
+		strcpy(
+			gSpideyModernAudioIniPath,
+			".\\spidey-modern-audio.ini");
+		return gSpideyModernAudioIniPath;
+	}
+
+	char* slash =
+		strrchr(
+			gSpideyModernAudioIniPath,
+			'\\');
+	if (!slash)
+	{
+		slash =
+			strrchr(
+				gSpideyModernAudioIniPath,
+				'/');
+	}
+
+	if (slash)
+	{
+		++slash;
+		*slash =
+			0;
+
+		const char* fileName =
+			"spidey-modern-audio.ini";
+
+		if (strlen(gSpideyModernAudioIniPath) +
+			strlen(fileName) <
+			MAX_PATH)
+		{
+			strcat(
+				gSpideyModernAudioIniPath,
+				fileName);
+		}
+	}
+	else
+	{
+		strcpy(
+			gSpideyModernAudioIniPath,
+			".\\spidey-modern-audio.ini");
+	}
+
+	return gSpideyModernAudioIniPath;
+}
+
+static int SpideyResolveDirectSoundExports()
+{
+	if (gSpideyRealDirectSoundCreate8 &&
+		gSpideyRealDirectSoundEnumerateA)
+	{
+		return 1;
+	}
+
+	if (!gSpideyDirectSoundModule)
+	{
+		gSpideyDirectSoundModule =
+			GetModuleHandleA(
+				"dsound.dll");
+		if (!gSpideyDirectSoundModule)
+		{
+			gSpideyDirectSoundModule =
+				LoadLibraryA(
+					"dsound.dll");
+		}
+	}
+
+	if (!gSpideyDirectSoundModule)
+		return 0;
+
+	gSpideyRealDirectSoundCreate8 =
+		(SpideyRealDirectSoundCreate8Fn)GetProcAddress(
+			gSpideyDirectSoundModule,
+			"DirectSoundCreate8");
+	gSpideyRealDirectSoundEnumerateA =
+		(SpideyRealDirectSoundEnumerateAFn)GetProcAddress(
+			gSpideyDirectSoundModule,
+			"DirectSoundEnumerateA");
+
+	return gSpideyRealDirectSoundCreate8 &&
+		gSpideyRealDirectSoundEnumerateA;
+}
+
+static BOOL CALLBACK SpideyAudioEnumerateCallback(
+		LPGUID guid,
+		LPCSTR description,
+		LPCSTR module,
+		LPVOID context)
+{
+	(void)module;
+	(void)context;
+
+	// DirectSoundEnumerate reports the primary/default driver with a NULL
+	// GUID. We author our own stable row 0 for that policy.
+	if (!guid)
+		return TRUE;
+
+	if (gSpideyAudioDeviceCount >=
+		kSpideyMaxAudioDevices)
+	{
+		return FALSE;
+	}
+
+	SpideyAudioDeviceInfo* info =
+		&gSpideyAudioDevices[gSpideyAudioDeviceCount];
+
+	memset(
+		info,
+		0,
+		sizeof(*info));
+	info->guid =
+		*guid;
+	info->hasGuid =
+		1;
+
+	if (description &&
+		description[0])
+	{
+		strncpy(
+			info->name,
+			description,
+			sizeof(info->name) - 1);
+		info->name[sizeof(info->name) - 1] =
+			0;
+	}
+	else
+	{
+		strcpy(
+			info->name,
+			"DirectSound Device");
+	}
+
+	++gSpideyAudioDeviceCount;
+	return TRUE;
+}
+
+static void SpideyRefreshAudioDevices()
+{
+	memset(
+		gSpideyAudioDevices,
+		0,
+		sizeof(gSpideyAudioDevices));
+
+	gSpideyAudioDeviceCount =
+		1;
+	gSpideyAudioDevices[0].hasGuid =
+		0;
+	strcpy(
+		gSpideyAudioDevices[0].name,
+		"(System Default)");
+
+	if (!SpideyResolveDirectSoundExports())
+		return;
+
+	gSpideyRealDirectSoundEnumerateA(
+		SpideyAudioEnumerateCallback,
+		0);
+}
+
+static void SpideyAudioGuidToString(
+		const GUID* guid,
+		char* value,
+		int valueSize)
+{
+	if (!value ||
+		valueSize < 40)
+	{
+		return;
+	}
+
+	if (!guid)
+	{
+		strcpy(
+			value,
+			"default");
+		return;
+	}
+
+	sprintf(
+		value,
+		"{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
+		(unsigned long)guid->Data1,
+		(unsigned int)guid->Data2,
+		(unsigned int)guid->Data3,
+		(unsigned int)guid->Data4[0],
+		(unsigned int)guid->Data4[1],
+		(unsigned int)guid->Data4[2],
+		(unsigned int)guid->Data4[3],
+		(unsigned int)guid->Data4[4],
+		(unsigned int)guid->Data4[5],
+		(unsigned int)guid->Data4[6],
+		(unsigned int)guid->Data4[7]);
+}
+
+static int SpideyAudioGuidFromString(
+		const char* value,
+		GUID* guid)
+{
+	if (!value ||
+		!guid)
+	{
+		return 0;
+	}
+
+	unsigned long data1 =
+		0;
+	unsigned int data2 =
+		0;
+	unsigned int data3 =
+		0;
+	unsigned int data4[8];
+
+	memset(
+		data4,
+		0,
+		sizeof(data4));
+
+	const int fields =
+		sscanf(
+			value,
+			"{%8lx-%4x-%4x-%2x%2x-%2x%2x%2x%2x%2x%2x}",
+			&data1,
+			&data2,
+			&data3,
+			&data4[0],
+			&data4[1],
+			&data4[2],
+			&data4[3],
+			&data4[4],
+			&data4[5],
+			&data4[6],
+			&data4[7]);
+
+	if (fields != 11)
+		return 0;
+
+	guid->Data1 =
+		(DWORD)data1;
+	guid->Data2 =
+		(WORD)data2;
+	guid->Data3 =
+		(WORD)data3;
+
+	for (int i = 0;
+		 i < 8;
+		 ++i)
+	{
+		guid->Data4[i] =
+			(BYTE)data4[i];
+	}
+
+	return 1;
+}
+
+static void SpideySaveAudioSettings()
+{
+	char value[64];
+
+	if (gSpideySelectedAudioDevice <= 0 ||
+		gSpideySelectedAudioDevice >=
+			gSpideyAudioDeviceCount)
+	{
+		strcpy(
+			value,
+			"default");
+	}
+	else
+	{
+		SpideyAudioGuidToString(
+			&gSpideyAudioDevices[gSpideySelectedAudioDevice].guid,
+			value,
+			sizeof(value));
+	}
+
+	WritePrivateProfileStringA(
+		"Audio",
+		"OutputGuid",
+		value,
+		SpideyGetModernAudioIniPath());
+}
+
+static void SpideyLoadAudioSettings()
+{
+	if (!gSpideyAudioDeviceCount)
+		SpideyRefreshAudioDevices();
+
+	char value[64];
+	memset(
+		value,
+		0,
+		sizeof(value));
+
+	GetPrivateProfileStringA(
+		"Audio",
+		"OutputGuid",
+		"default",
+		value,
+		sizeof(value),
+		SpideyGetModernAudioIniPath());
+
+	gSpideySelectedAudioDevice =
+		0;
+
+	if (_stricmp(
+			value,
+			"default") != 0)
+	{
+		GUID configured;
+		memset(
+			&configured,
+			0,
+			sizeof(configured));
+
+		if (SpideyAudioGuidFromString(
+				value,
+				&configured))
+		{
+			for (int i = 1;
+				 i < gSpideyAudioDeviceCount;
+				 ++i)
+			{
+				if (!memcmp(
+					&configured,
+					&gSpideyAudioDevices[i].guid,
+					sizeof(GUID)))
+				{
+					gSpideySelectedAudioDevice =
+						i;
+					break;
+				}
+			}
+		}
+	}
+
+	gSpideyAudioSettingsLoaded =
+		1;
+}
+
+static const SpideyAudioDeviceInfo* SpideyGetSelectedAudioDevice()
+{
+	if (!gSpideyAudioSettingsLoaded)
+	{
+		SpideyLoadAudioSettings();
+	}
+
+	if (gSpideySelectedAudioDevice < 0 ||
+		gSpideySelectedAudioDevice >=
+			gSpideyAudioDeviceCount)
+	{
+		gSpideySelectedAudioDevice =
+			0;
+	}
+
+	return &gSpideyAudioDevices[gSpideySelectedAudioDevice];
+}
+
+static HRESULT WINAPI SpideyCompatDirectSoundCreate8(
+		LPCGUID requestedGuid,
+		LPDIRECTSOUND8* directSound,
+		LPUNKNOWN outer)
+{
+	if (!SpideyResolveDirectSoundExports())
+		return E_FAIL;
+
+	if (!gSpideyAudioDeviceCount)
+		SpideyRefreshAudioDevices();
+	if (!gSpideyAudioSettingsLoaded)
+		SpideyLoadAudioSettings();
+
+	const SpideyAudioDeviceInfo* selected =
+		SpideyGetSelectedAudioDevice();
+	LPCGUID effectiveGuid =
+		selected && selected->hasGuid ?
+			&selected->guid :
+			0;
+
+	const HRESULT hr =
+		gSpideyRealDirectSoundCreate8(
+			effectiveGuid,
+			directSound,
+			outer);
+
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_create requested=0x%08lX selection=%d name=%s policy=%s result=0x%08lX\n",
+			(unsigned long)requestedGuid,
+			gSpideySelectedAudioDevice,
+			selected ? selected->name : "(System Default)",
+			effectiveGuid ? "manual_guid" : "system_default",
+			(unsigned long)hr);
+		fclose(f);
+	}
+
+	return hr;
+}
+
+static void SpideyInstallAudioDeviceCompat()
+{
+	const unsigned char expectedThunk[6] =
+	{
+		0xFF, 0x25, 0x24, 0xB0, 0x53, 0x00
+	};
+	unsigned char* thunk =
+		(unsigned char*)0x00517A70;
+
+	SpideyRefreshAudioDevices();
+	SpideyLoadAudioSettings();
+
+	int patched =
+		0;
+	if (!memcmp(
+		thunk,
+		expectedThunk,
+		sizeof(expectedThunk)))
+	{
+		PATCH_PUSH_RET(
+			0x00517A70,
+			SpideyCompatDirectSoundCreate8);
+		patched =
+			1;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_device_compat patched=%d thunk=0x00517A70 devices=%d selected=%d config=%s\n",
+			patched,
+			gSpideyAudioDeviceCount,
+			gSpideySelectedAudioDevice,
+			SpideyGetModernAudioIniPath());
+
+		for (int i = 0;
+			 i < gSpideyAudioDeviceCount;
+			 ++i)
+		{
+			char guidValue[64];
+			SpideyAudioGuidToString(
+				gSpideyAudioDevices[i].hasGuid ?
+					&gSpideyAudioDevices[i].guid :
+					0,
+				guidValue,
+				sizeof(guidValue));
+			fprintf(
+				f,
+				"audio_device index=%d name=%s guid=%s default=%d\n",
+				i,
+				gSpideyAudioDevices[i].name,
+				guidValue,
+				i == 0 ? 1 : 0);
+		}
+		fclose(f);
+	}
+}
+
 static float SpideyGetAspectScalar(
 		int mode,
 		unsigned long width,
@@ -7575,6 +8085,7 @@ void game_patches(void)
 
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
+	SpideyInstallAudioDeviceCompat();
 	SpideyInstallModernModeReinitCompat();
 	// Claim the Display Options menu's Enter/Apply call before the generic
 	// SetDisplayOptions scan rewrites the remaining retail call sites.
