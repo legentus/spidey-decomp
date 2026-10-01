@@ -1207,6 +1207,8 @@ static char gSpideyMenuTextScaleMenuLabel[64] =
 static char gSpideyPauseApplyUiScaleLabel[] =
 	"Apply UI Scale";
 static int gSpideyInLevelDisplayMenuActive = 0;
+static unsigned long gSpideyPauseUiDisplaySamples =
+	0;
 
 static const char* const gSpideyAspectLabels[] =
 {
@@ -2876,6 +2878,8 @@ static void __fastcall SpideyPauseMenuDisplay(
 	SpideyDisplaySliderDrawFn drawSlider =
 		(SpideyDisplaySliderDrawFn)0x00498060;
 
+	const int logPauseUi =
+		gSpideyPauseUiDisplaySamples < 12;
 	const int sliderX =
 		305;
 	int y =
@@ -2887,11 +2891,50 @@ static void __fastcall SpideyPauseMenuDisplay(
 		selected =
 			menu->mEntry[menu->mLine].name;
 
+	if (logPauseUi)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_ui_display phase=begin sample=%lu menu=0x%08lX rows=%u line=%u selected=%s pending_gameplay=%d pending_text=%d\n",
+				gSpideyPauseUiDisplaySamples,
+				(unsigned long)menu,
+				(unsigned int)menu->mNumLines,
+				(unsigned int)menu->mLine,
+				selected ? selected : "<none>",
+				gSpideyPendingGameplayUiScalePercent,
+				gSpideyPendingMenuTextScalePercent);
+			fclose(f);
+		}
+	}
+
 	if (SpideyGetDisplayScaleSliderY(
 			menu,
 			gSpideyGameplayUiScaleMenuLabel,
 			&y))
 	{
+		if (logPauseUi)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (f)
+			{
+				fprintf(
+					f,
+					"pause_ui_display phase=before_gameplay_slider sample=%lu y=%d value=%d\n",
+					gSpideyPauseUiDisplaySamples,
+					y,
+					SpideyUiScalePercentToSliderValue(
+						gSpideyPendingGameplayUiScalePercent));
+				fclose(f);
+			}
+		}
+
 		drawSlider(
 			sliderX,
 			y,
@@ -2899,6 +2942,21 @@ static void __fastcall SpideyPauseMenuDisplay(
 				gSpideyGameplayUiScaleMenuLabel ? 1 : 0,
 			SpideyUiScalePercentToSliderValue(
 				gSpideyPendingGameplayUiScalePercent));
+
+		if (logPauseUi)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (f)
+			{
+				fprintf(
+					f,
+					"pause_ui_display phase=after_gameplay_slider sample=%lu\n",
+					gSpideyPauseUiDisplaySamples);
+				fclose(f);
+			}
+		}
 	}
 
 	if (SpideyGetDisplayScaleSliderY(
@@ -2906,6 +2964,24 @@ static void __fastcall SpideyPauseMenuDisplay(
 			gSpideyMenuTextScaleMenuLabel,
 			&y))
 	{
+		if (logPauseUi)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (f)
+			{
+				fprintf(
+					f,
+					"pause_ui_display phase=before_text_slider sample=%lu y=%d value=%d\n",
+					gSpideyPauseUiDisplaySamples,
+					y,
+					SpideyUiScalePercentToSliderValue(
+						gSpideyPendingMenuTextScalePercent));
+				fclose(f);
+			}
+		}
+
 		drawSlider(
 			sliderX,
 			y,
@@ -2913,6 +2989,37 @@ static void __fastcall SpideyPauseMenuDisplay(
 				gSpideyMenuTextScaleMenuLabel ? 1 : 0,
 			SpideyUiScalePercentToSliderValue(
 				gSpideyPendingMenuTextScalePercent));
+
+		if (logPauseUi)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (f)
+			{
+				fprintf(
+					f,
+					"pause_ui_display phase=after_text_slider sample=%lu\n",
+					gSpideyPauseUiDisplaySamples);
+				fclose(f);
+			}
+		}
+	}
+
+	if (logPauseUi)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_ui_display phase=end sample=%lu\n",
+				gSpideyPauseUiDisplaySamples);
+			fclose(f);
+		}
+		++gSpideyPauseUiDisplaySamples;
 	}
 }
 
@@ -5422,7 +5529,7 @@ static void SpideyCompactGameplayUiPoly(
 
 	++gSpideyGameplayUiScaledPolys;
 
-	if (gSpideyGameplayUiScaleSamples < 16)
+	if (gSpideyGameplayUiScaleSamples < 48)
 	{
 		FILE* log =
 			SpideyOpenConsolidatedLog(
