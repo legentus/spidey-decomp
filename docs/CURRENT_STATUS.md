@@ -5990,3 +5990,131 @@ If Stereo/Mono still crashes without any live DirectSound replacement, the next 
 ### Timing note from this crashed run
 
 The timing log contains only `frontend=1` samples before the crash. It confirms the menu commonly runs near 30 Hz, with a brief ~86-88 Hz transitional period after the display/frontend reconfiguration, but provides no `timing_logic` gameplay data. Do not draw conclusions about gameplay simulation speed from this run.
+
+
+## Frontend/settings architecture correction + live audio + display modes — 2026-10-01
+
+### User runtime confirmations / screenshot evidence
+
+User confirmed:
+- **post-level mouse location / menu hover alignment is FIXED**. Preserve that behavior.
+- Audio Output must apply without restarting the game.
+- frontend/settings must stop behaving as a 640x480 layout underneath the selected modern output;
+- Display settings must expose Fullscreen Exclusive, Borderless, and Windowed;
+- Audio/settings controls were visibly offset.
+
+Screenshot of the Audio screen made the offset cause concrete:
+- menu text had been shifted upward by the previous six-row workaround;
+- the three sliders/arrows stayed at their original hard-coded retail Y positions;
+- Output still extended below the intended composition.
+
+This proved the previous text-only `menu->mY -= menu->mLineSep` workaround was invalid by itself.
+
+### Frontend logical-canvas correction
+
+Commit:
+- `685b00ff9a95c034612951e96b88863a5c4b2a3d` — `frontend: unify modern canvas and remove audio row offset`
+
+Changes:
+- removed the text-only Audio row shift;
+- frontend mouse bounds now prefer the modern logical canvas;
+- mouse canvas helpers use `gSpideyModernLogicalWidth/Height` while the DX11 visible path is active;
+- the retail shell's legacy 640x480x16 display request is no longer allowed to become the visible/logical frontend canvas when a modern mode is selected;
+- the selected resolution remains authoritative for frontend logical rendering;
+- only the hidden D3D7 compatibility producer may be remapped (currently 2560x1440 -> 1920x1440 because retail D3D7 CreateDevice is runtime-proven to reject 2560x1440).
+
+The hidden compatibility producer is temporary legacy plumbing. It must not define frontend text, slider, hit-test, or mouse coordinates.
+
+### Live-safe audio output switching
+
+Commit:
+- `117b6b0fa6b03084943d1c827fd1dfd00bdf8b22` — `audio: apply output device live without invalidating Bink`
+
+Behavior:
+- selecting a new endpoint again applies immediately in-session;
+- before retail DirectSound shutdown, if Bink has already been initialized, the current DirectSound object receives an extra retained reference;
+- retail may then release its game-owned reference and rebuild the game's DirectSound/SFX path on the newly selected endpoint;
+- Bink cannot be left with a dangling backend pointer;
+- when no Bink movie handle is active, `G_PC_MOVIE_INITED @ 0x00AC0BA0` is cleared, retail `PCMOVIE_Init @ 0x0050B0F0` rebinds Bink to current `G_PDS`, then the retained old DirectSound reference is released;
+- a per-frame safe point performs that delayed rebind automatically if a movie was active during the endpoint change.
+
+This satisfies the requirement that an audio endpoint change not require restarting the game while preserving the root-cause fix for the prior `binkw32_.DLL` stale-DirectSound crash.
+
+### Audio screen full-layout alignment
+
+Commit:
+- `b0eb4f66df689fa75001e418766b9d12b6618de7` — `audio: align six-row text sliders and hit regions`
+
+Retail grounding:
+- Audio `CMenu` line separation = 20;
+- slider drawing calls:
+  - `0x00497978 -> DrawSlider @ 0x00498060`
+  - `0x00497998 -> DrawSlider`
+  - `0x004979B8 -> DrawSlider`
+- slider mouse logic:
+  - `0x00497BE9 -> sub_497F80 @ 0x00497F80`
+- disassembly proves `sub_497F80(x,y,value)` builds its hover rectangle directly from the supplied Y.
+
+The six-row layout now moves consistently by one authored row:
+- `CMenu` text Y: -20;
+- all three slider graphics/arrows Y: -20;
+- slider mouse hit-region Y: -20.
+
+Therefore the screenshot's text-vs-slider mismatch is addressed at all three matching coordinate paths, not by another visual-only nudge.
+
+### Display-mode support
+
+Commits:
+- `9f0107bdf8ef0d398d6fc3bbb5ea9b47f0af75f7` — renderer API exposes fullscreen-state control;
+- `106cd597b04c50d4a62450d231f491ea74578033` — DX11 implementation of `SetFullscreenState`;
+- `b8853c19d5ccf66d09f2352905719a4c110c98c4` — persistent Display Mode state/menu;
+- `c1c6c3a630677225dd13468a62fe0b8717f3eef7` — renderer ABI 8 for window-mode control;
+- `e7d9500b270fba9218ce5ded408f52dc3fcfbb8f` — main bridge loads/applies DX11 window mode;
+- `cb0d64ad3754bccec48817b9135b0b7d29bbdce8` — corrected exclusive transition ordering;
+- `5c3b1340f3a1ce436fd4068f8680bd67cdc46234` — stable transition/menu sizing pass.
+
+Display menu is now five rows:
+1. Resolution
+2. Aspect Ratio
+3. Brightness
+4. Display Mode
+5. Apply
+
+Display Mode values:
+- Fullscreen Exclusive
+- Borderless
+- Windowed
+
+Persistence:
+- `[Video] WindowMode` in `spidey-modern-video.ini`;
+- default = Borderless to preserve current behavior.
+
+Retail `PCSHELL_DoDisplayOptions @ 0x0050D9B0` switch logic was disassembled:
+- retail only implements row-specific left/right behavior for rows 0, 1, and 2;
+- row 3+ falls through without hidden setting mutation;
+- therefore row 3 is a safe custom Display Mode row and Apply can move to row 4.
+
+DX11:
+- real Fullscreen Exclusive uses `IDXGISwapChain::SetFullscreenState(TRUE)` plus `ResizeTarget` for the selected mode;
+- Borderless/Windowed exit DXGI exclusive and use corresponding Win32 styles;
+- renderer ABI is now 8 and the new export is mandatory;
+- release path explicitly leaves exclusive mode before releasing the swap chain.
+
+### Current pre-test audit status
+
+Static checks currently pass for:
+- main expected renderer ABI = 8;
+- renderer header ABI = 8;
+- new fullscreen export declared, implemented, loaded, and required;
+- Display menu logs rows=5 / row3 Display Mode / row4 Apply;
+- Apply handler requires line 4;
+- all four Audio layout hooks are present;
+- live audio-retained-Bink path is enabled;
+- old intentional `keep frontend 640x480 canvas` behavior is no longer present.
+
+Before requesting runtime testing:
+1. harden transition ordering so leaving exclusive happens before retail graphics-producer rebuild;
+2. harden live-audio failure fallback;
+3. run one more source/log-format sanity audit.
+
+Do not regress the confirmed post-level mouse fix.
