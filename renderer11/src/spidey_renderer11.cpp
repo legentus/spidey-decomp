@@ -1614,9 +1614,15 @@ int __cdecl SpideyRenderer11_SetFullscreenState(
         mode.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
         mode.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
 
-        hr = gSwapChain->ResizeTarget(&mode);
+        // Enter exclusive ownership first, then request the selected display
+        // mode. Calling ResizeTarget while still windowed only resizes the
+        // window and does not establish a true exclusive display mode.
+        hr = gSwapChain->SetFullscreenState(TRUE, nullptr);
         if (SUCCEEDED(hr))
-            hr = gSwapChain->SetFullscreenState(TRUE, nullptr);
+            hr = gSwapChain->ResizeTarget(&mode);
+
+        if (FAILED(hr))
+            gSwapChain->SetFullscreenState(FALSE, nullptr);
     }
     else
     {
