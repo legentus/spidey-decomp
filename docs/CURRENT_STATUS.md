@@ -5323,3 +5323,51 @@ Reason:
 The retained `CCamera::AI` binary was checked for the mode-dispatch tables referenced at `0x0041866C` and `0x0041868C`. The archived function blob ends exactly at `0x0041866C`; the table data is not present elsewhere found in the repo. No table contents were inferred or fabricated.
 
 Next authoritative step is the combined runtime test documented at the top of `docs/NEW_CHAT_HANDOFF.md`. Do not enable modern controller action injection or camera ownership until the passive logs validate these boundaries.
+
+
+## Priority shift from user runtime observations — 2026-09-30
+
+User explicitly reprioritized current work ahead of the optional F9 renderer-isolation test.
+
+Current priority order:
+
+1. **Proper widescreen**
+   - current implementation visibly stretches a 4:3 presentation to 16:9;
+   - this is not acceptable as the final widescreen implementation;
+   - target is true widescreen/Hor+ gameplay geometry with correct projection and non-stretched 2D/HUD behavior.
+
+2. **Frontend/menu mouse hit-testing**
+   - cursor motion itself is responsive;
+   - hover/selection regions do not line up reliably with the visible menu after returning from a level;
+   - user often has to place the pointer slightly above the visible option to select/click it;
+   - treat this as a coordinate-transform / bounds-sync issue, not a mouse-acquisition issue unless new evidence proves otherwise.
+
+3. **High-frame-rate simulation speed**
+   - at higher render frame rates the game feels sped up;
+   - renderer isolation/F9 is deprioritized because DX11 alone is not expected to fix simulation speed;
+   - must identify the simulation/game-timer cadence and decouple gameplay/physics from render rate;
+   - compare two design families:
+     a. fixed 30 Hz simulation with interpolation for rendering;
+     b. delta-time / fixed-step accumulator conversion with rate-independent gameplay;
+   - do not choose until original timer/update semantics are grounded.
+
+4. **Audio output modernization**
+   - current game sound is effectively stuck on one headset/output device;
+   - default behavior must become Windows **system default** output;
+   - add an Audio menu that lists output devices and includes `System Default` as the default selection;
+   - manual device selection should persist.
+
+5. **Uncap main-menu framerate**
+   - current main menu is 30 FPS;
+   - user wants it uncapped;
+   - this must not reintroduce sped-up menu animation/input timing, so frontend pacing and simulation timing need to be separated.
+
+Renderer isolation:
+- F9 D3D7-main-draw suppression test is postponed until these priorities are addressed or until renderer-isolation evidence becomes directly useful to one of them.
+
+Immediate investigation plan:
+- trace widescreen projection/FOV and 2D scaling separately;
+- trace shell mouse coordinate conversion/hit-test bounds, especially gameplay -> frontend transition;
+- trace frame timer/update loop and identify where 30 Hz assumptions enter simulation;
+- trace DirectSound device creation and existing sound options/menu;
+- trace frontend 30 FPS limiter and determine whether it shares the same timer path as gameplay.
