@@ -3486,6 +3486,9 @@ static void SpideyRestoreSavedRenderResolution()
 
 static int gSpideyModernAspectEnabled = 1;
 static int gSpideyFrontendLegacyMode = 1;
+// Independent of DirectDraw mode/resolution requests. This mirrors whether
+// the retail PShell frontend lifecycle is actually active.
+static int gSpideyFrontendUiActive = 0;
 static int gSpideyShadowPreviewEnabled = 1;
 static unsigned long gSpideyModernLogicalWidth = 0;
 static unsigned long gSpideyModernLogicalHeight = 0;
@@ -4021,7 +4024,8 @@ static int SpideyGetResolutionAwareTextScale(
 	if (requestedScale <= 0)
 		return requestedScale;
 
-	if (!gSpideyFrontendLegacyMode ||
+	if (!(gSpideyFrontendUiActive ||
+		  gSpideyFrontendLegacyMode) ||
 		!gSpideyShadowPreviewEnabled ||
 		gSpideyModernLogicalHeight <= 480)
 	{
@@ -4067,7 +4071,8 @@ static void SpideyApplyFrontendTextScale(
 		(u16)effective;
 
 	const int frontend =
-		gSpideyFrontendLegacyMode ? 1 : 0;
+		(gSpideyFrontendUiActive ||
+		 gSpideyFrontendLegacyMode) ? 1 : 0;
 
 	if (gSpideyLastFrontendTextRequested !=
 			gSpideyRequestedFrontendTextScale ||
@@ -4256,6 +4261,180 @@ static void SpideyApplyLogicalRenderResolution(
 			gSpideyModernLogicalWidth,
 			gSpideyModernLogicalHeight,
 			gSpideyAspectLabels[gSpideyAspectMode]);
+		fclose(f);
+	}
+}
+
+
+typedef void (__cdecl *SpideyRetailPShellLifecycleFn)(void);
+
+// @Ok
+static void SpideySetFrontendUiActive(
+		int active,
+		const char* reason)
+{
+	gSpideyFrontendUiActive =
+		active ? 1 : 0;
+	gSpideyFrontendLegacyMode =
+		active ? 1 : 0;
+
+	SpideyRefreshModernLogicalResolution();
+
+	if (active)
+	{
+		SpideyApplyLogicalRenderResolution(
+			1,
+			reason ?
+				reason :
+				"shell_frontend_active");
+		SpideySyncFrontendMouseBounds(
+			reason ?
+				reason :
+				"shell_frontend_active");
+	}
+	else
+	{
+		// Restore the retail-requested scale immediately as the shell shuts
+		// down. The gameplay display transition can then choose its own
+		// logical canvas without inheriting frontend typography.
+		SpideyApplyFrontendTextScale(
+			reason ?
+				reason :
+				"shell_frontend_inactive");
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"frontend_lifecycle reason=%s active=%d logical=%lux%lu selected=%lux%lu\n",
+			reason ? reason : "unknown",
+			gSpideyFrontendUiActive,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight,
+			gSpideySelectedOutputWidth,
+			gSpideySelectedOutputHeight);
+		fclose(f);
+	}
+}
+
+// @Ok
+static void __cdecl SpideyCompatPShellInitialise()
+{
+	// Set frontend ownership before retail initialization, because
+	// PShell_Initialise itself calls PShell_NormalFont/Mess_SetScale.
+	SpideySetFrontendUiActive(
+		1,
+		"pshell_initialise_pre");
+
+	SpideyRetailPShellLifecycleFn retail =
+		(SpideyRetailPShellLifecycleFn)0x0048D790;
+	retail();
+
+	// Reassert after initialization in case a retail display rebuild occurred
+	// inside the shell startup sequence.
+	SpideySetFrontendUiActive(
+		1,
+		"pshell_initialise_post");
+}
+
+// @Ok
+static void __cdecl SpideyCompatPShellCleanup()
+{
+	SpideyRetailPShellLifecycleFn retail =
+		(SpideyRetailPShellLifecycleFn)0x0048D880;
+	retail();
+
+	SpideySetFrontendUiActive(
+		0,
+		"pshell_cleanup_post");
+}
+
+// @Ok
+static int SpideyPatchAllRetailDirectCalls(
+		unsigned long retailTarget,
+		void* replacement)
+{
+	unsigned char* textStart =
+		(unsigned char*)0x00401000;
+	unsigned char* textEnd =
+		(unsigned char*)0x0053B000;
+	int patched =
+		0;
+
+	for (unsigned char* p = textStart;
+		 p + 5 <= textEnd;
+		 ++p)
+	{
+		if (p[0] != 0xE8)
+			continue;
+
+		const long rel =
+			*(long*)(p + 1);
+		const unsigned long target =
+			(unsigned long)(p + 5 + rel);
+
+		if (target != retailTarget)
+			continue;
+
+		DWORD oldProtect =
+			0;
+		if (!VirtualProtect(
+				p,
+				5,
+				PAGE_EXECUTE_READWRITE,
+				&oldProtect))
+		{
+			continue;
+		}
+
+		*(long*)(p + 1) =
+			(long)(
+				(unsigned char*)replacement -
+				(p + 5));
+
+		DWORD ignoredProtect =
+			0;
+		VirtualProtect(
+			p,
+			5,
+			oldProtect,
+			&ignoredProtect);
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			p,
+			5);
+		++patched;
+	}
+
+	return patched;
+}
+
+// @Ok
+static void SpideyInstallFrontendLifecycleCompat()
+{
+	const int initialiseCalls =
+		SpideyPatchAllRetailDirectCalls(
+			0x0048D790,
+			(void*)&SpideyCompatPShellInitialise);
+	const int cleanupCalls =
+		SpideyPatchAllRetailDirectCalls(
+			0x0048D880,
+			(void*)&SpideyCompatPShellCleanup);
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"frontend_lifecycle_install initialise_target=0x0048D790 initialise_calls=%d cleanup_target=0x0048D880 cleanup_calls=%d\n",
+			initialiseCalls,
+			cleanupCalls);
 		fclose(f);
 	}
 }
@@ -4478,12 +4657,21 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	const u32 requestedBpp =
 		bpp;
 
-	const int frontendLegacy =
-		*(DWORD*)0x006B78F4 &&
+	const int frontendLegacyRequest =
 		requestedWidth == 640 &&
 		requestedHeight == 480 &&
 		requestedBpp == 16 &&
 		option4 == 0;
+
+	// The exact 640x480x16 shell request is still a useful fallback signal
+	// during very early shell entry, but modern-resolution rebuilds while a
+	// menu is active must never revoke frontend ownership.
+	if (frontendLegacyRequest)
+		gSpideyFrontendUiActive =
+			1;
+
+	const int frontendActive =
+		gSpideyFrontendUiActive ? 1 : 0;
 
 	// The compatibility producer must never be torn down/rebuilt while DXGI
 	// owns the display exclusively. Release exclusive unconditionally if it
@@ -4510,7 +4698,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	// must never replace the modern user-facing DX11 output selected through
 	// our Display -> Apply path. Seed from retail only as an emergency when
 	// no valid modern selection exists yet.
-	if (!frontendLegacy &&
+	if (!frontendActive &&
 		(gSpideySelectedOutputWidth < 640 ||
 		 gSpideySelectedOutputHeight < 480))
 	{
@@ -4529,7 +4717,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	// request become the active frontend canvas. Keep the user's selected
 	// modern dimensions authoritative and use only a hidden D3D7-compatible
 	// producer surface where the legacy device requires one.
-	if (frontendLegacy &&
+	if (frontendLegacyRequest &&
 		gSpideySelectedOutputWidth >= 640 &&
 		gSpideySelectedOutputHeight >= 480)
 	{
@@ -4574,7 +4762,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 		option5);
 
 	gSpideyFrontendLegacyMode =
-		frontendLegacy ? 1 : 0;
+		frontendActive ? 1 : 0;
 
 	gSpideyLegacyPhysicalWidth =
 		(unsigned long)*(DWORD*)0x006B78E4;
@@ -4641,7 +4829,7 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	{
 		fprintf(
 			f,
-			"display_options requested=%lux%lux%lu selected=%lux%lux%lu physical=%lux%lux%lu option4=%d option5=%d frontend_legacy=%d legacy_backing_remap=%d selection_seeded=%d preserve_selected=1\n",
+			"display_options requested=%lux%lux%lu selected=%lux%lux%lu physical=%lux%lux%lu option4=%d option5=%d frontend_active=%d frontend_legacy_request=%d legacy_backing_remap=%d selection_seeded=%d preserve_selected=1\n",
 			(unsigned long)requestedWidth,
 			(unsigned long)requestedHeight,
 			(unsigned long)requestedBpp,
@@ -4653,7 +4841,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 			(unsigned long)physicalBpp,
 			option4,
 			option5,
-			frontendLegacy,
+			frontendActive,
+			frontendLegacyRequest,
 			remappedLegacyBacking,
 			seededSelectedOutput);
 		fclose(f);
@@ -4741,7 +4930,8 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 		"display_menu_apply_commit");
 
 	const int liveFrontend =
-		*(DWORD*)0x006B78F4 ? 1 : 0;
+		(gSpideyFrontendUiActive ||
+		 gSpideyFrontendLegacyMode) ? 1 : 0;
 
 	// Apply the selected modern mode immediately even while the shell is
 	// active. SpideyCompatSetDisplayOptions will quarantine any incompatible
@@ -4755,6 +4945,8 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 
 	if (liveFrontend)
 	{
+		gSpideyFrontendUiActive =
+			1;
 		gSpideyFrontendLegacyMode =
 			1;
 		SpideyRefreshModernLogicalResolution();
@@ -10910,6 +11102,7 @@ void game_patches(void)
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
 	SpideyInstallMouseCoordinateCompat();
+	SpideyInstallFrontendLifecycleCompat();
 	SpideyInstallCleanup503AF0Compat();
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
