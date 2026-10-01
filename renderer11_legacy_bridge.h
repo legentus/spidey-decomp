@@ -44,6 +44,7 @@ struct SpideyRenderer11LegacyShadowState
     unsigned long addressV;
     unsigned long magFilter;
     unsigned long minFilter;
+    unsigned long drawClass;
 };
 
 int SpideyRenderer11MirrorLegacyTexture(
