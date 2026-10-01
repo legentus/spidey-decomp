@@ -4583,14 +4583,14 @@ static int SpideyProbeRenderer11Bridge()
 		probe();
 
 	gSpideyRenderer11BridgeReady =
-		abi == 6 &&
+		abi == 7 &&
 		probeResult != 0;
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=6 backend=%s probe=%d phase2c2_exports=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=7 backend=%s probe=%d phase2c2_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
@@ -5215,6 +5215,148 @@ static unsigned long gSpideyRetailDrawFvf144 = 0;
 static unsigned long gSpideyRetailDrawOtherPrimitive = 0;
 static unsigned long gSpideyRetailDrawOtherFvf = 0;
 static unsigned long gSpideyRetailDrawSampleCount = 0;
+static unsigned long gSpideyRetailDraw2D = 0;
+static unsigned long gSpideyRetailDraw3D = 0;
+
+static const unsigned long SPIDEY_2D_POLY_TAG_CAPACITY = 32768;
+static void* gSpidey2DPolyTags[SPIDEY_2D_POLY_TAG_CAPACITY];
+static unsigned long gSpidey2DPolyTagged = 0;
+
+typedef void (__cdecl *SpideyRetailDXPOLYDrawPolyFn)(
+		void*,
+		int,
+		int,
+		float);
+
+static unsigned long Spidey2DPolyHash(
+		void* poly)
+{
+	return (
+		((unsigned long)poly >> 4) ^
+		((unsigned long)poly >> 13)) &
+		(SPIDEY_2D_POLY_TAG_CAPACITY - 1);
+}
+
+static void SpideyTag2DPoly(
+		void* poly)
+{
+	if (!poly)
+		return;
+
+	unsigned long slot =
+		Spidey2DPolyHash(
+			poly);
+
+	for (unsigned long probe = 0;
+		 probe < SPIDEY_2D_POLY_TAG_CAPACITY;
+		 ++probe)
+	{
+		void*& entry =
+			gSpidey2DPolyTags[slot];
+
+		if (!entry)
+		{
+			entry =
+				poly;
+			++gSpidey2DPolyTagged;
+			return;
+		}
+
+		if (entry == poly)
+			return;
+
+		slot =
+			(slot + 1) &
+			(SPIDEY_2D_POLY_TAG_CAPACITY - 1);
+	}
+}
+
+static int SpideyIsTagged2DVertices(
+		const void* vertices)
+{
+	if (!vertices)
+		return 0;
+
+	void* poly =
+		(void*)(
+			(const unsigned char*)vertices -
+			0x10);
+
+	unsigned long slot =
+		Spidey2DPolyHash(
+			poly);
+
+	for (unsigned long probe = 0;
+		 probe < SPIDEY_2D_POLY_TAG_CAPACITY;
+		 ++probe)
+	{
+		void* entry =
+			gSpidey2DPolyTags[slot];
+
+		if (!entry)
+			return 0;
+
+		if (entry == poly)
+			return 1;
+
+		slot =
+			(slot + 1) &
+			(SPIDEY_2D_POLY_TAG_CAPACITY - 1);
+	}
+
+	return 0;
+}
+
+static void __cdecl SpideyCompatDXPOLYDraw2D(
+		void* poly,
+		int sortSlot,
+		int blendMode,
+		float maxDepth)
+{
+	SpideyTag2DPoly(
+		poly);
+
+	SpideyRetailDXPOLYDrawPolyFn retail =
+		(SpideyRetailDXPOLYDrawPolyFn)0x00503100;
+
+	retail(
+		poly,
+		sortSlot,
+		blendMode,
+		maxDepth);
+}
+
+static void SpideyInstall2DPolyProvenanceCompat()
+{
+	const int quadInstalled =
+		SpideyPatchDirectCall(
+			0x005078F0,
+			0x00503100,
+			SpideyCompatDXPOLYDraw2D,
+			"drawquad2d_provenance");
+	const int qpolyInstalled =
+		SpideyPatchDirectCall(
+			0x00507D83,
+			0x00503100,
+			SpideyCompatDXPOLYDraw2D,
+			"drawqpoly2d_provenance");
+
+	FILE* f = fopen(
+		"spidey-decomp-draw.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"draw_provenance installed=%d quad_call=0x005078F0 qpoly_call=0x00507D83 retail=0x00503100 sidecar_capacity=%lu\n",
+			quadInstalled &&
+				qpolyInstalled ?
+				1 :
+				0,
+			SPIDEY_2D_POLY_TAG_CAPACITY);
+		fclose(f);
+	}
+}
 
 static int gSpideyModernRangeValid = 0;
 static float gSpideyModernMinX = 0.0f;
@@ -5760,6 +5902,21 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 		gSpideyRetailShadowRenderTarget ==
 		*(LPDIRECTDRAWSURFACE7*)0x006B7908;
 
+	const int drawIs2D =
+		vertexTypeDesc == 324 &&
+		vertices &&
+		SpideyIsTagged2DVertices(
+			vertices);
+
+	if (onMainScene &&
+		vertexTypeDesc == 324)
+	{
+		if (drawIs2D)
+			++gSpideyRetailDraw2D;
+		else
+			++gSpideyRetailDraw3D;
+	}
+
 	if (captureShadowFrame &&
 		!onMainScene)
 	{
@@ -5835,6 +5992,10 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 	{
 		SpideyRenderer11LegacyShadowState shadowState =
 			gSpideyRetailShadowState;
+		shadowState.drawClass =
+			drawIs2D ?
+				1UL :
+				0UL;
 
 		if (SpideyUseModernOutputAspect() &&
 			gSpideyShadowPreviewEnabled)
@@ -5910,7 +6071,7 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 
 			fprintf(
 				f,
-				"draw_sample call=%lu device=0x%08lX primitive=%lu fvf=%lu vertices=0x%08lX count=%lu flags=0x%08lX texture_hr=0x%08lX texture=0x%08lX mirrored_id=%ld",
+				"draw_sample call=%lu device=0x%08lX primitive=%lu fvf=%lu vertices=0x%08lX count=%lu flags=0x%08lX texture_hr=0x%08lX texture=0x%08lX mirrored_id=%ld class=%s",
 				gSpideyRetailDrawCalls,
 				(unsigned long)device,
 				(unsigned long)primitiveType,
@@ -5920,7 +6081,10 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 				(unsigned long)flags,
 				(unsigned long)textureHr,
 				(unsigned long)texture,
-				mirroredTextureId);
+				mirroredTextureId,
+				drawIs2D ?
+					"2d" :
+					"3d");
 
 			if (sampledVertex)
 			{
@@ -6113,6 +6277,13 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyRetailDrawFvf144 = 0;
 	gSpideyRetailDrawOtherPrimitive = 0;
 	gSpideyRetailDrawOtherFvf = 0;
+	gSpideyRetailDraw2D = 0;
+	gSpideyRetailDraw3D = 0;
+	gSpidey2DPolyTagged = 0;
+	memset(
+		gSpidey2DPolyTags,
+		0,
+		sizeof(gSpidey2DPolyTags));
 	gSpideyShadowSubmitted = 0;
 	gSpideyShadowSkipped = 0;
 	gSpideyShadowOffscreenSkipped = 0;
@@ -6150,7 +6321,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu d3d7_suppress=%d d3d7_suppressed=%lu d3d7_fallback=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu d3d7_suppress=%d d3d7_suppressed=%lu d3d7_fallback=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -6160,6 +6331,9 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyRetailDrawFvf144,
 				gSpideyRetailDrawOtherPrimitive,
 				gSpideyRetailDrawOtherFvf,
+				gSpideyRetailDraw2D,
+				gSpideyRetailDraw3D,
+				gSpidey2DPolyTagged,
 				gSpideyShadowSubmitted,
 				gSpideyShadowSkipped,
 				gSpideyShadowOffscreenSkipped,
@@ -8596,6 +8770,7 @@ void game_patches(void)
 	SpideyInstallDisplayAspectCompat();
 	SpideyInstallDisplayOptionsCompat();
 	SpideyInstallHorPlusCullCompat();
+	SpideyInstall2DPolyProvenanceCompat();
 	SpideyInstallPresentProbe();
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
