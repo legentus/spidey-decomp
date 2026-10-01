@@ -646,6 +646,28 @@ static volatile long gSpideyCompatFirstResult = 0;
 static volatile long gSpideyCompatRetryResult = 0;
 static volatile DWORD gSpideyCompatRetryAttempted = 0;
 
+// @Ok
+static FILE* SpideyOpenConsolidatedLog(
+		const char* category)
+{
+	FILE* f =
+		fopen(
+			"spidey-decomp.log",
+			"a");
+
+	if (!f)
+		return 0;
+
+	fprintf(
+		f,
+		"[%s] ",
+		category ?
+			category :
+			"GENERAL");
+
+	return f;
+}
+
 static void SpideyAppendCompatLog(
 		DWORD width,
 		DWORD height,
@@ -654,7 +676,8 @@ static void SpideyAppendCompatLog(
 		HRESULT retryResult,
 		int retried)
 {
-	FILE* f = fopen("spidey-decomp-compat.log", "a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (!f)
 		return;
 
@@ -834,9 +857,8 @@ static void SpideyEnableDpiAwarenessEarly()
 	gSpideyDpiAware =
 		awareResult ? 1 : 0;
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -976,9 +998,8 @@ static void SpideyInjectModernVideoModes()
 	}
 
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (f)
 	{
@@ -1051,9 +1072,8 @@ static void SpideyKeepBorderlessMonitorWindow(HWND hwnd)
 		SWP_FRAMECHANGED |
 		SWP_SHOWWINDOW);
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (f)
 	{
@@ -1129,9 +1149,8 @@ static void SpideyInstallModernModeReinitCompat()
 		patched++;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (f)
 	{
@@ -1370,9 +1389,8 @@ static void SpideyApplySelectedWindowStyle(
 		SWP_FRAMECHANGED |
 		SWP_SHOWWINDOW);
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -1827,9 +1845,8 @@ static HRESULT WINAPI SpideyCompatDirectSoundCreate8(
 			directSound,
 			outer);
 
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		fprintf(
@@ -1872,9 +1889,8 @@ static void SpideyInstallAudioDeviceCompat()
 			1;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		fprintf(
@@ -1962,9 +1978,8 @@ static float SpideyGetSelectedAspectScalar()
 static void SpideyLogAspectSetting(
 		const char* reason)
 {
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (!f)
 		return;
 
@@ -2083,9 +2098,8 @@ static void SpideyResetPendingDisplaySettings(
 		gSpideyWindowMode;
 	SpideyUpdateDisplayModeMenuLabel();
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -2146,9 +2160,8 @@ static u32 __cdecl SpideyDisplayAspectPrev(
 		gSpideyPendingAspectMode =
 			count - 1;
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -2174,9 +2187,8 @@ static u32 __cdecl SpideyDisplayAspectNext(
 		gSpideyPendingAspectMode =
 			0;
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -2228,9 +2240,8 @@ static u8 SpideyStepPendingResolution(
 			height;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -2401,9 +2412,8 @@ static void __fastcall SpideyDisplayMenuUpdate(
 
 	SpideyUpdateDisplayModeMenuLabel();
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -2440,9 +2450,8 @@ static int SpideyPatchDirectCall(
 	if (!call ||
 		call[0] != 0xE8)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -2462,9 +2471,8 @@ static int SpideyPatchDirectCall(
 
 	if (oldTarget != expectedTarget)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -2508,9 +2516,8 @@ static int SpideyPatchDirectCall(
 		call,
 		5);
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -2790,9 +2797,8 @@ static void SpideyTryRebindBinkAudio(
 	gSpideyRetainedBinkDirectSound =
 		0;
 
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		fprintf(
@@ -2919,9 +2925,8 @@ static int SpideyRestartDirectSoundForShell(
 	SpideyTryRebindBinkAudio(
 		"device_switch");
 
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		const SpideyAudioDeviceInfo* selected =
@@ -3124,9 +3129,8 @@ typedef void (__cdecl *SpideyRetailSetBootSoundModeFn)(
 static void __cdecl SpideyAudioSetStereoModeCompat(
 		bool stereo)
 {
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		fprintf(
@@ -3145,9 +3149,8 @@ static void __cdecl SpideyAudioSetStereoModeCompat(
 	retail(
 		stereo);
 
-	f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		fprintf(
@@ -3216,9 +3219,8 @@ static void SpideyInstallAudioMenuCompat()
 			(void*)&SpideyAudioDrawStereoValueShifted,
 			"audio_stereo_value_shift");
 
-	FILE* f = fopen(
-		"spidey-decomp-audio.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"AUDIO");
 	if (f)
 	{
 		fprintf(
@@ -3347,9 +3349,8 @@ static void SpideyInstallDisplayAspectCompat()
 			(void*)&SpideyDisplayMenuUpdate,
 			"display_mode_update");
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -3464,9 +3465,8 @@ static void SpideyRestoreSavedRenderResolution()
 	*(DWORD*)0x00568158 =
 		requestedHeight;
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (f)
 	{
@@ -3745,9 +3745,8 @@ static void SpideySyncFrontendMouseBounds(
 		&mappedX,
 		&mappedY);
 
-	FILE* f = fopen(
-		"spidey-decomp-input.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 	if (f)
 	{
 		fprintf(
@@ -3906,9 +3905,8 @@ static void SpideyInstallMouseCoordinateCompat()
 			1;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-input.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 	if (f)
 	{
 		fprintf(
@@ -4080,9 +4078,8 @@ static void SpideyApplyFrontendTextScale(
 		gSpideyLastFrontendTextMode !=
 			frontend)
 	{
-		FILE* log = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* log = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (log)
 		{
 			fprintf(
@@ -4128,9 +4125,8 @@ static void SpideyInstallFrontendTextScaleCompat()
 		0x00458620,
 		SpideyCompatMessSetScale);
 
-	FILE* log = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* log = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (log)
 	{
 		fprintf(
@@ -4241,9 +4237,8 @@ static void SpideyApplyLogicalRenderResolution(
 	SpideyApplyFrontendTextScale(
 		reason ? reason : "logical_resolution");
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -4405,9 +4400,8 @@ static void __cdecl SpideyCompatLoadCullBasis(
 
 	if (!gSpideyHorPlusCullLogged)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -4445,9 +4439,8 @@ static void SpideyInstallHorPlusCullCompat()
 			SpideyCompatLoadCullBasis,
 			"horplus_cull_basis");
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -4642,9 +4635,8 @@ static void __cdecl SpideyCompatSetDisplayOptions(
 	SpideySyncFrontendMouseBounds(
 		"display_options_transition");
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -4686,9 +4678,8 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 
 	if (!onApply)
 	{
-		FILE* ignored = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* ignored = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (ignored)
 		{
 			fprintf(
@@ -4788,9 +4779,8 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 	SpideyResetPendingDisplaySettings(
 		"apply_complete");
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -4855,9 +4845,8 @@ static void SpideyInstallDisplayOptionsCompat()
 		patched++;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (f)
 	{
@@ -4911,9 +4900,8 @@ static void SpideyLogRetailActionMap()
 	// +0x14 keyboard mapping, +0x18 controller mapping.
 	const unsigned char* base =
 		(const unsigned char*)0x00568690;
-	FILE* f = fopen(
-		"spidey-decomp-input.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 
 	if (!f)
 		return;
@@ -4986,9 +4974,8 @@ static int SpideyProbeInput11Bridge()
 				"spidey_input11.dll");
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-input.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 
 	if (!gSpideyInput11Module)
 	{
@@ -5122,9 +5109,8 @@ int SpideyInput11PassivePoll(
 	if (transition ||
 		periodic)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-input.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 		if (f)
 		{
 			fprintf(
@@ -5243,9 +5229,8 @@ static void SpideyCameraPassivePoll(
 	{
 		if (gSpideyCameraTelemetryLastCamera)
 		{
-			FILE* f = fopen(
-				"spidey-decomp-camera.log",
-				"a");
+			FILE* f = SpideyOpenConsolidatedLog(
+		"CAMERA");
 			if (f)
 			{
 				fprintf(
@@ -5326,9 +5311,8 @@ static void SpideyCameraPassivePoll(
 	{
 		if (camera != gSpideyCameraTelemetryLastCamera)
 		{
-			FILE* f = fopen(
-				"spidey-decomp-camera.log",
-				"a");
+			FILE* f = SpideyOpenConsolidatedLog(
+		"CAMERA");
 			if (f)
 			{
 				fprintf(
@@ -5376,9 +5360,8 @@ static void SpideyCameraPassivePoll(
 		intentSample ||
 		periodic)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-camera.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"CAMERA");
 		if (f)
 		{
 			fprintf(
@@ -5608,9 +5591,8 @@ static void SpideyApplyRendererWindowMode(
 		}
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -5705,9 +5687,8 @@ static void SpideyReleaseRendererExclusiveForCompatRebuild(
 		}
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -5735,9 +5716,8 @@ static int SpideyProbeRenderer11Bridge()
 				"spidey_renderer11.dll");
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (!gSpideyRenderer11Module)
 	{
@@ -5975,9 +5955,8 @@ static int SpideyEnsureRenderer11Presentation(
 				width,
 				height);
 
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -6017,9 +5996,8 @@ static int SpideyEnsureRenderer11Presentation(
 				width,
 				height);
 
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -6099,9 +6077,8 @@ int SpideyRenderer11MirrorLegacyTexture(
 			return 0;
 		}
 
-		FILE* lazyLog = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* lazyLog = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (lazyLog)
 		{
 			fprintf(
@@ -6159,9 +6136,8 @@ int SpideyRenderer11MirrorLegacyTexture(
 		!desc.dwHeight ||
 		!desc.ddpfPixelFormat.dwRGBBitCount)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-texture.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"TEXTURE");
 		if (f)
 		{
 			fprintf(
@@ -6198,9 +6174,8 @@ int SpideyRenderer11MirrorLegacyTexture(
 
 	surface->Unlock(0);
 
-	FILE* f = fopen(
-		"spidey-decomp-texture.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"TEXTURE");
 	if (f)
 	{
 		fprintf(
@@ -6239,9 +6214,8 @@ int SpideyRenderer11AssociateLegacyTexture(
 			textureId,
 			(unsigned long)legacySurface);
 
-	FILE* f = fopen(
-		"spidey-decomp-texture.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"TEXTURE");
 	if (f)
 	{
 		fprintf(
@@ -6327,9 +6301,8 @@ long SpideyRenderer11MirrorTransientLegacyTexture(
 		if (SUCCEEDED(lockHr))
 			surface->Unlock(0);
 
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -6362,9 +6335,8 @@ long SpideyRenderer11MirrorTransientLegacyTexture(
 
 	surface->Unlock(0);
 
-	FILE* f = fopen(
-		"spidey-decomp-draw.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 	if (f)
 	{
 		fprintf(
@@ -6734,9 +6706,8 @@ static void SpideyInstall2DPolyProvenanceCompat()
 			SpideyCompatDXPOLYDraw2D,
 			"drawqpoly2d_provenance");
 
-	FILE* f = fopen(
-		"spidey-decomp-draw.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 	if (f)
 	{
 		fprintf(
@@ -6770,9 +6741,8 @@ static void SpideyLogTimingWindow(
 		return;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-timing.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"TIMING");
 	if (!f)
 		return;
 
@@ -6878,9 +6848,8 @@ static void SpideyInstallTimingTelemetry()
 			SpideyCompatLogicTiming,
 			"gameplay_logic_timing");
 
-	FILE* f = fopen(
-		"spidey-decomp-timing.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"TIMING");
 	if (f)
 	{
 		fprintf(
@@ -7962,9 +7931,8 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 	if (gSpideyRetailDrawSampleCount < 16 ||
 		unusual)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 
 		if (f)
 		{
@@ -8264,9 +8232,8 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 
 	if (shouldLog)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 
 		if (f)
 		{
@@ -8365,9 +8332,8 @@ static int SpideyPatchRetailD3D7VtableMethod(
 	if (!SpideyIsExecutablePointer(
 			current))
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -8390,9 +8356,8 @@ static int SpideyPatchRetailD3D7VtableMethod(
 			PAGE_EXECUTE_READWRITE,
 			&oldProtect))
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -8424,9 +8389,8 @@ static int SpideyPatchRetailD3D7VtableMethod(
 		&vtable[index],
 		sizeof(void*));
 
-	FILE* f = fopen(
-		"spidey-decomp-draw.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 	if (f)
 	{
 		fprintf(
@@ -8497,9 +8461,8 @@ static int SpideyInstallRetailD3D7SurfaceCompat()
 			current !=
 				(void*)gSpideyRetailD3D7SurfaceBltOriginal)
 		{
-			FILE* f = fopen(
-				"spidey-decomp-draw.log",
-				"a");
+			FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 			if (f)
 			{
 				fprintf(
@@ -8548,9 +8511,8 @@ static int SpideyInstallRetailD3D7SurfaceCompat()
 
 		++patched;
 
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -8610,9 +8572,8 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 
 	if (FAILED(capsHr))
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -8756,9 +8717,8 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 		!textureOk ||
 		!textureStateOk)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -8789,9 +8749,8 @@ static void SpideyInstallRetailD3D7DrawProbe(void)
 	SpideyInitializeRetailShadowState(
 		device);
 
-	FILE* f = fopen(
-		"spidey-decomp-draw.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 	if (f)
 	{
 		fprintf(
@@ -8865,9 +8824,8 @@ static void __cdecl SpideyCompatDXINITDirectX8(
 					width,
 					height);
 
-			FILE* f = fopen(
-				"spidey-decomp-compat.log",
-				"a");
+			FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 			if (f)
 			{
 				fprintf(
@@ -8954,9 +8912,8 @@ static void SpideyInstallWindowedDirectDrawCompat()
 		}
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 
 	if (matchingCalls != 1 ||
 		!matchedPush ||
@@ -9260,9 +9217,8 @@ static int SpideyCompatPresentSceneToWindow(
 	{
 		if (shouldLog)
 		{
-			FILE* f = fopen(
-				"spidey-decomp-present.log",
-				"a");
+			FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 			if (f)
 			{
 				fprintf(
@@ -9348,9 +9304,8 @@ static int SpideyCompatPresentSceneToWindow(
 			{
 				if (shouldLog)
 				{
-					FILE* f = fopen(
-						"spidey-decomp-present.log",
-						"a");
+					FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 					if (f)
 					{
 						fprintf(
@@ -9373,9 +9328,8 @@ static int SpideyCompatPresentSceneToWindow(
 			gSpideyRenderer11PixelsDisabled =
 				1;
 
-			FILE* compat = fopen(
-				"spidey-decomp-compat.log",
-				"a");
+			FILE* compat = SpideyOpenConsolidatedLog(
+		"COMPAT");
 			if (compat)
 			{
 				fprintf(
@@ -9391,9 +9345,8 @@ static int SpideyCompatPresentSceneToWindow(
 
 			if (shouldLog)
 			{
-				FILE* f = fopen(
-					"spidey-decomp-present.log",
-					"a");
+				FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 				if (f)
 				{
 					fprintf(
@@ -9421,9 +9374,8 @@ static int SpideyCompatPresentSceneToWindow(
 	{
 		if (shouldLog)
 		{
-			FILE* f = fopen(
-				"spidey-decomp-present.log",
-				"a");
+			FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 			if (f)
 			{
 				fprintf(
@@ -9455,9 +9407,8 @@ static int SpideyCompatPresentSceneToWindow(
 
 			if (shouldLog)
 			{
-				FILE* f = fopen(
-					"spidey-decomp-present.log",
-					"a");
+				FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 				if (f)
 				{
 					fprintf(
@@ -9475,9 +9426,8 @@ static int SpideyCompatPresentSceneToWindow(
 			return 2;
 		}
 
-		FILE* compat = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* compat = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (compat)
 		{
 			fprintf(
@@ -9658,9 +9608,8 @@ static int SpideyCompatPresentSceneToWindow(
 
 	if (shouldLog)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-present.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 		if (f)
 		{
@@ -9729,9 +9678,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		gSpideyShadowPreviewModeSynced =
 			1;
 
-		FILE* previewLog = fopen(
-			"spidey-decomp-present.log",
-			"a");
+		FILE* previewLog = SpideyOpenConsolidatedLog(
+		"PRESENT");
 		if (previewLog)
 		{
 			fprintf(
@@ -9838,9 +9786,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		retailMovieBlocksTakeover !=
 			lastMovieTakeoverBlock)
 	{
-		FILE* gateLog = fopen(
-			"spidey-decomp-present.log",
-			"a");
+		FILE* gateLog = SpideyOpenConsolidatedLog(
+		"PRESENT");
 		if (gateLog)
 		{
 			fprintf(
@@ -9873,9 +9820,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 		 (frame % 120) == 0) &&
 		!shadowFrameResult)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-draw.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"DRAW");
 		if (f)
 		{
 			fprintf(
@@ -9936,9 +9882,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 
 	if (shouldLog)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-present.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 		if (f)
 		{
@@ -10026,9 +9971,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 
 	if (shouldLog)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-present.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 		if (f)
 		{
 			fprintf(
@@ -10053,9 +9997,8 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 
 	if (shouldLog)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-present.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 		if (f)
 		{
@@ -10109,9 +10052,8 @@ static void SpideyReleaseRetailMovieSurface(
 	*slot =
 		0;
 
-	FILE* f = fopen(
-		"spidey-decomp-present.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 	if (f)
 	{
@@ -10171,9 +10113,8 @@ static void SpideyInstallMovieStopCompat()
 	int patched =
 		0;
 
-	FILE* f = fopen(
-		"spidey-decomp-present.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 	for (unsigned char* p = textStart;
 		 p + 5 <= textEnd;
@@ -10287,9 +10228,8 @@ static void SpideyInstallMovieFrameCompat()
 		++patched;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-present.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 	if (f)
 	{
 		fprintf(
@@ -10336,9 +10276,8 @@ static void SpideyInstallMoviePresentCompat()
 		}
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-present.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 	if (count != 1 || !match)
 	{
@@ -10388,9 +10327,8 @@ static void SpideyInstallPresentProbe()
 		0xE8, 0x4A, 0xFC, 0xFF, 0xFF
 	};
 
-	FILE* f = fopen(
-		"spidey-decomp-present.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"PRESENT");
 
 	if (memcmp(
 			site,
@@ -10467,9 +10405,8 @@ static void __cdecl SpideyCompatCleanup503AF0()
 
 	if (!object)
 	{
-		FILE* f = fopen(
-			"spidey-decomp-compat.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -10526,9 +10463,8 @@ static void SpideyInstallCleanup503AF0Compat()
 		patched++;
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-compat.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"COMPAT");
 	if (f)
 	{
 		fprintf(
@@ -10553,9 +10489,8 @@ static void SpideyLogRetailInput(
 		HRESULT mouseHr,
 		HRESULT controllerHr)
 {
-	FILE* f = fopen(
-		"spidey-decomp-input.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 	if (!f)
 		return;
 
@@ -10789,9 +10724,8 @@ static void SpideyInstallRetailInputCompat()
 			5);
 	}
 
-	FILE* f = fopen(
-		"spidey-decomp-input.log",
-		"a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"INPUT");
 	if (f)
 	{
 		fprintf(
@@ -10818,7 +10752,8 @@ static void SpideyAppendDxErrorWithCaller(
 		char* file,
 		i32 line)
 {
-	FILE* f = fopen("spidey-decomp-dxerror.log", "a");
+	FILE* f = SpideyOpenConsolidatedLog(
+		"DXERROR");
 	if (!f)
 		return;
 
@@ -11326,9 +11261,8 @@ void DoAssert(u8 cond, const char* str, ...)
 
 		puts(message);
 
-		FILE* f = fopen(
-			"spidey-decomp-runtime.log",
-			"a");
+		FILE* f = SpideyOpenConsolidatedLog(
+		"RUNTIME");
 
 		if (f)
 		{
