@@ -3507,8 +3507,8 @@ typedef void (__cdecl *SpideyRetailGetMousePositionFn)(
 static int SpideyGetFrontendMouseDomains(
 		int* pClientWidth,
 		int* pClientHeight,
-		int* pLogicalWidth,
-		int* pLogicalHeight)
+		int* pShellWidth,
+		int* pShellHeight)
 {
 	int clientWidth =
 		0;
@@ -3552,19 +3552,31 @@ static int SpideyGetFrontendMouseDomains(
 			(int)gSpideyLegacyPhysicalHeight;
 	}
 
-	int logicalWidth =
-		gSpideyModernLogicalWidth >= 64 ?
-			(int)gSpideyModernLogicalWidth :
+	// PCSHELL_CoordsPCtoDC divides PC mouse coordinates by the retail
+	// DirectX canvas (gDxResolutionX/Y). In this executable those live at
+	// the same width/height globals used by the D3D7 compatibility backing.
+	// Therefore GetMousePosition must return this *retail PC canvas* domain,
+	// not the modern DX11 logical canvas. Mapping to modern logical here and
+	// then letting PCSHELL convert again caused the upper-left "invisible
+	// box" (a second scale-down on both axes).
+	int shellWidth =
+		(int)*(DWORD*)0x006B78E4;
+	int shellHeight =
+		(int)*(DWORD*)0x006B78E8;
+
+	if (shellWidth < 64 ||
+		shellHeight < 64)
+	{
+		shellWidth =
 			clientWidth;
-	int logicalHeight =
-		gSpideyModernLogicalHeight >= 64 ?
-			(int)gSpideyModernLogicalHeight :
+		shellHeight =
 			clientHeight;
+	}
 
 	if (clientWidth < 64 ||
 		clientHeight < 64 ||
-		logicalWidth < 64 ||
-		logicalHeight < 64)
+		shellWidth < 64 ||
+		shellHeight < 64)
 	{
 		return 0;
 	}
@@ -3575,12 +3587,12 @@ static int SpideyGetFrontendMouseDomains(
 	if (pClientHeight)
 		*pClientHeight =
 			clientHeight;
-	if (pLogicalWidth)
-		*pLogicalWidth =
-			logicalWidth;
-	if (pLogicalHeight)
-		*pLogicalHeight =
-			logicalHeight;
+	if (pShellWidth)
+		*pShellWidth =
+			shellWidth;
+	if (pShellHeight)
+		*pShellHeight =
+			shellHeight;
 
 	return 1;
 }
@@ -3589,52 +3601,49 @@ static int SpideyGetFrontendMouseDomains(
 static void SpideyMapFrontendMouseToLogical(
 		i32 rawX,
 		i32 rawY,
-		i32* pLogicalX,
-		i32* pLogicalY)
+		i32* pShellX,
+		i32* pShellY)
 {
 	int clientWidth =
 		0;
 	int clientHeight =
 		0;
-	int logicalWidth =
+	int shellWidth =
 		0;
-	int logicalHeight =
+	int shellHeight =
 		0;
 
 	if (!SpideyGetFrontendMouseDomains(
 			&clientWidth,
 			&clientHeight,
-			&logicalWidth,
-			&logicalHeight))
+			&shellWidth,
+			&shellHeight))
 	{
-		if (pLogicalX)
-			*pLogicalX =
+		if (pShellX)
+			*pShellX =
 				rawX;
-		if (pLogicalY)
-			*pLogicalY =
+		if (pShellY)
+			*pShellY =
 				rawY;
 		return;
 	}
 
-	// gMouseX/Y are relative-motion virtual cursor coordinates, not an OS
-	// absolute cursor. Let them use the entire live client domain, then map
-	// that domain onto the logical frontend canvas. The visible shell cursor
-	// and all hit tests therefore share one transformation while no longer
-	// inheriting the smaller logical-height clamp.
-	if (pLogicalX)
+	// Raw relative mouse state spans the whole HWND client. Convert exactly
+	// once into the PC pixel canvas expected by PCSHELL_CoordsPCtoDC.
+	if (pShellX)
 	{
-		*pLogicalX =
+		*pShellX =
 			(i32)(
 				((long)rawX *
-				 (long)logicalWidth) /
+				 (long)shellWidth) /
 				(long)clientWidth);
 	}
-	if (pLogicalY)
+	if (pShellY)
 	{
-		*pLogicalY =
+		*pShellY =
 			(i32)(
 				((long)rawY *
-				 (long)logicalHeight) /
+				 (long)shellHeight) /
 				(long)clientHeight);
 	}
 }
@@ -3661,16 +3670,16 @@ static void SpideySyncFrontendMouseBounds(
 		0;
 	int clientHeight =
 		0;
-	int logicalWidth =
+	int shellWidth =
 		0;
-	int logicalHeight =
+	int shellHeight =
 		0;
 
 	if (!SpideyGetFrontendMouseDomains(
 			&clientWidth,
 			&clientHeight,
-			&logicalWidth,
-			&logicalHeight))
+			&shellWidth,
+			&shellHeight))
 	{
 		return;
 	}
@@ -3741,7 +3750,7 @@ static void SpideySyncFrontendMouseBounds(
 	{
 		fprintf(
 			f,
-			"retail_input event=frontend_bounds_sync reason=%s client=%dx%d bounds=0,0,%d,%d raw_position=%d,%d logical_position=%d,%d recentered=%d logical=%dx%d basis=client_to_logical\n",
+			"retail_input event=frontend_bounds_sync reason=%s client=%dx%d bounds=0,0,%d,%d raw_position=%d,%d shell_position=%d,%d recentered=%d shell_canvas=%dx%d modern_logical=%lux%lu basis=client_to_retail_pc_canvas\n",
 			reason ? reason : "unknown",
 			clientWidth,
 			clientHeight,
@@ -3752,20 +3761,16 @@ static void SpideySyncFrontendMouseBounds(
 			mappedX,
 			mappedY,
 			recentered,
-			logicalWidth,
-			logicalHeight);
+			shellWidth,
+			shellHeight,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight);
 		fclose(f);
 	}
 }
 
 static i32 SpideyMouseCanvasWidth()
 {
-	if (gSpideyShadowPreviewEnabled &&
-		gSpideyModernLogicalWidth >= 1)
-	{
-		return (i32)gSpideyModernLogicalWidth;
-	}
-
 	i32 width =
 		*(i32*)0x006B78E4;
 	if (width < 1)
@@ -3775,12 +3780,6 @@ static i32 SpideyMouseCanvasWidth()
 
 static i32 SpideyMouseCanvasHeight()
 {
-	if (gSpideyShadowPreviewEnabled &&
-		gSpideyModernLogicalHeight >= 1)
-	{
-		return (i32)gSpideyModernLogicalHeight;
-	}
-
 	i32 height =
 		*(i32*)0x006B78E8;
 	if (height < 1)
@@ -3907,7 +3906,7 @@ static void SpideyInstallMouseCoordinateCompat()
 	{
 		fprintf(
 			f,
-			"mouse_coordinate_compat position=1 mouse_over=%d hotspot=%d position_addr=0x0050A750 mouse_over_addr=0x0050A820 hotspot_addr=0x0050A770 canvas=%dx%d gameplay=%lux%lu basis=client_to_logical\n",
+			"mouse_coordinate_compat position=1 mouse_over=%d hotspot=%d position_addr=0x0050A750 mouse_over_addr=0x0050A820 hotspot_addr=0x0050A770 canvas=%dx%d gameplay=%lux%lu basis=client_to_retail_pc_canvas\n",
 			mouseOverPatched,
 			hotspotPatched,
 			SpideyMouseCanvasWidth(),
@@ -4754,6 +4753,18 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 		32,
 		option4,
 		option5);
+
+	if (liveFrontend)
+	{
+		gSpideyFrontendLegacyMode =
+			1;
+		SpideyRefreshModernLogicalResolution();
+		SpideyApplyLogicalRenderResolution(
+			1,
+			"display_apply_frontend_restore");
+		SpideySyncFrontendMouseBounds(
+			"display_apply_frontend_restore");
+	}
 
 	SpideyApplySelectedWindowStyle(
 		*(HWND*)0x006B58D0,
