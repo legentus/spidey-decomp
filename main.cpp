@@ -4981,6 +4981,10 @@ typedef int (__cdecl *SpideyRenderer11InitializeFn)(
 typedef int (__cdecl *SpideyRenderer11ResizeFn)(
 		unsigned long,
 		unsigned long);
+typedef int (__cdecl *SpideyRenderer11SetFullscreenStateFn)(
+		int,
+		unsigned long,
+		unsigned long);
 typedef int (__cdecl *SpideyRenderer11PresentPixelsFn)(
 		const void*,
 		unsigned long,
@@ -5047,6 +5051,7 @@ typedef void (__cdecl *SpideyRenderer11ShutdownFn)(void);
 
 static SpideyRenderer11InitializeFn gSpideyRenderer11Initialize = 0;
 static SpideyRenderer11ResizeFn gSpideyRenderer11Resize = 0;
+static SpideyRenderer11SetFullscreenStateFn gSpideyRenderer11SetFullscreenState = 0;
 static SpideyRenderer11PresentPixelsFn gSpideyRenderer11PresentPixels = 0;
 static SpideyRenderer11PresentHdcFn gSpideyRenderer11PresentHdc = 0;
 static SpideyRenderer11UpdateTextureFn gSpideyRenderer11UpdateTexture = 0;
@@ -5069,6 +5074,75 @@ static int gSpideyRenderer11PixelsDisabled = 0;
 static HWND gSpideyRenderer11Window = 0;
 static unsigned long gSpideyRenderer11Width = 0;
 static unsigned long gSpideyRenderer11Height = 0;
+static int gSpideyRenderer11AppliedWindowMode = -1;
+static unsigned long gSpideyRenderer11AppliedModeWidth = 0;
+static unsigned long gSpideyRenderer11AppliedModeHeight = 0;
+
+static void SpideyApplyRendererWindowMode(
+		const char* reason)
+{
+	if (!gSpideyRenderer11Initialized ||
+		!gSpideyRenderer11SetFullscreenState)
+	{
+		return;
+	}
+
+	const int exclusive =
+		gSpideyWindowMode ==
+			SPIDEY_WINDOW_FULLSCREEN_EXCLUSIVE ?
+			1 :
+			0;
+
+	const unsigned long width =
+		gSpideySelectedOutputWidth;
+	const unsigned long height =
+		gSpideySelectedOutputHeight;
+
+	if (gSpideyRenderer11AppliedWindowMode ==
+			gSpideyWindowMode &&
+		gSpideyRenderer11AppliedModeWidth ==
+			width &&
+		gSpideyRenderer11AppliedModeHeight ==
+			height)
+	{
+		return;
+	}
+
+	const int result =
+		gSpideyRenderer11SetFullscreenState(
+			exclusive,
+			width,
+			height);
+
+	if (result)
+	{
+		gSpideyRenderer11AppliedWindowMode =
+			gSpideyWindowMode;
+		gSpideyRenderer11AppliedModeWidth =
+			width;
+		gSpideyRenderer11AppliedModeHeight =
+			height;
+	}
+
+	FILE* f = fopen(
+		"spidey-decomp-compat.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"renderer11_window_mode reason=%s mode=%d label=%s exclusive=%d selected=%lux%lu result=%d\n",
+			reason ? reason : "unknown",
+			gSpideyWindowMode,
+			gSpideyWindowModeLabels[
+				gSpideyWindowMode],
+			exclusive,
+			width,
+			height,
+			result);
+		fclose(f);
+	}
+}
 
 static int SpideyProbeRenderer11Bridge()
 {
@@ -5120,6 +5194,11 @@ static int SpideyProbeRenderer11Bridge()
 		(SpideyRenderer11ResizeFn)GetProcAddress(
 			gSpideyRenderer11Module,
 			"SpideyRenderer11_Resize");
+
+	gSpideyRenderer11SetFullscreenState =
+		(SpideyRenderer11SetFullscreenStateFn)GetProcAddress(
+			gSpideyRenderer11Module,
+			"SpideyRenderer11_SetFullscreenState");
 
 	gSpideyRenderer11PresentPixels =
 		(SpideyRenderer11PresentPixelsFn)GetProcAddress(
@@ -5201,6 +5280,7 @@ static int SpideyProbeRenderer11Bridge()
 		!probe ||
 		!gSpideyRenderer11Initialize ||
 		!gSpideyRenderer11Resize ||
+		!gSpideyRenderer11SetFullscreenState ||
 		!gSpideyRenderer11PresentPixels ||
 		!gSpideyRenderer11PresentHdc ||
 		!gSpideyRenderer11UpdateTexture ||
@@ -5221,12 +5301,13 @@ static int SpideyProbeRenderer11Bridge()
 		{
 			fprintf(
 				f,
-				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX resolve_tex=0x%08lX transient_tex=0x%08lX shadow_clear=0x%08lX shadow_submit=0x%08lX shadow_end=0x%08lX shadow_continuous=0x%08lX present_shadow=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
+				"renderer11_bridge exports_missing abi=0x%08lX name=0x%08lX probe=0x%08lX init=0x%08lX resize=0x%08lX fullscreen=0x%08lX present_pixels=0x%08lX present_hdc=0x%08lX update_tex=0x%08lX associate_tex=0x%08lX resolve_tex=0x%08lX transient_tex=0x%08lX shadow_clear=0x%08lX shadow_submit=0x%08lX shadow_end=0x%08lX shadow_continuous=0x%08lX present_shadow=0x%08lX release_tex=0x%08lX release_all=0x%08lX tex_count=0x%08lX shutdown=0x%08lX\n",
 				(unsigned long)getAbi,
 				(unsigned long)getName,
 				(unsigned long)probe,
 				(unsigned long)gSpideyRenderer11Initialize,
 				(unsigned long)gSpideyRenderer11Resize,
+				(unsigned long)gSpideyRenderer11SetFullscreenState,
 				(unsigned long)gSpideyRenderer11PresentPixels,
 				(unsigned long)gSpideyRenderer11PresentHdc,
 				(unsigned long)gSpideyRenderer11UpdateTexture,
@@ -5255,14 +5336,14 @@ static int SpideyProbeRenderer11Bridge()
 		probe();
 
 	gSpideyRenderer11BridgeReady =
-		abi == 7 &&
+		abi == 8 &&
 		probeResult != 0;
 
 	if (f)
 	{
 		fprintf(
 			f,
-			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=7 backend=%s probe=%d phase2c2_exports=%d\n",
+			"renderer11_bridge loaded module=0x%08lX abi=%lu expected=8 backend=%s probe=%d phase2c2_exports=%d\n",
 			(unsigned long)gSpideyRenderer11Module,
 			abi,
 			name ? name : "unknown",
@@ -5299,6 +5380,9 @@ static int SpideyEnsureRenderer11Presentation(
 		gSpideyRenderer11Window = 0;
 		gSpideyRenderer11Width = 0;
 		gSpideyRenderer11Height = 0;
+		gSpideyRenderer11AppliedWindowMode = -1;
+		gSpideyRenderer11AppliedModeWidth = 0;
+		gSpideyRenderer11AppliedModeHeight = 0;
 	}
 
 	if (!gSpideyRenderer11Initialized)
@@ -5334,6 +5418,12 @@ static int SpideyEnsureRenderer11Presentation(
 		gSpideyRenderer11Window = hwnd;
 		gSpideyRenderer11Width = width;
 		gSpideyRenderer11Height = height;
+		gSpideyRenderer11AppliedWindowMode = -1;
+		SpideyApplySelectedWindowStyle(
+			hwnd,
+			"renderer11_initialize");
+		SpideyApplyRendererWindowMode(
+			"renderer11_initialize");
 		return 1;
 	}
 
@@ -5371,6 +5461,10 @@ static int SpideyEnsureRenderer11Presentation(
 
 		gSpideyRenderer11Width = width;
 		gSpideyRenderer11Height = height;
+		gSpideyRenderer11AppliedModeWidth = 0;
+		gSpideyRenderer11AppliedModeHeight = 0;
+		SpideyApplyRendererWindowMode(
+			"renderer11_resize");
 	}
 
 	return 1;
