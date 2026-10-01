@@ -7267,3 +7267,240 @@ In one run:
 8. Exit normally so the single consolidated log is complete.
 
 Put only the resulting `spidey-decomp.log` in the Drive `Logs` folder. The assistant should pull it directly and correlate it with screenshots rather than asking for a log upload.
+
+
+## eb8ca93 runtime failure + corrective pause/HUD/Alt+Tab frontier (2026-10-01)
+
+### Runtime-tested build and evidence
+
+User tested:
+
+- session revision `eb8ca938760616236453e7258f1d6d2f09e94eaa`;
+- selected output `2560x1440`;
+- Gameplay UI Scale default `125%`;
+- Menu/Text Scale default `100%`.
+
+The matching uploaded screenshot is:
+
+- `Screenshot 2026-10-01 162717.png`
+
+The matching uploaded consolidated log is the 2026-10-01 16:26 session.
+
+Observed failures:
+
+1. The synthetic `Display Options` row appeared in the in-level pause menu but activating/clicking it did nothing.
+2. The colored gameplay gauge bars were still detached from their small holders.
+3. Alt+Tab caused the game to become effectively non-responsive and it later exited/crashed.
+
+### Important correction: the first health-fill RE target was not the live HUD path
+
+The `a8b3394` hooks all installed successfully:
+
+- three direct QPoly calls inside `Panel_DisplayHealthBar @ 0x00464270`;
+- two direct flat-shaded calls inside that function.
+
+However, the full matching runtime log contains **zero** `gameplay_ui_fill_scale` samples from those wrappers.
+
+At the same time, the holder scaling did execute:
+
+- `gameplay_ui_scale source=anim_frame ... density=0.312500,0.416667 user_percent=125 ...`.
+
+Therefore the screenshot's giant live colored gauges are **not** produced by the five `Panel_DisplayHealthBar` call sites targeted in `a8b3394`. Keep those hooks harmlessly scoped, but do not treat them as the solution to the visible player HUD.
+
+This supersedes the earlier inference that the five `Panel_DisplayHealthBar` calls directly explained the screenshot.
+
+### Retail RE: actual live composite panel gauge draws
+
+Further disassembly of the uploaded retail EXE grounded the real live path.
+
+The broad composite panel routine beginning at:
+
+- `0x004658C0`
+
+contains the player HUD/gauge drawing and only calls `Panel_DisplayHealthBar @ 0x00464270` near the end.
+
+Direct QPoly calls in the broad panel routine:
+
+- `0x00465D08 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x00465F46 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x00466176 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x004663AA -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x004665D1 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x004667F6 -> PCGfx_DrawQPoly2D @ 0x00507910`
+
+Direct authored-space gouraud gauge calls:
+
+- `0x0046687B -> DCDrawGouraudPoly_0 @ 0x00462FB0`
+- `0x00466931 -> DCDrawGouraudPoly_0 @ 0x00462FB0`
+- `0x004669C7 -> DCDrawGouraudPoly_0 @ 0x00462FB0`
+
+Direct authored-space flat gauge calls:
+
+- `0x004668D1 -> DCPanel_DrawFlatShadedPoly @ 0x00462D60`
+- `0x00466A1B -> DCPanel_DrawFlatShadedPoly @ 0x00462D60`
+- `0x00466A65 -> DCPanel_DrawFlatShadedPoly @ 0x00462D60`
+
+The surrounding machine code uses small 512x240-style authored positions/sizes for these gouraud/flat calls, consistent with the visible player gauges.
+
+### Pause-menu failure: confirm was being sampled at the wrong layer
+
+The old pause compatibility patch replaced:
+
+- `0x004415F8 -> CMenu_Update @ 0x00440600`.
+
+The runtime log showed the install succeeded, but there were **zero**:
+
+- `pause_display_options phase=open`;
+- `pause_display_options entry_added`;
+- `display_pending_ui_scale`
+
+events during the failed in-level activation.
+
+Retail disassembly shows why. The actual pause confirm dispatch occurs *after* `CMenu_Update`:
+
+- `0x004415F8 call CMenu_Update`
+- pushes `1, 1, 0x100`
+- `0x00441606 call PCSHELL_CheckTriggers @ 0x0050C180`
+
+Retail then dispatches the selected pause row by comparing the entry string against its known choices such as Continue / Restart level / Quit.
+
+The synthetic `Display Options` row has no retail branch. Sampling `PCSHELL_CheckTriggers` from inside the CMenu update wrapper was therefore the wrong timing and could miss/consume the edge.
+
+### Corrective implementation
+
+Commit:
+
+- `430461dae00a22d5aef9ada42591ff997fc15827` — **fix: repair pause options HUD gauges and alt-tab**
+
+#### Pause Display Options
+
+The existing row-insertion wrapper remains at:
+
+- `0x004415F8 -> CMenu_Update`
+
+and a new narrow confirm hook is installed at:
+
+- `0x00441606 -> PCSHELL_CheckTriggers @ 0x0050C180`.
+
+Behavior:
+
+- call the real retail trigger function first;
+- if the current row is not synthetic Display Options, preserve the original result exactly;
+- if the current row *is* Display Options and confirm fires:
+  - consume the retail result so its unknown-row dispatcher does nothing;
+  - set a deferred-open flag;
+  - on the next pause update, open `PCSHELL_DoDisplayOptions @ 0x0050D9B0` outside the trigger call stack.
+
+Expected telemetry:
+
+- `display_menu_patch name=pause_display_confirm installed=1 address=0x00441606 ...`
+- `display_menu_mod ... pause_access=1 pause_confirm=1 ...`
+- `pause_display_options phase=confirm_intercept ...`
+- `pause_display_options phase=open ...`
+- `pause_display_options phase=close ...`
+
+#### Live player-gauge scaling
+
+The broad panel QPoly sites listed above are patched to the existing narrow QPoly HUD wrapper.
+
+A new authored-space gouraud wrapper was added for `DCDrawGouraudPoly_0 @ 0x00462FB0`, using the same:
+
+- committed Gameplay UI Scale;
+- X/Y density;
+- left/center/right and top/center/bottom anchor policy
+
+as the panel holders.
+
+The three broad-panel flat sites use the existing authored-space flat wrapper.
+
+New install telemetry:
+
+- `panel_qpoly=6`
+- `panel_gouraud=3`
+- `panel_flat=3`
+
+Expected runtime samples now include:
+
+- `gameplay_ui_fill_scale source=qpoly ...`
+- `gameplay_ui_fill_scale source=gouraud ...`
+- `gameplay_ui_fill_scale source=flat ...`
+
+Do not call the bar/holder issue fixed until those wrappers execute and a screenshot confirms alignment.
+
+### Alt+Tab evidence and corrective policy
+
+The failed run does **not** show an immediate focus-loss device crash.
+
+At the focus edge:
+
+- DirectInput keyboard/mouse/controller are successfully unacquired;
+- the game remains in its render/timing loop for many more seconds;
+- there is no matching foreground reacquire before termination;
+- the session eventually ends with exit code `-805306369` / unsigned `0xCFFFFFFF`;
+- no explicit crash or DX-error diagnostic identifies a faulting call.
+
+This matches the user's description that the game appears to stop responding after Alt+Tab rather than failing instantly at unacquire.
+
+The previous foreground-sync path returned immediately on every frame while backgrounded and did not service the game window's messages.
+
+`430461d` adds a background-only message pump:
+
+- up to 64 window-targeted `PeekMessageA(... PM_REMOVE)` messages per input poll;
+- `TranslateMessage` + `DispatchMessageA`;
+- only for the game's HWND;
+- therefore thread-level `WM_QUIT` is not intentionally consumed.
+
+Expected telemetry when messages are processed:
+
+- `[INPUT] background_message_pump calls=... pumped=... total_messages=...`
+
+This is a grounded first fix for the non-responsive window symptom, but it is not yet runtime validated. If the process still exits with `0xCFFFFFFF`, the next step is to add focused WndProc/background-state termination telemetry rather than assuming a renderer/device-loss fault.
+
+### Static validation of 430461d
+
+After commit:
+
+- `main.cpp` lexical state ends in normal code;
+- braces, parentheses, and brackets balance;
+- new helpers carry `// @Ok`;
+- Display menu install format/argument counts were audited;
+- gameplay HUD install format/argument counts were audited;
+- corrective changes are limited to `main.cpp`.
+
+No GitHub Actions run is available for connector-written commits, so this remains a runtime-test frontier.
+
+### Mandatory next runtime test
+
+Run:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+At 2560x1440, test these in order:
+
+1. **Boot/main-menu regression guard**
+   - game reaches menu normally.
+2. **Gameplay HUD**
+   - verify horizontal and vertical colored bars are now inside/aligned with their holders;
+   - take one screenshot.
+3. **Pause -> Display Options**
+   - select/click Display Options;
+   - verify the Display menu actually opens;
+   - verify Gameplay UI Scale and Menu/Text Scale rows exist.
+4. **Live Apply**
+   - change Gameplay UI Scale, press Apply, return to gameplay;
+   - confirm HUD changes without restart/reload;
+   - change Menu/Text Scale and confirm the same live behavior.
+5. **Alt+Tab**
+   - while in a level, Alt+Tab out for several seconds;
+   - return to the game;
+   - verify the window responds and input reacquires.
+6. Exit normally if possible.
+
+Provide screenshots if anything is still visually wrong. Use the single consolidated `spidey-decomp.log`; the assistant should inspect it for:
+
+- `pause_confirm=1`;
+- `phase=confirm_intercept/open/close`;
+- `panel_qpoly=6 panel_gouraud=3 panel_flat=3`;
+- live `gameplay_ui_fill_scale` samples;
+- `background_message_pump`;
+- a post-Alt+Tab `foreground_acquire`.
