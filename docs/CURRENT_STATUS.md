@@ -5912,3 +5912,81 @@ A runtime pass is now higher-value than more static guessing because it will pro
 5. whether the already-committed System Default/manual audio output work behaves correctly.
 
 Do not use F9. F10 reference switching is unnecessary for this pass.
+
+
+## Audio-menu crash/layout regression — runtime-grounded fix — 2026-10-01
+
+User runtime report from revision `4431517a65548f0dcf085850a4e1ebdf865effe9`:
+- sixth Audio-menu output selector was partially/off-screen;
+- after exercising output selection, changing Stereo -> Mono -> Stereo appeared to crash.
+
+Uploaded runtime evidence:
+- device enumeration and every manual device-create/restart logged success;
+- the crash itself is `0xC0000005` inside `binkw32_.DLL + 0x849A`, reading address `0x00000099`;
+- the session did not reach gameplay timing; timing data in this run is frontend-only.
+
+### Root cause found for unsafe live device switching
+
+The existing implementation changed output devices by:
+1. retail DirectSound shutdown;
+2. creating a new selected `IDirectSound8`;
+3. writing the new pointer to `G_PDS @ 0x006B7920`;
+4. running `DXSOUND_Init` and respooling the menu SFX bank.
+
+Static source RE of `PCMovie.cpp` proves Bink audio is initialized differently:
+- `PCMOVIE_Init` calls `BinkSetSoundSystem(BinkOpenDirectSound, G_PDS)`;
+- then sets `G_PC_MOVIE_INITED @ 0x00AC0BA0`;
+- future `PCMOVIE_Init` calls do not rebind Bink while that flag is set.
+
+Therefore replacing `G_PDS` live can leave Bink holding the old DirectSound object. A later Bink/audio operation can then touch stale state. This matches the observed fault module much better than treating the stereo/mono retail handler itself as the primary cause.
+
+### Fix commit
+
+`6bb4d8a44542ca27b491a9688e8a56cd8027ff90` — `audio: defer device apply and stabilize six-row menu`
+
+Behavior now:
+- Audio Output left/right changes the persisted selected device immediately;
+- it updates the visible label immediately;
+- it **does not** tear down/recreate DirectSound while the Audio menu/Bink subsystem is live;
+- selected device is applied on the next normal audio initialization / next game launch through the already-installed `DirectSoundCreate8` selection hook.
+
+This intentionally prioritizes Bink safety over unsafe live device swapping until a fully grounded Bink rebind/reopen sequence is implemented.
+
+### Six-row layout fix
+
+Retail Audio menu constructor is:
+- x = 270
+- y = 90
+- justification = 2
+- hi/low scale = 256
+- line separation = 20
+
+Retail authored five rows. The added sixth row therefore extended one line lower.
+
+The add-entry wrapper now:
+- appends the Output row;
+- shifts the full menu upward by one line separation (`mY -= mLineSep`) once six rows exist;
+- compacts long device names to a 20-character middle-ellipsis form;
+- strips common `Speakers (...)` / `Virtual Speakers (...)` wrappers before compacting.
+
+This keeps useful distinguishing suffixes such as Game/Chat while preventing long Windows endpoint names from forcing the row out of the authored menu footprint.
+
+### Stereo/mono instrumentation
+
+Retail Stereo/Mono path is now grounded:
+- `Shell_SFXMusic @ 0x004977D0`
+- stereo case call `0x00497DD5 -> DCSetBootROMSoundMode @ 0x00472AA0`
+- `DCSetBootROMSoundMode` ultimately calls `syCfgSetSoundMode`.
+
+The exact call is wrapped observation-only and logs before/after:
+- requested stereo state;
+- retail boot sound-mode byte `0x0061919D`;
+- runtime `G_PDS`;
+- Bink initialized flag `0x00AC0BA0`;
+- active Bink handle `0x00AC0BA4`.
+
+If Stereo/Mono still crashes without any live DirectSound replacement, the next log will isolate that as a separate retail/Bink interaction.
+
+### Timing note from this crashed run
+
+The timing log contains only `frontend=1` samples before the crash. It confirms the menu commonly runs near 30 Hz, with a brief ~86-88 Hz transitional period after the display/frontend reconfiguration, but provides no `timing_logic` gameplay data. Do not draw conclusions about gameplay simulation speed from this run.
