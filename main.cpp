@@ -2218,6 +2218,314 @@ static int SpideyPatchDirectCall(
 	return 1;
 }
 
+static char gSpideyAudioOutputMenuLabel[160];
+
+typedef void (__cdecl *SpideyRetailShutdownDirectSoundFn)(void);
+typedef void (__cdecl *SpideyRetailDxSoundInitFn)(void);
+typedef void (__cdecl *SpideyRetailSpoolMenuSfxFn)(const char*);
+typedef void (__fastcall *SpideyRetailMenuUpdateFn)(
+		CMenu*,
+		void*);
+typedef u8 (__cdecl *SpideyRetailShellCheckTriggersFn)(
+		u32,
+		i32,
+		i32);
+
+static void SpideyUpdateAudioOutputMenuLabel()
+{
+	const SpideyAudioDeviceInfo* selected =
+		SpideyGetSelectedAudioDevice();
+	const char* name =
+		selected && selected->name[0] ?
+			selected->name :
+			"(System Default)";
+
+	sprintf(
+		gSpideyAudioOutputMenuLabel,
+		"Output: %.42s",
+		name);
+}
+
+static int SpideyCreateSelectedDirectSound(
+		LPDIRECTSOUND8* outDirectSound)
+{
+	if (!outDirectSound)
+		return 0;
+
+	*outDirectSound =
+		0;
+
+	LPDIRECTSOUND8 directSound =
+		0;
+	HRESULT hr =
+		SpideyCompatDirectSoundCreate8(
+			0,
+			&directSound,
+			0);
+
+	if (FAILED(hr) ||
+		!directSound)
+	{
+		return 0;
+	}
+
+	HWND hwnd =
+		*(HWND*)0x006B58D0;
+	hr =
+		directSound->SetCooperativeLevel(
+			hwnd,
+			DSSCL_EXCLUSIVE);
+
+	if (FAILED(hr))
+	{
+		directSound->Release();
+		return 0;
+	}
+
+	DSCAPS* caps =
+		(DSCAPS*)0x006B5870;
+	memset(
+		caps,
+		0,
+		sizeof(*caps));
+	caps->dwSize =
+		sizeof(*caps);
+
+	hr =
+		directSound->GetCaps(
+			caps);
+	if (FAILED(hr))
+	{
+		directSound->Release();
+		memset(
+			caps,
+			0,
+			sizeof(*caps));
+		return 0;
+	}
+
+	*outDirectSound =
+		directSound;
+	return 1;
+}
+
+static int SpideyRestartDirectSoundForShell(
+		int selectedIndex,
+		const char* reason)
+{
+	if (selectedIndex < 0 ||
+		selectedIndex >=
+			gSpideyAudioDeviceCount)
+	{
+		selectedIndex =
+			0;
+	}
+
+	gSpideySelectedAudioDevice =
+		selectedIndex;
+
+	LPDIRECTSOUND8* directSoundSlot =
+		(LPDIRECTSOUND8*)0x006B7920;
+
+	// Retail shutdown releases the primary buffer, every loaded sample
+	// buffer and the DirectSound object. Only use this from the shell Audio
+	// screen, then re-spool the menu sound bank after reinitialization.
+	if (*directSoundSlot)
+	{
+		SpideyRetailShutdownDirectSoundFn shutdownSound =
+			(SpideyRetailShutdownDirectSoundFn)0x005000F0;
+		shutdownSound();
+	}
+
+	LPDIRECTSOUND8 directSound =
+		0;
+	int created =
+		SpideyCreateSelectedDirectSound(
+			&directSound);
+	int fellBack =
+		0;
+
+	if (!created &&
+		gSpideySelectedAudioDevice != 0)
+	{
+		gSpideySelectedAudioDevice =
+			0;
+		fellBack =
+			1;
+		created =
+			SpideyCreateSelectedDirectSound(
+				&directSound);
+	}
+
+	if (created &&
+		directSound)
+	{
+		*directSoundSlot =
+			directSound;
+
+		SpideyRetailDxSoundInitFn soundInit =
+			(SpideyRetailDxSoundInitFn)0x005039F0;
+		SpideyRetailSpoolMenuSfxFn spoolMenu =
+			(SpideyRetailSpoolMenuSfxFn)0x004719B0;
+
+		soundInit();
+		spoolMenu(
+			"menu");
+	}
+
+	SpideySaveAudioSettings();
+	SpideyUpdateAudioOutputMenuLabel();
+
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		const SpideyAudioDeviceInfo* selected =
+			SpideyGetSelectedAudioDevice();
+		fprintf(
+			f,
+			"audio_restart reason=%s requested_index=%d selected_index=%d name=%s created=%d fallback_default=%d shell_only=1\n",
+			reason ? reason : "unknown",
+			selectedIndex,
+			gSpideySelectedAudioDevice,
+			selected ? selected->name : "(System Default)",
+			created,
+			fellBack);
+		fclose(f);
+	}
+
+	return created;
+}
+
+static void __fastcall SpideyAudioAddOutputDevice(
+		CMenu* menu,
+		void*,
+		const char* fifthLabel)
+{
+	SpideyRetailMenuAddEntryFn retailAdd =
+		(SpideyRetailMenuAddEntryFn)0x0043FFF0;
+
+	// Refresh on every Audio-menu open so devices connected since launch are
+	// visible. Re-resolve the persisted GUID against the new enumeration.
+	SpideyRefreshAudioDevices();
+	gSpideyAudioSettingsLoaded =
+		0;
+	SpideyLoadAudioSettings();
+	SpideyUpdateAudioOutputMenuLabel();
+
+	retailAdd(
+		menu,
+		0,
+		fifthLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyAudioOutputMenuLabel);
+}
+
+static void __fastcall SpideyAudioMenuUpdate(
+		CMenu* menu,
+		void*)
+{
+	SpideyRetailMenuUpdateFn retailUpdate =
+		(SpideyRetailMenuUpdateFn)0x00440600;
+	retailUpdate(
+		menu,
+		0);
+
+	if (!menu ||
+		menu->mLine != 5 ||
+		gSpideyAudioDeviceCount < 1)
+	{
+		return;
+	}
+
+	SpideyRetailShellCheckTriggersFn checkTriggers =
+		(SpideyRetailShellCheckTriggersFn)0x0050C180;
+
+	int delta =
+		0;
+
+	// These are the exact left/right trigger masks used by the retail
+	// Shell_SFXMusic loop for its existing sliders.
+	if (checkTriggers(
+			0x00008008,
+			0,
+			0))
+	{
+		delta =
+			1;
+	}
+	else if (checkTriggers(
+			0x00004004,
+			0,
+			0))
+	{
+		delta =
+			-1;
+	}
+
+	if (!delta)
+		return;
+
+	int next =
+		gSpideySelectedAudioDevice +
+		delta;
+
+	if (next < 0)
+		next =
+			gSpideyAudioDeviceCount - 1;
+	if (next >=
+		gSpideyAudioDeviceCount)
+	{
+		next =
+			0;
+	}
+
+	if (next ==
+		gSpideySelectedAudioDevice)
+	{
+		return;
+	}
+
+	SpideyRestartDirectSoundForShell(
+		next,
+		delta > 0 ?
+			"audio_menu_next" :
+			"audio_menu_prev");
+}
+
+static void SpideyInstallAudioMenuCompat()
+{
+	const int addEntryInstalled =
+		SpideyPatchDirectCall(
+			0x0049788B,
+			0x0043FFF0,
+			(void*)&SpideyAudioAddOutputDevice,
+			"audio_output_entry");
+
+	const int updateInstalled =
+		SpideyPatchDirectCall(
+			0x00497B57,
+			0x00440600,
+			(void*)&SpideyAudioMenuUpdate,
+			"audio_output_update");
+
+	FILE* f = fopen(
+		"spidey-decomp-audio.log",
+		"a");
+	if (f)
+	{
+		fprintf(
+			f,
+			"audio_menu_mod retail=0x004977D0 rows=6 output_row=5 add_entry=%d update=%d controls=retail_left_right live_restart=shell_only\n",
+			addEntryInstalled,
+			updateInstalled);
+		fclose(f);
+	}
+}
+
 static void SpideyInstallDisplayAspectCompat()
 {
 	SpideyLoadModernVideoSettings();
@@ -8086,6 +8394,7 @@ void game_patches(void)
 #ifdef _WIN32
 	SpideyInstallWindowedDirectDrawCompat();
 	SpideyInstallAudioDeviceCompat();
+	SpideyInstallAudioMenuCompat();
 	SpideyInstallModernModeReinitCompat();
 	// Claim the Display Options menu's Enter/Apply call before the generic
 	// SetDisplayOptions scan rewrites the remaining retail call sites.
