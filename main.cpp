@@ -1207,6 +1207,7 @@ static char gSpideyMenuTextScaleMenuLabel[64] =
 static char gSpideyPauseDisplayOptionsLabel[] =
 	"Display Options";
 static int gSpideyInLevelDisplayMenuActive = 0;
+static int gSpideyPauseOpenDisplayPending = 0;
 
 static const char* const gSpideyAspectLabels[] =
 {
@@ -2789,6 +2790,46 @@ static void __fastcall SpideyDisplayMenuUpdate(
 }
 
 // @Ok
+static void SpideyOpenDisplayOptionsFromPause()
+{
+	typedef void (__cdecl *DisplayOptionsFn)(void);
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_display_options phase=open gameplay_ui=%d text=%d\n",
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent);
+		fclose(f);
+	}
+
+	gSpideyInLevelDisplayMenuActive =
+		1;
+	DisplayOptionsFn displayOptions =
+		(DisplayOptionsFn)0x0050D9B0;
+	displayOptions();
+	gSpideyInLevelDisplayMenuActive =
+		0;
+
+	f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_display_options phase=close gameplay_ui=%d text=%d\n",
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent);
+		fclose(f);
+	}
+}
+
+// @Ok
 static void __fastcall SpideyPauseMenuUpdate(
 		CMenu* menu,
 		void*)
@@ -2796,11 +2837,13 @@ static void __fastcall SpideyPauseMenuUpdate(
 	typedef void (__fastcall *RetailUpdateFn)(
 			CMenu*,
 			void*);
-	typedef u8 (__cdecl *CheckTriggersFn)(
-			u32,
-			i32,
-			i32);
-	typedef void (__cdecl *DisplayOptionsFn)(void);
+
+	if (gSpideyPauseOpenDisplayPending)
+	{
+		gSpideyPauseOpenDisplayPending =
+			0;
+		SpideyOpenDisplayOptionsFromPause();
+	}
 
 	if (menu)
 	{
@@ -2855,7 +2898,32 @@ static void __fastcall SpideyPauseMenuUpdate(
 	retailUpdate(
 		menu,
 		0);
+}
 
+// @Ok
+static u8 __cdecl SpideyPauseConfirmTrigger(
+		u32 mask,
+		i32 option2,
+		i32 option3)
+{
+	typedef u8 (__cdecl *RetailCheckTriggersFn)(
+			u32,
+			i32,
+			i32);
+
+	RetailCheckTriggersFn retail =
+		(RetailCheckTriggersFn)0x0050C180;
+	const u8 triggered =
+		retail(
+			mask,
+			option2,
+			option3);
+
+	if (!triggered)
+		return triggered;
+
+	CMenu* menu =
+		*(CMenu**)0x005FAED0;
 	if (!menu ||
 		menu->mLine >= menu->mNumLines ||
 		!menu->mEntry[menu->mLine].name ||
@@ -2863,18 +2931,11 @@ static void __fastcall SpideyPauseMenuUpdate(
 			menu->mEntry[menu->mLine].name,
 			gSpideyPauseDisplayOptionsLabel))
 	{
-		return;
+		return triggered;
 	}
 
-	CheckTriggersFn checkTriggers =
-		(CheckTriggersFn)0x0050C180;
-	if (!checkTriggers(
-			0x00000100,
-			1,
-			1))
-	{
-		return;
-	}
+	gSpideyPauseOpenDisplayPending =
+		1;
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -2883,32 +2944,16 @@ static void __fastcall SpideyPauseMenuUpdate(
 	{
 		fprintf(
 			f,
-			"pause_display_options phase=open gameplay_ui=%d text=%d\n",
-			gSpideyGameplayUiScalePercent,
-			gSpideyMenuTextScalePercent);
+			"pause_display_options phase=confirm_intercept line=%u rows=%u mask=0x%08lX\n",
+			(unsigned int)menu->mLine,
+			(unsigned int)menu->mNumLines,
+			(unsigned long)mask);
 		fclose(f);
 	}
 
-	gSpideyInLevelDisplayMenuActive =
-		1;
-	DisplayOptionsFn displayOptions =
-		(DisplayOptionsFn)0x0050D9B0;
-	displayOptions();
-	gSpideyInLevelDisplayMenuActive =
-		0;
-
-	f =
-		SpideyOpenConsolidatedLog(
-			"COMPAT");
-	if (f)
-	{
-		fprintf(
-			f,
-			"pause_display_options phase=close gameplay_ui=%d text=%d\n",
-			gSpideyGameplayUiScalePercent,
-			gSpideyMenuTextScalePercent);
-		fclose(f);
-	}
+	// Suppress the retail pause dispatcher for this synthetic row. The next
+	// pause-menu update opens Display Options outside the trigger call stack.
+	return 0;
 }
 
 // @Ok
@@ -3844,13 +3889,20 @@ static void SpideyInstallDisplayAspectCompat()
 			(void*)&SpideyPauseMenuUpdate,
 			"pause_display_options");
 
+	const int pauseConfirmInstalled =
+		SpideyPatchDirectCall(
+			0x00441606,
+			0x0050C180,
+			(void*)&SpideyPauseConfirmTrigger,
+			"pause_display_confirm");
+
 	FILE* f = SpideyOpenConsolidatedLog(
 		"COMPAT");
 	if (f)
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_access=%d range=%d-%d step=%d defaults=%d,%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_access=%d pause_confirm=%d range=%d-%d step=%d defaults=%d,%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
@@ -3865,6 +3917,7 @@ static void SpideyInstallDisplayAspectCompat()
 			menuUpdateInstalled,
 			menuDisplayInstalled,
 			pauseDisplayOptionsInstalled,
+			pauseConfirmInstalled,
 			kSpideyUiScaleMinPercent,
 			kSpideyUiScaleMaxPercent,
 			kSpideyUiScaleStepPercent,
@@ -5503,6 +5556,161 @@ static void __cdecl SpideyCompatHealthBarQPoly2D(
 		z);
 }
 
+typedef void (__cdecl *SpideyRetailGouraudUiPolyFn)(
+		float,
+		i32,
+		i32,
+		i32,
+		i32,
+		u32,
+		u32,
+		u32,
+		u32,
+		i32);
+
+// @Ok
+static void __cdecl SpideyCompatPanelGouraudPoly(
+		float z,
+		i32 x,
+		i32 y,
+		i32 width,
+		i32 height,
+		u32 color0,
+		u32 color1,
+		u32 color2,
+		u32 color3,
+		i32 option10)
+{
+	float densityX =
+		1.0f;
+	float densityY =
+		1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	const int shouldScale =
+		!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f);
+
+	const int beforeX =
+		x;
+	const int beforeY =
+		y;
+	const int beforeWidth =
+		width;
+	const int beforeHeight =
+		height;
+
+	if (shouldScale)
+	{
+		const float right =
+			(float)x +
+			(float)width;
+		const float bottom =
+			(float)y +
+			(float)height;
+		const float anchorX =
+			SpideyChooseGameplayUiFloatAnchor(
+				(float)x,
+				right,
+				(float)x,
+				right,
+				512.0f);
+		const float anchorY =
+			SpideyChooseGameplayUiFloatAnchor(
+				(float)y,
+				(float)y,
+				bottom,
+				bottom,
+				240.0f);
+
+		const int scaledLeft =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)x,
+					anchorX,
+					densityX));
+		const int scaledRight =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					right,
+					anchorX,
+					densityX));
+		const int scaledTop =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)y,
+					anchorY,
+					densityY));
+		const int scaledBottom =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					bottom,
+					anchorY,
+					densityY));
+
+		x =
+			scaledLeft;
+		y =
+			scaledTop;
+		width =
+			scaledRight -
+			scaledLeft;
+		height =
+			scaledBottom -
+			scaledTop;
+
+		++gSpideyGameplayUiFillScaledDraws;
+
+		if (gSpideyGameplayUiFillScaleSamples < 24)
+		{
+			FILE* log =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (log)
+			{
+				fprintf(
+					log,
+					"gameplay_ui_fill_scale source=gouraud logical=%lux%lu density=%.6f,%.6f user_percent=%d before=%d,%d,%d,%d after=%d,%d,%d,%d count=%lu\n",
+					gSpideyModernLogicalWidth,
+					gSpideyModernLogicalHeight,
+					(double)densityX,
+					(double)densityY,
+					gSpideyGameplayUiScalePercent,
+					beforeX,
+					beforeY,
+					beforeWidth,
+					beforeHeight,
+					x,
+					y,
+					width,
+					height,
+					gSpideyGameplayUiFillScaledDraws);
+				fclose(log);
+			}
+			++gSpideyGameplayUiFillScaleSamples;
+		}
+	}
+
+	SpideyRetailGouraudUiPolyFn retail =
+		(SpideyRetailGouraudUiPolyFn)0x00462FB0;
+	retail(
+		z,
+		x,
+		y,
+		width,
+		height,
+		color0,
+		color1,
+		color2,
+		color3,
+		option10);
+}
+
 // @Ok
 static void __cdecl SpideyCompatHealthBarFlatPoly(
 		float z,
@@ -5689,6 +5897,69 @@ static void SpideyInstallGameplayUiScaleCompat()
 			(void*)&SpideyCompatHealthBarFlatPoly,
 			"health_fill_flat_2");
 
+	const unsigned long panelQPolySites[] =
+	{
+		0x00465D08,
+		0x00465F46,
+		0x00466176,
+		0x004663AA,
+		0x004665D1,
+		0x004667F6
+	};
+	int panelQPolyCalls =
+		0;
+	for (int i = 0;
+		 i < (int)(sizeof(panelQPolySites) / sizeof(panelQPolySites[0]));
+		 ++i)
+	{
+		panelQPolyCalls +=
+			SpideyPatchDirectCall(
+				panelQPolySites[i],
+				0x00507910,
+				(void*)&SpideyCompatHealthBarQPoly2D,
+				"panel_fill_qpoly");
+	}
+
+	const unsigned long panelGouraudSites[] =
+	{
+		0x0046687B,
+		0x00466931,
+		0x004669C7
+	};
+	int panelGouraudCalls =
+		0;
+	for (int i = 0;
+		 i < (int)(sizeof(panelGouraudSites) / sizeof(panelGouraudSites[0]));
+		 ++i)
+	{
+		panelGouraudCalls +=
+			SpideyPatchDirectCall(
+				panelGouraudSites[i],
+				0x00462FB0,
+				(void*)&SpideyCompatPanelGouraudPoly,
+				"panel_fill_gouraud");
+	}
+
+	const unsigned long panelFlatSites[] =
+	{
+		0x004668D1,
+		0x00466A1B,
+		0x00466A65
+	};
+	int panelFlatCalls =
+		0;
+	for (int i = 0;
+		 i < (int)(sizeof(panelFlatSites) / sizeof(panelFlatSites[0]));
+		 ++i)
+	{
+		panelFlatCalls +=
+			SpideyPatchDirectCall(
+				panelFlatSites[i],
+				0x00462D60,
+				(void*)&SpideyCompatHealthBarFlatPoly,
+				"panel_fill_flat");
+	}
+
 	FILE* log =
 		SpideyOpenConsolidatedLog(
 			"COMPAT");
@@ -5696,7 +5967,7 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d health_qpoly=%d,%d,%d health_flat=%d,%d reference=512x240 baseline_output=640x480 policy=compact_resolution_density user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d health_qpoly=%d,%d,%d health_flat=%d,%d panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_resolution_density user_percent=%d\n",
 			frameCalls,
 			textureCalls,
 			healthQPolyOne,
@@ -5704,6 +5975,9 @@ static void SpideyInstallGameplayUiScaleCompat()
 			healthQPolyThree,
 			healthFlatOne,
 			healthFlatTwo,
+			panelQPolyCalls,
+			panelGouraudCalls,
+			panelFlatCalls,
 			gSpideyGameplayUiScalePercent);
 		fclose(log);
 	}
@@ -12015,6 +12289,64 @@ static void SpideyLogRetailInput(
 	fclose(f);
 }
 
+static unsigned long gSpideyBackgroundPumpCalls =
+	0;
+static unsigned long gSpideyBackgroundPumpMessages =
+	0;
+
+// @Ok
+static void SpideyPumpBackgroundWindowMessages(
+		HWND hwnd)
+{
+	if (!hwnd)
+		return;
+
+	MSG message;
+	int pumped =
+		0;
+
+	while (pumped < 64 &&
+		PeekMessageA(
+			&message,
+			hwnd,
+			0,
+			0,
+			PM_REMOVE))
+	{
+		TranslateMessage(
+			&message);
+		DispatchMessageA(
+			&message);
+		++pumped;
+	}
+
+	++gSpideyBackgroundPumpCalls;
+	gSpideyBackgroundPumpMessages +=
+		(unsigned long)pumped;
+
+	if (pumped &&
+		(gSpideyBackgroundPumpCalls <= 8 ||
+		 (gSpideyBackgroundPumpCalls % 300) == 0))
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"INPUT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"background_message_pump calls=%lu pumped=%d total_messages=%lu hwnd=0x%08lX foreground=0x%08lX\n",
+				gSpideyBackgroundPumpCalls,
+				pumped,
+				gSpideyBackgroundPumpMessages,
+				(unsigned long)hwnd,
+				(unsigned long)GetForegroundWindow());
+			fclose(f);
+		}
+	}
+}
+
+// @Ok
 static i32 SpideySyncRetailInputForeground(void)
 {
 	HWND hwnd =
@@ -12025,7 +12357,12 @@ static i32 SpideySyncRetailInputForeground(void)
 		GetForegroundWindow() == hwnd;
 
 	if (foreground == gSpideyRetailInputForeground)
+	{
+		if (!foreground)
+			SpideyPumpBackgroundWindowMessages(
+				hwnd);
 		return foreground;
+	}
 
 	gSpideyRetailInputForeground =
 		foreground;
@@ -12088,6 +12425,9 @@ static i32 SpideySyncRetailInputForeground(void)
 			keyboardHr,
 			mouseHr,
 			controllerHr);
+
+		SpideyPumpBackgroundWindowMessages(
+			hwnd);
 	}
 
 	return foreground;
