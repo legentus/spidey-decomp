@@ -6592,3 +6592,127 @@ Most important log evidence:
 - movie-frame compatibility should show `scene_lost=DDERR_SURFACELOST` followed by successful `scene_restore=0x00000000` when needed;
 - no fatal `PCMovie.cpp:897` / `DXinit.cpp:1105` surface-lost entries;
 - DX11 gameplay should continue with `missing=0`, `shadow_skip=0`, `d3d7_fallback=0`.
+
+
+## Runtime result: level-transition crash fixed; cursor floor + oversized frontend text remain — 2026-10-01
+
+Tested revision:
+- `78cfba2b22fa6a4dc079f4ddd14f9ca1793e5f8e`
+
+### User-visible result
+
+- **No crash** in this pass.
+- The previously failing normal-level transition now survives.
+- After returning from a level, the shell cursor still cannot move below a visible horizontal threshold.
+- Audio Output remains partially cut off.
+- Display Mode values including Fullscreen Exclusive / Windowed / Borderless remain too large / clipped.
+- User explicitly requested that frontend text scale down with higher resolution instead of retaining the oversized legacy visual scale.
+
+Treat the level-transition surface-lost crash as fixed unless it regresses.
+
+### Mouse-floor evidence
+
+Fresh input telemetry still showed:
+- frontend logical canvas = `1920x1080`;
+- mouse bounds = `0,0,1888,1048`.
+
+The live HWND client in the same session is approximately `1920x1421`.
+
+Therefore the old frontend sync was still using the **logical render canvas as the raw virtual-mouse clamp**. That is the wrong ownership boundary:
+- raw relative cursor motion belongs to the live client domain;
+- shell cursor drawing and menu hit testing belong to the logical frontend domain.
+
+### Mouse-domain fix
+
+Commit:
+- `8ed74f4a8a54b8b884434813969e099d8ff817f5` — **input: decouple frontend cursor bounds from logical canvas**
+
+Behavior:
+- raw `gMouseX/gMouseY` bounds now use the actual live HWND client size (fallback to selected/legacy dimensions only if no valid client is available);
+- `PCINPUT_GetMousePosition @ 0x0050A750` is now hooked so the visible shell cursor receives a client->logical mapping;
+- `PCINPUT_GetMouseHotspotPosition @ 0x0050A770` uses the exact same mapping before adding the hotspot offset;
+- `PCINPUT_IsMouseOver @ 0x0050A820` therefore continues to use the same logical coordinate domain as the visible cursor;
+- existing strict retail hit-test boundaries are preserved;
+- new telemetry records client size, raw bounds/position, mapped logical position, and logical size.
+
+This is intentionally a three-path fix: changing only the raw bounds would have risked reintroducing the previously fixed post-level hover/click offset.
+
+### Frontend typography grounding
+
+Retail shell layout is authored on a fixed Dreamcast-style coordinate grid:
+- X = 0..512;
+- Y = 0..240.
+
+`PCSHELL_CoordsDCtoPC` expands those coordinates to the live render dimensions.
+
+Retail font scale is separate:
+- `Mess_SetScale @ 0x00458620`;
+- `G_SCALE @ 0x0060D5A4`;
+- `Mess_DrawText` sets the active Font scale from `G_SCALE`;
+- `Mess_TextWidth` uses the same scale, so changing it affects both rendering **and menu width measurement**.
+
+The normal/small shell font helpers still request scale 256, which was correct at the 640x480 PC baseline but becomes visually oversized when the shell coordinate canvas expands to 1080p/1440p.
+
+### Resolution-aware frontend text fix
+
+Commit:
+- `ef7df27e9b24349ef4a7413464d50e99ec69d498` — **frontend: scale text with modern resolution**
+
+Behavior:
+- retail code can continue requesting its authored text scales;
+- frontend-only effective scale is:
+  - `requested * 480 / logical_height`;
+- 640x480 keeps scale 256 unchanged;
+- 1920x1080 maps 256 -> approximately 113;
+- 2560x1440 maps 256 -> approximately 85;
+- proportional differences between normal/small/menu-selected scales are preserved;
+- scale is clamped to avoid pathological tiny values;
+- gameplay/non-frontend text keeps the retail-requested scale unchanged;
+- the last raw requested scale is remembered and re-evaluated immediately whenever logical/frontend resolution state changes, so level -> menu transitions do not wait for a later font-reset call;
+- the override is deliberately installed **after `patch_mess()`**, because `patch_mess()` also owns retail `Mess_SetScale`.
+
+Because `Mess_TextWidth` reads the same effective scale, menu boxes/centering/longest-label measurement now use the smaller modern text too. This is not a final-pixel-only shrink.
+
+### Audio/display layout interaction
+
+Existing six-row Audio layout remains intact:
+- Audio text is shifted up one authored row;
+- all three slider draws use the same shift;
+- slider mouse hit regions use the same shift;
+- Stereo/Mono value uses the same shift.
+
+The new typography scaling is applied globally to frontend text, including the added Audio Output and Display Mode labels/values. No additional per-label pixel nudges were added in this pass.
+
+### Static audit
+
+At `ef7df27`:
+- main.cpp braces / parentheses / brackets balanced;
+- frontend scale override is installed after `patch_mess()`;
+- mouse position hook at `0x0050A750` is present;
+- raw frontend bounds are based on the client domain;
+- hit-test hotspot and visible cursor position share the same client->logical mapping;
+- frontend text scaling uses the 480-line PC baseline and is re-applied on logical transitions.
+
+### Next focused runtime test
+
+1. Run normal updater/build.
+2. Boot to menu.
+3. Open Audio:
+   - verify Output row is fully visible;
+   - verify text is noticeably smaller / resolution-appropriate;
+   - verify sliders and hit regions remain aligned.
+4. Open Display:
+   - cycle Fullscreen Exclusive / Borderless / Windowed;
+   - verify each complete value is visible.
+5. Enter a level and return to menu.
+6. Move the cursor through the entire usable frontend area, especially downward.
+7. Verify hover/click still line up with the visible cursor after returning from the level.
+8. Upload fresh input/compat/draw logs if any of these still fail.
+
+Key expected input telemetry:
+- `frontend_bounds_sync ... client=... bounds=... basis=client_to_logical`;
+- raw Y bound should reflect the live client, not logical `1080-32`.
+
+Key expected typography telemetry:
+- `frontend_text_scale ... requested=256 effective=113 ... logical=1920x1080` at 1080-high logical frontend;
+- or approximately `effective=85` at 1440-high logical frontend.
