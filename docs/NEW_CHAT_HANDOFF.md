@@ -1,3 +1,45 @@
+# DRIVE LOG WORKFLOW + SHELL-LIFECYCLE TEXT FIX — READ FIRST (2026-10-01)
+
+Google Drive project root:
+https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+
+Runtime Logs folder:
+https://drive.google.com/drive/folders/1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s
+
+**Permanent workflow:** read the newest runtime log directly from the connected Drive `Logs` folder. Do not ask the user to re-upload routine logs into chat. New sessions should produce only `spidey-decomp.log`.
+
+Latest analyzed Drive session was revision `b0c4910d007d7c3562552cceaed45dfb196c10bf`.
+
+Observed:
+- changing/applying resolution correctly shrank text;
+- backing out of Display Options made it large again;
+- user did not test mouse.
+
+Grounded trace:
+- Apply restore reached correct 2560x1440 scale: requested 256 -> effective 85, frontend=1.
+- backing out caused another display-options call to mark frontend=0 and return effective scale to 256.
+
+Correction:
+- `0x006B78F4` is DirectDraw/windowed state, **not** shell-active state.
+- real frontend boundaries are `PShell_Initialise @ 0x0048D790` and `PShell_Cleanup @ 0x0048D880`.
+
+Fix:
+- `02077c1218251814dcecfa7f02881a12f0752178` — frontend text policy is driven by actual shell lifecycle; modern display rebuilds no longer revoke frontend ownership.
+
+NEXT TEST:
+1. change resolution + Apply;
+2. back out of Display Options;
+3. verify text stays small in parent and other frontend menus;
+4. optionally test mouse;
+5. put only the new `spidey-decomp.log` in the Drive `Logs` folder.
+
+Expected lifecycle log entries:
+- `frontend_lifecycle_install ... initialise_calls=>0 ... cleanup_calls=>0`
+- frontend navigation retains `frontend_active=1`
+- actual gameplay transition logs `pshell_cleanup_post active=0`.
+
+---
+
 # PERMANENT SINGLE-LOG POLICY — READ BEFORE ALL OLDER TEST INSTRUCTIONS
 
 The user has explicitly required that routine test logging be consolidated so they do not hit the attachment limit.
