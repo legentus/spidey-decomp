@@ -5699,3 +5699,39 @@ Nothing substantive needs to be redone:
 - no source implementation after them was lost;
 - the interrupted analysis frontier is reconstructed here;
 - next work should continue from the `PCGfx_DrawQPoly3D` / DXPOLY perspective-coordinate investigation before touching the 2D safe-area hook or requesting another runtime test.
+
+
+## User-validated five-item priority refresh — 2026-09-30
+
+Latest runtime correction from the user:
+- The previously reported level/background warping or distortion while moving is **FIXED**. Treat it as closed unless it regresses.
+- Stop pursuing the interrupted UV/RHW distortion hypothesis as an active bug. Keep the RE notes only as historical evidence.
+
+Active priorities, in order:
+
+1. **Proper widescreen / Hor+**
+   - Current widescreen still behaves as stretched 4:3 rather than true widescreen.
+   - Preserve vertical FOV and expand horizontal view.
+   - Keep 3D projection, culling, HUD/2D, and frontend/menu layout as separate domains.
+
+2. **Menu mouse hover/click alignment and responsiveness**
+   - Cursor movement is fine.
+   - Hover/selection does not reliably line up with the cursor, especially after leaving a level; the user sometimes must hover slightly above the intended item.
+   - Existing mouse-coordinate fix is not considered user-validated yet.
+
+3. **Frame-rate-independent game speed**
+   - Higher render FPS makes gameplay feel sped up.
+   - Choose and implement the correct architecture between original-cadence fixed-step + interpolation and broader delta-time conversion.
+   - Current RE evidence still favors fixed-step simulation with independent rendering/interpolation rather than a risky global delta-time rewrite.
+
+4. **Modern audio output selection**
+   - Default output must follow the OS/system default device rather than behaving as though pinned to the headset.
+   - Audio menu must allow manual device selection, with `(System Default)` as the default setting.
+   - Existing backend/menu implementation must be validated and completed as needed.
+
+5. **Uncapped main-menu rendering**
+   - Main menu is currently ~30 FPS.
+   - Uncap menu rendering/presentation without uncapping menu logic or otherwise tying shell/game simulation speed to render FPS.
+   - This must be designed together with priority 3 so removing the menu cap does not accelerate shell logic.
+
+Immediate work resumes at priority 1. Do not ask for a new runtime test until a meaningful widescreen implementation batch is ready.
