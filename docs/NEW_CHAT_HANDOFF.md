@@ -1,3 +1,28 @@
+# FRONTEND APPLY-SCALE + MOUSE-BOX FIX FRONTIER — READ FIRST (2026-10-01)
+
+Latest runtime tested `56374190919f6a12ff8abbe6602fee4dcba75f1b`:
+- no reported crash;
+- changing resolution made text large until level -> frontend roundtrip;
+- mouse was confined to an invisible upper-left rectangle, not just a bottom floor.
+
+Root causes from logs/source:
+- Display Apply temporarily classified the live shell as gameplay, setting effective text scale back to 256.
+- raw mouse bounds were successfully full-client, but coordinates were pre-scaled to modern logical and then scaled again by retail PCSHELL.
+
+Fixes:
+- `b04a78b492dfe41842d42cf6017328b48d4138e6` — restore live frontend ownership immediately after Display Apply; map client mouse once into the retail PC canvas.
+- `19eb5bca0824e31d09e66ccce737e9ebca653d30` — validator tags / comment cleanup.
+
+NEXT TEST:
+- change resolution and confirm text remains small immediately;
+- move cursor to every edge/corner before and after a level transition;
+- verify hover/click alignment remains exact;
+- inspect compat/input logs for `display_apply_frontend_restore` and `basis=client_to_retail_pc_canvas`.
+
+Do not restore the prior client->modern-logical mouse mapping; that was the upper-left box bug.
+
+---
+
 # FRONTEND CURSOR + RESOLUTION-AWARE TEXT FRONTIER — READ FIRST (2026-10-01)
 
 Runtime revision `78cfba2b22fa6a4dc079f4ddd14f9ca1793e5f8e` did **not crash**. The normal-level transition regression is fixed.
