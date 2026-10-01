@@ -7093,3 +7093,177 @@ Expected log:
 - `[COMPAT] ui_text_scale ... requested=256 effective=85 ... logical=2560x1440 ... scope=frontend_gameplay_pause` during gameplay/pause;
 - `[COMPAT] gameplay_ui_scale_install ... frame_calls=>0 texture_calls=>0`;
 - `[COMPAT] gameplay_ui_scale ... density=0.250000,0.333333 ...` for 2560x1440.
+
+
+## Gameplay UI runtime-scale controls + health-bar fill synchronization frontier (2026-10-01)
+
+### User runtime report that opened this frontier
+
+The first gameplay-HUD screenshot after the resolution-aware panel work showed two distinct facts:
+
+- the HUD holders/frames routed through the panel coordinate helpers were being compacted;
+- the colored health/web fill primitives were **not** following those holders and remained detached/oversized;
+- the compacted HUD was also slightly smaller than the user wanted.
+
+The screenshot is in the Google Drive `Logs` folder as:
+
+- `Screenshot 2026-10-01 015811.png`
+
+The `spidey-decomp.log` currently beside it is **not** the matching run. Its session revision is still:
+
+- `0b2d306b48beadfb1d0de6dc45a8dad4f4fb3faf`
+
+Therefore that log must not be used as runtime validation for the gameplay-UI commits or the work below. A fresh consolidated log is required after the next test.
+
+### Retail binary RE: why the bars separated from their holders
+
+A user-uploaded `SpideyPC.exe` was inspected directly. Its full-file SHA-256 in this chat is:
+
+- `0A11A49F3F63D4BB15650F322D654553FC47234B01885B852A058FF074689DEA`
+
+It has the expected retail PE timestamp `0x3B7A3167` and image size `0x02A0D000`. The installed-game runtime log previously reported a different full-file SHA-256, so these two files must not be treated as byte-for-byte identical. However, every machine-code call site used by this RE matches the expected retail address/target bytes, so the uploaded EXE is used only as grounded static evidence for these specific routines.
+
+`Panel_DisplayHealthBar @ 0x00464270` contains five fill/render calls that bypass the two panel coordinate helpers already compacted by `d680f80`:
+
+- `0x004644E3 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x00464707 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x00464936 -> PCGfx_DrawQPoly2D @ 0x00507910`
+- `0x0046497D -> DCPanel_DrawFlatShadedPoly @ 0x00462D60`
+- `0x0046499F -> DCPanel_DrawFlatShadedPoly @ 0x00462D60`
+
+This directly explains the screenshot: holders use the patched frame/texture coordinate setup while the colored fill geometry can take its own QPoly/flat-shaded path.
+
+The fix is deliberately call-site scoped. It does **not** globally scale every `PCGfx_DrawQPoly2D` or flat 2D primitive in the game.
+
+### New user-facing scale policy
+
+Implemented on `dev`:
+
+- `2b97806c42b2ef69bff237d3c37833a2e4f034ea` — **ui: add live gameplay and text scale controls**
+- `a8b3394b1ccd32621ed3729922256cc224e55533` — **ui: scale health bar fills with HUD holders**
+- `af814fa6526e31fa228f765cdd484e057debb595` — **chore: annotate new UI compatibility helpers**
+
+Display Options is expanded from five rows to seven:
+
+0. Screen Size
+1. Aspect Ratio
+2. Brightness
+3. Gameplay UI Scale
+4. Menu/Text Scale
+5. Display Mode
+6. Apply
+
+Both scale controls:
+
+- use independent pending state;
+- are displayed with retail-style sliders;
+- support the same left/right trigger path used by the retail shell;
+- use a 50%–200% range in 5% steps;
+- persist in `spidey-modern-video.ini`;
+- do **not** change the live game until Apply is activated.
+
+Defaults:
+
+- Gameplay UI Scale: **125%**
+- Menu/Text Scale: **100%**
+
+The 125% gameplay default intentionally loosens the earlier aggressive high-resolution compaction. At 2560x1440 the former density was approximately `0.250000,0.333333`; the new default becomes approximately `0.312500,0.416667`.
+
+### Live Apply behavior
+
+The Apply hook now distinguishes display changes from UI-only changes.
+
+If only Gameplay UI Scale and/or Menu/Text Scale changed:
+
+- no DirectDraw/DXGI device rebuild is performed;
+- the committed text multiplier is applied immediately to the live message scale;
+- gameplay HUD wrappers read the committed gameplay multiplier on the next draw;
+- the settings are persisted immediately;
+- no game restart or level reload is required.
+
+Resolution/aspect/window-mode changes retain the existing live display-rebuild path.
+
+Expected telemetry includes:
+
+- `ui_scale_settings load ...`
+- `display_pending_ui_scale kind=gameplay_ui ...`
+- `display_pending_ui_scale kind=menu_text ...`
+- `display_apply ... gameplay_ui=... text=... display_changed=0 ui_changed=1 in_level=...`
+- `ui_text_scale ... user_percent=...`
+- `gameplay_ui_scale ... user_percent=...`
+
+### Display Options while a level is paused
+
+Retail `Front_Update` uses the pause-menu `CMenu_Update` call at:
+
+- `0x004415F8 -> CMenu_Update @ 0x00440600`
+
+The retail pause menu owns Continue / Restart level / Quit logic and dispatches choices by comparing their strings after the update. The compatibility wrapper adds a fourth `Display Options` entry. Because retail has no matching branch for that new string, the wrapper consumes confirm on that row and opens:
+
+- `PCSHELL_DoDisplayOptions @ 0x0050D9B0`
+
+while the game remains paused.
+
+This gives the player access to the new Gameplay UI Scale and Menu/Text Scale sliders **during a level**, even though retail did not expose Display Options there.
+
+Expected telemetry:
+
+- `pause_display_options entry_added=1 ...`
+- `pause_display_options phase=open ...`
+- `pause_display_options phase=close ...`
+
+### Health/web fill synchronization
+
+The three direct health-bar QPoly calls and two direct flat-shaded calls listed above now have narrow wrappers that apply the same committed gameplay-UI density as the holder geometry.
+
+Expected telemetry:
+
+- `gameplay_ui_scale_install ... health_qpoly=1,1,1 health_flat=1,1 ...`
+- `gameplay_ui_fill_scale source=qpoly ...`
+- `gameplay_ui_fill_scale source=flat ...`
+
+This is the first build where the screenshot-specific “bars detached from holders” defect is addressed directly.
+
+### Static validation completed before runtime
+
+Grounded static checks completed:
+
+- all five health-bar call-site opcodes/targets were verified directly in the uploaded retail EXE;
+- the pause-menu update call `0x004415F8 -> 0x00440600` was verified directly;
+- the Display Options draw/update/apply calls `0x0050DC26`, `0x0050DCA0`, and `0x0050DCF8` were verified directly;
+- the final `main.cpp` lexical state terminates in normal code;
+- braces, parentheses, and brackets are balanced after stripping comments/string/character literals;
+- each newly introduced helper definition is unique and carries an `// @Ok` validator annotation.
+
+GitHub Actions runs are not being spawned by the connector-written commits on this repository, so there is no CI result to claim. Do not describe this frontier as runtime-tested or CI-proven yet.
+
+### Mandatory next runtime test
+
+Run:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Primary resolution: **2560x1440**.
+
+In one run:
+
+1. Main-menu regression guard:
+   - menu remains correctly scaled and usable.
+2. Enter gameplay:
+   - verify the health/web colored bars remain inside/aligned with their holders;
+   - verify the default 125% gameplay scale is slightly larger than the previous screenshot.
+3. Pause during the level:
+   - verify a new `Display Options` row is present.
+4. Open Display Options from the pause menu:
+   - verify separate `Gameplay UI Scale` and `Menu/Text Scale` slider rows are visible.
+5. Change Gameplay UI Scale only, then press Apply:
+   - HUD size must change immediately after returning to the paused/gameplay view;
+   - no restart or level reload.
+6. Change Menu/Text Scale only, then press Apply:
+   - pause/menu text size must change immediately;
+   - no restart or level reload.
+7. Re-open the menu:
+   - committed values should still be selected.
+8. Exit normally so the single consolidated log is complete.
+
+Put only the resulting `spidey-decomp.log` in the Drive `Logs` folder. The assistant should pull it directly and correlate it with screenshots rather than asking for a log upload.
