@@ -1185,6 +1185,29 @@ static int gSpideyPendingWindowMode =
 	SPIDEY_WINDOW_BORDERLESS;
 static CMenu* gSpideyDisplayMenu = 0;
 
+static const int kSpideyUiScaleMinPercent = 50;
+static const int kSpideyUiScaleMaxPercent = 200;
+static const int kSpideyUiScaleStepPercent = 5;
+static const int kSpideyDefaultGameplayUiScalePercent = 125;
+static const int kSpideyDefaultMenuTextScalePercent = 100;
+
+static int gSpideyGameplayUiScalePercent =
+	kSpideyDefaultGameplayUiScalePercent;
+static int gSpideyPendingGameplayUiScalePercent =
+	kSpideyDefaultGameplayUiScalePercent;
+static int gSpideyMenuTextScalePercent =
+	kSpideyDefaultMenuTextScalePercent;
+static int gSpideyPendingMenuTextScalePercent =
+	kSpideyDefaultMenuTextScalePercent;
+
+static char gSpideyGameplayUiScaleMenuLabel[64] =
+	"Gameplay UI Scale: 125%";
+static char gSpideyMenuTextScaleMenuLabel[64] =
+	"Menu/Text Scale: 100%";
+static char gSpideyPauseDisplayOptionsLabel[] =
+	"Display Options";
+static int gSpideyInLevelDisplayMenuActive = 0;
+
 static const char* const gSpideyAspectLabels[] =
 {
 	"AUTO",
@@ -1267,6 +1290,54 @@ static const char* SpideyGetModernVideoIniPath()
 	}
 
 	return gSpideyModernVideoIniPath;
+}
+
+static int SpideyClampUiScalePercent(
+		int percent)
+{
+	if (percent < kSpideyUiScaleMinPercent)
+		return kSpideyUiScaleMinPercent;
+	if (percent > kSpideyUiScaleMaxPercent)
+		return kSpideyUiScaleMaxPercent;
+	return percent;
+}
+
+static int SpideyUiScalePercentToSliderValue(
+		int percent)
+{
+	percent =
+		SpideyClampUiScalePercent(
+			percent);
+
+	const int range =
+		kSpideyUiScaleMaxPercent -
+		kSpideyUiScaleMinPercent;
+
+	if (range <= 0)
+		return 0;
+
+	return ((percent -
+		kSpideyUiScaleMinPercent) * 256) /
+		range;
+}
+
+static void SpideyUpdateUiScaleMenuLabels()
+{
+	gSpideyPendingGameplayUiScalePercent =
+		SpideyClampUiScalePercent(
+			gSpideyPendingGameplayUiScalePercent);
+	gSpideyPendingMenuTextScalePercent =
+		SpideyClampUiScalePercent(
+			gSpideyPendingMenuTextScalePercent);
+
+	sprintf(
+		gSpideyGameplayUiScaleMenuLabel,
+		"Gameplay UI Scale: %d%%",
+		gSpideyPendingGameplayUiScalePercent);
+	sprintf(
+		gSpideyMenuTextScaleMenuLabel,
+		"Menu/Text Scale: %d%%",
+		gSpideyPendingMenuTextScalePercent);
 }
 
 static void SpideyUpdateDisplayModeMenuLabel()
@@ -2041,6 +2112,26 @@ static void SpideySaveModernVideoSettings()
 		"WindowMode",
 		value,
 		SpideyGetModernVideoIniPath());
+
+	sprintf(
+		value,
+		"%d",
+		gSpideyGameplayUiScalePercent);
+	WritePrivateProfileStringA(
+		"Video",
+		"GameplayUIScalePercent",
+		value,
+		SpideyGetModernVideoIniPath());
+
+	sprintf(
+		value,
+		"%d",
+		gSpideyMenuTextScalePercent);
+	WritePrivateProfileStringA(
+		"Video",
+		"MenuTextScalePercent",
+		value,
+		SpideyGetModernVideoIniPath());
 }
 
 static void SpideyLoadModernVideoSettings()
@@ -2077,12 +2168,49 @@ static void SpideyLoadModernVideoSettings()
 			SPIDEY_WINDOW_BORDERLESS;
 	}
 
+	gSpideyGameplayUiScalePercent =
+		SpideyClampUiScalePercent(
+			GetPrivateProfileIntA(
+				"Video",
+				"GameplayUIScalePercent",
+				kSpideyDefaultGameplayUiScalePercent,
+				SpideyGetModernVideoIniPath()));
+	gSpideyMenuTextScalePercent =
+		SpideyClampUiScalePercent(
+			GetPrivateProfileIntA(
+				"Video",
+				"MenuTextScalePercent",
+				kSpideyDefaultMenuTextScalePercent,
+				SpideyGetModernVideoIniPath()));
+
 	gSpideyPendingWindowMode =
 		gSpideyWindowMode;
-	SpideyUpdateDisplayModeMenuLabel();
-
 	gSpideyPendingAspectMode =
 		gSpideyAspectMode;
+	gSpideyPendingGameplayUiScalePercent =
+		gSpideyGameplayUiScalePercent;
+	gSpideyPendingMenuTextScalePercent =
+		gSpideyMenuTextScalePercent;
+
+	SpideyUpdateDisplayModeMenuLabel();
+	SpideyUpdateUiScaleMenuLabels();
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"ui_scale_settings load gameplay_percent=%d text_percent=%d range=%d-%d step=%d config=%s\n",
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent,
+			kSpideyUiScaleMinPercent,
+			kSpideyUiScaleMaxPercent,
+			kSpideyUiScaleStepPercent,
+			SpideyGetModernVideoIniPath());
+		fclose(f);
+	}
 }
 
 static void SpideyResetPendingDisplaySettings(
@@ -2096,7 +2224,12 @@ static void SpideyResetPendingDisplaySettings(
 		gSpideyAspectMode;
 	gSpideyPendingWindowMode =
 		gSpideyWindowMode;
+	gSpideyPendingGameplayUiScalePercent =
+		gSpideyGameplayUiScalePercent;
+	gSpideyPendingMenuTextScalePercent =
+		gSpideyMenuTextScalePercent;
 	SpideyUpdateDisplayModeMenuLabel();
+	SpideyUpdateUiScaleMenuLabels();
 
 	FILE* f = SpideyOpenConsolidatedLog(
 		"COMPAT");
@@ -2104,12 +2237,14 @@ static void SpideyResetPendingDisplaySettings(
 	{
 		fprintf(
 			f,
-			"display_pending_reset reason=%s selected=%lux%lu aspect=%s window_mode=%s\n",
+			"display_pending_reset reason=%s selected=%lux%lu aspect=%s window_mode=%s gameplay_ui=%d text=%d\n",
 			reason ? reason : "unknown",
 			gSpideyPendingOutputWidth,
 			gSpideyPendingOutputHeight,
 			gSpideyAspectLabels[gSpideyPendingAspectMode],
-			gSpideyWindowModeLabels[gSpideyPendingWindowMode]);
+			gSpideyWindowModeLabels[gSpideyPendingWindowMode],
+			gSpideyPendingGameplayUiScalePercent,
+			gSpideyPendingMenuTextScalePercent);
 		fclose(f);
 	}
 }
@@ -2330,19 +2465,181 @@ static void __fastcall SpideyDisplayAddBrightnessAndApply(
 	retailAdd(
 		menu,
 		0,
+		gSpideyGameplayUiScaleMenuLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyMenuTextScaleMenuLabel);
+	retailAdd(
+		menu,
+		0,
 		gSpideyDisplayModeMenuLabel);
 	retailAdd(
 		menu,
 		0,
 		gSpideyDisplayApplyMenuLabel);
 
+	if (menu &&
+		menu->mNumLines >= 7)
+	{
+		menu->mY -=
+			menu->mLineSep;
+	}
+
 	SpideyUpdateDisplayModeMenuLabel();
+	SpideyUpdateUiScaleMenuLabels();
 
 	gSpideyDisplayMenu =
 		menu;
 
 	SpideyResetPendingDisplaySettings(
 		"menu_open");
+}
+
+typedef void (__fastcall *SpideyRetailMenuGetEntryXYFn)(
+		CMenu*,
+		void*,
+		const char*,
+		int*,
+		int*);
+typedef void (__cdecl *SpideyDisplaySliderDrawFn)(
+		int,
+		int,
+		int,
+		int);
+typedef int (__cdecl *SpideyDisplaySliderMouseFn)(
+		int,
+		int,
+		int);
+
+static int SpideyGetDisplayScaleSliderY(
+		CMenu* menu,
+		const char* label,
+		int* y)
+{
+	if (!menu ||
+		!label ||
+		!y)
+	{
+		return 0;
+	}
+
+	int x =
+		0;
+	int entryY =
+		0;
+	SpideyRetailMenuGetEntryXYFn getEntryXY =
+		(SpideyRetailMenuGetEntryXYFn)0x00440110;
+	getEntryXY(
+		menu,
+		0,
+		label,
+		&x,
+		&entryY);
+
+	*y =
+		entryY;
+	return 1;
+}
+
+static void __fastcall SpideyDisplayMenuDisplay(
+		CMenu* menu,
+		void*)
+{
+	typedef void (__fastcall *RetailDisplayFn)(
+			CMenu*,
+			void*);
+
+	RetailDisplayFn retailDisplay =
+		(RetailDisplayFn)0x004401B0;
+	retailDisplay(
+		menu,
+		0);
+
+	if (!menu)
+		return;
+
+	SpideyDisplaySliderDrawFn drawSlider =
+		(SpideyDisplaySliderDrawFn)0x00498060;
+
+	const int sliderX =
+		305;
+	int y =
+		0;
+
+	if (SpideyGetDisplayScaleSliderY(
+			menu,
+			gSpideyGameplayUiScaleMenuLabel,
+			&y))
+	{
+		drawSlider(
+			sliderX,
+			y,
+			menu->mLine == 3 ? 1 : 0,
+			SpideyUiScalePercentToSliderValue(
+				gSpideyPendingGameplayUiScalePercent));
+	}
+
+	if (SpideyGetDisplayScaleSliderY(
+			menu,
+			gSpideyMenuTextScaleMenuLabel,
+			&y))
+	{
+		drawSlider(
+			sliderX,
+			y,
+			menu->mLine == 4 ? 1 : 0,
+			SpideyUiScalePercentToSliderValue(
+				gSpideyPendingMenuTextScalePercent));
+	}
+}
+
+static int SpideyStepPendingUiScale(
+		int row,
+		int* percent,
+		const char* kind,
+		int delta)
+{
+	if (!percent ||
+		!kind ||
+		!delta)
+	{
+		return 0;
+	}
+
+	const int before =
+		*percent;
+	*percent =
+		SpideyClampUiScalePercent(
+			*percent +
+			delta * kSpideyUiScaleStepPercent);
+
+	if (*percent ==
+		before)
+	{
+		return 0;
+	}
+
+	SpideyUpdateUiScaleMenuLabels();
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"display_pending_ui_scale kind=%s row=%d direction=%s percent=%d committed_gameplay=%d committed_text=%d\n",
+			kind,
+			row,
+			delta > 0 ? "next" : "prev",
+			*percent,
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent);
+		fclose(f);
+	}
+
+	return 1;
 }
 
 static void __fastcall SpideyDisplayMenuUpdate(
@@ -2363,8 +2660,15 @@ static void __fastcall SpideyDisplayMenuUpdate(
 		menu,
 		0);
 
-	if (!menu ||
-		menu->mLine != 3)
+	if (!menu)
+		return;
+
+	const int row =
+		(int)menu->mLine;
+
+	if (row != 3 &&
+		row != 4 &&
+		row != 5)
 	{
 		return;
 	}
@@ -2389,6 +2693,51 @@ static void __fastcall SpideyDisplayMenuUpdate(
 	{
 		delta =
 			-1;
+	}
+
+	if (row == 3 ||
+		row == 4)
+	{
+		int y =
+			0;
+		const char* label =
+			row == 3 ?
+				gSpideyGameplayUiScaleMenuLabel :
+				gSpideyMenuTextScaleMenuLabel;
+		int* percent =
+			row == 3 ?
+				&gSpideyPendingGameplayUiScalePercent :
+				&gSpideyPendingMenuTextScalePercent;
+		const char* kind =
+			row == 3 ?
+				"gameplay_ui" :
+				"menu_text";
+
+		if (!delta &&
+			SpideyGetDisplayScaleSliderY(
+				menu,
+				label,
+				&y))
+		{
+			SpideyDisplaySliderMouseFn sliderMouse =
+				(SpideyDisplaySliderMouseFn)0x00497F80;
+			delta =
+				sliderMouse(
+					305,
+					y,
+					SpideyUiScalePercentToSliderValue(
+						*percent));
+		}
+
+		if (delta)
+		{
+			SpideyStepPendingUiScale(
+				row,
+				percent,
+				kind,
+				delta);
+		}
+		return;
 	}
 
 	if (!delta)
@@ -2427,6 +2776,128 @@ static void __fastcall SpideyDisplayMenuUpdate(
 				gSpideyPendingWindowMode],
 			gSpideyWindowModeLabels[
 				gSpideyWindowMode]);
+		fclose(f);
+	}
+}
+
+static void __fastcall SpideyPauseMenuUpdate(
+		CMenu* menu,
+		void*)
+{
+	typedef void (__fastcall *RetailUpdateFn)(
+			CMenu*,
+			void*);
+	typedef u8 (__cdecl *CheckTriggersFn)(
+			u32,
+			i32,
+			i32);
+	typedef void (__cdecl *DisplayOptionsFn)(void);
+
+	if (menu)
+	{
+		int found =
+			0;
+		for (int i = 0;
+			 i < (int)menu->mNumLines;
+			 ++i)
+		{
+			if (menu->mEntry[i].name &&
+				!strcmp(
+					menu->mEntry[i].name,
+					gSpideyPauseDisplayOptionsLabel))
+			{
+				found =
+					1;
+				break;
+			}
+		}
+
+		if (!found &&
+			menu->mNumLines < 40)
+		{
+			SpideyRetailMenuAddEntryFn retailAdd =
+				(SpideyRetailMenuAddEntryFn)0x0043FFF0;
+			retailAdd(
+				menu,
+				0,
+				gSpideyPauseDisplayOptionsLabel);
+
+			menu->mY -=
+				menu->mLineSep / 2;
+
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (f)
+			{
+				fprintf(
+					f,
+					"pause_display_options entry_added=1 rows=%u y=%d line_sep=%d\n",
+					(unsigned int)menu->mNumLines,
+					menu->mY,
+					menu->mLineSep);
+				fclose(f);
+			}
+		}
+	}
+
+	RetailUpdateFn retailUpdate =
+		(RetailUpdateFn)0x00440600;
+	retailUpdate(
+		menu,
+		0);
+
+	if (!menu ||
+		menu->mLine >= menu->mNumLines ||
+		!menu->mEntry[menu->mLine].name ||
+		strcmp(
+			menu->mEntry[menu->mLine].name,
+			gSpideyPauseDisplayOptionsLabel))
+	{
+		return;
+	}
+
+	CheckTriggersFn checkTriggers =
+		(CheckTriggersFn)0x0050C180;
+	if (!checkTriggers(
+			0x00000100,
+			1,
+			1))
+	{
+		return;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_display_options phase=open gameplay_ui=%d text=%d\n",
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent);
+		fclose(f);
+	}
+
+	gSpideyInLevelDisplayMenuActive =
+		1;
+	DisplayOptionsFn displayOptions =
+		(DisplayOptionsFn)0x0050D9B0;
+	displayOptions();
+	gSpideyInLevelDisplayMenuActive =
+		0;
+
+	f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_display_options phase=close gameplay_ui=%d text=%d\n",
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent);
 		fclose(f);
 	}
 }
@@ -3349,13 +3820,27 @@ static void SpideyInstallDisplayAspectCompat()
 			(void*)&SpideyDisplayMenuUpdate,
 			"display_mode_update");
 
+	const int menuDisplayInstalled =
+		SpideyPatchDirectCall(
+			0x0050DC26,
+			0x004401B0,
+			(void*)&SpideyDisplayMenuDisplay,
+			"display_scale_slider_draw");
+
+	const int pauseDisplayOptionsInstalled =
+		SpideyPatchDirectCall(
+			0x004415F8,
+			0x00440600,
+			(void*)&SpideyPauseMenuUpdate,
+			"pause_display_options");
+
 	FILE* f = SpideyOpenConsolidatedLog(
 		"COMPAT");
 	if (f)
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=5 row1=Aspect_Ratio row3=Display_Mode row4=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_access=%d range=%d-%d step=%d defaults=%d,%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
@@ -3367,7 +3852,14 @@ static void SpideyInstallDisplayAspectCompat()
 			resolutionNextInstalled,
 			applyEntryInstalled,
 			applyConfirmInstalled,
-			menuUpdateInstalled);
+			menuUpdateInstalled,
+			menuDisplayInstalled,
+			pauseDisplayOptionsInstalled,
+			kSpideyUiScaleMinPercent,
+			kSpideyUiScaleMaxPercent,
+			kSpideyUiScaleStepPercent,
+			kSpideyDefaultGameplayUiScalePercent,
+			kSpideyDefaultMenuTextScalePercent);
 		fclose(f);
 	}
 }
@@ -4024,35 +4516,38 @@ static int SpideyGetResolutionAwareTextScale(
 	if (requestedScale <= 0)
 		return requestedScale;
 
-	if (!gSpideyShadowPreviewEnabled ||
-		gSpideyModernLogicalHeight <= 480)
+	long scaled =
+		requestedScale;
+
+	if (gSpideyShadowPreviewEnabled &&
+		gSpideyModernLogicalHeight > 480)
 	{
-		return requestedScale;
+		scaled =
+			((long)requestedScale * 480L) /
+			(long)gSpideyModernLogicalHeight;
+
+		const int minimumScale =
+			requestedScale < 64 ?
+				requestedScale :
+				64;
+
+		if (scaled < minimumScale)
+			scaled =
+				minimumScale;
 	}
 
-	// Retail shell typography was authored for the 640x480 PC baseline.
-	// Shell coordinates themselves expand with modern resolution, so leaving
-	// the old scale unchanged makes glyphs balloon with the canvas. Invert
-	// that vertical resolution gain so the font occupies progressively less
-	// of a 1080p/1440p menu instead of clipping modern labels.
-	long scaled =
-		((long)requestedScale * 480L) /
-		(long)gSpideyModernLogicalHeight;
+	scaled =
+		(scaled *
+		 (long)gSpideyMenuTextScalePercent +
+		 50L) /
+		100L;
 
-	const int minimumScale =
-		requestedScale < 64 ?
-			requestedScale :
-			64;
-
-	if (scaled < minimumScale)
+	if (scaled < 1L)
 		scaled =
-			minimumScale;
-	if (scaled > requestedScale)
-		scaled =
-			requestedScale;
+		1L;
 	if (scaled > 65535L)
 		scaled =
-			65535L;
+		65535L;
 
 	return (int)scaled;
 }
@@ -4087,13 +4582,14 @@ static void SpideyApplyFrontendTextScale(
 		{
 			fprintf(
 				log,
-				"ui_text_scale reason=%s requested=%d effective=%d frontend=%d logical=%lux%lu reference_height=480 scope=frontend_gameplay_pause\n",
+				"ui_text_scale reason=%s requested=%d effective=%d frontend=%d logical=%lux%lu reference_height=480 user_percent=%d scope=frontend_gameplay_pause\n",
 				reason ? reason : "unknown",
 				gSpideyRequestedFrontendTextScale,
 				effective,
 				frontend,
 				gSpideyModernLogicalWidth,
-				gSpideyModernLogicalHeight);
+				gSpideyModernLogicalHeight,
+				gSpideyMenuTextScalePercent);
 			fclose(log);
 		}
 
@@ -4528,12 +5024,17 @@ static void SpideyCompactGameplayUiPoly(
 		return;
 	}
 
+	const float userScale =
+		(float)gSpideyGameplayUiScalePercent /
+		100.0f;
 	const float densityX =
-		640.0f /
-		(float)gSpideyModernLogicalWidth;
+		(640.0f /
+		 (float)gSpideyModernLogicalWidth) *
+		userScale;
 	const float densityY =
-		480.0f /
-		(float)gSpideyModernLogicalHeight;
+		(480.0f /
+		 (float)gSpideyModernLogicalHeight) *
+		userScale;
 
 	if (densityX >= 1.0f &&
 		densityY >= 1.0f)
@@ -4618,12 +5119,13 @@ static void SpideyCompactGameplayUiPoly(
 		{
 			fprintf(
 				log,
-				"gameplay_ui_scale source=%s logical=%lux%lu density=%.6f,%.6f anchor=%.1f,%.1f before=%d,%d,%d,%d,%d,%d,%d,%d after=%d,%d,%d,%d,%d,%d,%d,%d count=%lu\n",
+				"gameplay_ui_scale source=%s logical=%lux%lu density=%.6f,%.6f user_percent=%d anchor=%.1f,%.1f before=%d,%d,%d,%d,%d,%d,%d,%d after=%d,%d,%d,%d,%d,%d,%d,%d count=%lu\n",
 				source ? source : "unknown",
 				gSpideyModernLogicalWidth,
 				gSpideyModernLogicalHeight,
 				(double)densityX,
 				(double)densityY,
+				gSpideyGameplayUiScalePercent,
 				(double)anchorX,
 				(double)anchorY,
 				(int)beforeX0,
@@ -4719,9 +5221,10 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d reference=512x240 baseline_output=640x480 policy=compact_resolution_density\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d reference=512x240 baseline_output=640x480 policy=compact_resolution_density user_percent=%d\n",
 			frameCalls,
-			textureCalls);
+			textureCalls,
+			gSpideyGameplayUiScalePercent);
 		fclose(log);
 	}
 }
@@ -5150,27 +5653,31 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 {
 	const int onApply =
 		gSpideyDisplayMenu &&
-		gSpideyDisplayMenu->mNumLines >= 5 &&
-		gSpideyDisplayMenu->mLine == 4;
+		gSpideyDisplayMenu->mNumLines >= 7 &&
+		gSpideyDisplayMenu->mLine == 6;
 
 	if (!onApply)
 	{
 		FILE* ignored = SpideyOpenConsolidatedLog(
-		"COMPAT");
+			"COMPAT");
 		if (ignored)
 		{
 			fprintf(
 				ignored,
-				"display_apply ignored line=%d pending=%lux%lu aspect=%s committed=%lux%lu aspect=%s\n",
+				"display_apply ignored line=%d pending=%lux%lu aspect=%s gameplay_ui=%d text=%d committed=%lux%lu aspect=%s gameplay_ui=%d text=%d\n",
 				gSpideyDisplayMenu ?
 					(int)gSpideyDisplayMenu->mLine :
 					-1,
 				gSpideyPendingOutputWidth,
 				gSpideyPendingOutputHeight,
 				gSpideyAspectLabels[gSpideyPendingAspectMode],
+				gSpideyPendingGameplayUiScalePercent,
+				gSpideyPendingMenuTextScalePercent,
 				gSpideySelectedOutputWidth,
 				gSpideySelectedOutputHeight,
-				gSpideyAspectLabels[gSpideyAspectMode]);
+				gSpideyAspectLabels[gSpideyAspectMode],
+				gSpideyGameplayUiScalePercent,
+				gSpideyMenuTextScalePercent);
 			fclose(ignored);
 		}
 		return;
@@ -5195,6 +5702,28 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 			gSpideyAspectMode;
 	}
 
+	gSpideyPendingGameplayUiScalePercent =
+		SpideyClampUiScalePercent(
+			gSpideyPendingGameplayUiScalePercent);
+	gSpideyPendingMenuTextScalePercent =
+		SpideyClampUiScalePercent(
+			gSpideyPendingMenuTextScalePercent);
+
+	const int displayChanged =
+		gSpideyPendingOutputWidth !=
+			gSpideySelectedOutputWidth ||
+		gSpideyPendingOutputHeight !=
+			gSpideySelectedOutputHeight ||
+		gSpideyPendingAspectMode !=
+			gSpideyAspectMode ||
+		gSpideyPendingWindowMode !=
+			gSpideyWindowMode;
+	const int uiScaleChanged =
+		gSpideyPendingGameplayUiScalePercent !=
+			gSpideyGameplayUiScalePercent ||
+		gSpideyPendingMenuTextScalePercent !=
+			gSpideyMenuTextScalePercent;
+
 	gSpideySelectedOutputWidth =
 		gSpideyPendingOutputWidth;
 	gSpideySelectedOutputHeight =
@@ -5205,6 +5734,10 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 		gSpideyPendingAspectMode;
 	gSpideyWindowMode =
 		gSpideyPendingWindowMode;
+	gSpideyGameplayUiScalePercent =
+		gSpideyPendingGameplayUiScalePercent;
+	gSpideyMenuTextScalePercent =
+		gSpideyPendingMenuTextScalePercent;
 
 	*(DWORD*)0x02E096F8 =
 		(DWORD)gSpideySelectedOutputWidth;
@@ -5221,37 +5754,45 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 		(gSpideyFrontendUiActive ||
 		 gSpideyFrontendLegacyMode) ? 1 : 0;
 
-	// Apply the selected modern mode immediately even while the shell is
-	// active. SpideyCompatSetDisplayOptions will quarantine any incompatible
-	// D3D7 backing size without changing the visible/logical DX11 mode.
-	SpideyCompatSetDisplayOptions(
-		(u32)gSpideySelectedOutputWidth,
-		(u32)gSpideySelectedOutputHeight,
-		32,
-		option4,
-		option5);
-
-	if (liveFrontend)
+	if (displayChanged)
 	{
-		gSpideyFrontendUiActive =
-			1;
-		gSpideyFrontendLegacyMode =
-			1;
+		SpideyCompatSetDisplayOptions(
+			(u32)gSpideySelectedOutputWidth,
+			(u32)gSpideySelectedOutputHeight,
+			32,
+			option4,
+			option5);
+
+		if (liveFrontend)
+		{
+			gSpideyFrontendUiActive =
+				1;
+			gSpideyFrontendLegacyMode =
+				1;
+			SpideyRefreshModernLogicalResolution();
+			SpideyApplyLogicalRenderResolution(
+				1,
+				"display_apply_frontend_restore");
+			SpideySyncFrontendMouseBounds(
+				"display_apply_frontend_restore");
+		}
+
+		SpideyApplySelectedWindowStyle(
+			*(HWND*)0x006B58D0,
+			"display_apply");
+		SpideyApplyRendererWindowMode(
+			"display_apply");
+	}
+	else
+	{
 		SpideyRefreshModernLogicalResolution();
-		SpideyApplyLogicalRenderResolution(
-			1,
-			"display_apply_frontend_restore");
-		SpideySyncFrontendMouseBounds(
-			"display_apply_frontend_restore");
 	}
 
-	SpideyApplySelectedWindowStyle(
-		*(HWND*)0x006B58D0,
-		"display_apply");
-	SpideyApplyRendererWindowMode(
-		"display_apply");
+	SpideyApplyFrontendTextScale(
+		displayChanged ?
+			"display_apply_post_rebuild" :
+			"display_apply_ui_only");
 
-	// Save immediately; Apply must not depend on exiting the menu or game.
 	SpideyRetailSaveSettingsFn retailSave =
 		(SpideyRetailSaveSettingsFn)0x00515850;
 	retailSave();
@@ -5265,13 +5806,18 @@ static void __cdecl SpideyDisplayConfirmOrApply(
 	{
 		fprintf(
 			f,
-			"display_apply committed=1 selected=%lux%lux%lu aspect=%s scalar=%.6f window_mode=%s live_before=%lux%lux%lu frontend=%d brightness=%d saved_now=1\n",
+			"display_apply committed=1 selected=%lux%lux%lu aspect=%s scalar=%.6f window_mode=%s gameplay_ui=%d text=%d display_changed=%d ui_changed=%d in_level=%d live_before=%lux%lux%lu frontend=%d brightness=%d saved_now=1\n",
 			gSpideySelectedOutputWidth,
 			gSpideySelectedOutputHeight,
 			gSpideySelectedOutputBpp,
 			gSpideyAspectLabels[gSpideyAspectMode],
 			(double)*(float*)0x00550064,
 			gSpideyWindowModeLabels[gSpideyWindowMode],
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent,
+			displayChanged,
+			uiScaleChanged,
+			gSpideyInLevelDisplayMenuActive,
 			(unsigned long)liveWidth,
 			(unsigned long)liveHeight,
 			(unsigned long)liveBpp,
