@@ -5504,6 +5504,17 @@ static unsigned long gSpideyModernVertexCount = 0;
 static unsigned long gSpideyModernOutsidePhysicalX = 0;
 static unsigned long gSpideyModernOutsidePhysicalY = 0;
 
+static int gSpidey2DRangeValid = 0;
+static float gSpidey2DMinX = 0.0f;
+static float gSpidey2DMaxX = 0.0f;
+static float gSpidey2DMinY = 0.0f;
+static float gSpidey2DMaxY = 0.0f;
+static int gSpidey3DRangeValid = 0;
+static float gSpidey3DMinX = 0.0f;
+static float gSpidey3DMaxX = 0.0f;
+static float gSpidey3DMinY = 0.0f;
+static float gSpidey3DMaxY = 0.0f;
+
 static int SpideyIsExecutablePointer(
 		void* pointer)
 {
@@ -6101,6 +6112,47 @@ static HRESULT WINAPI SpideyProbeD3D7DrawPrimitive(
 
 				++gSpideyModernVertexCount;
 
+				int* classRangeValid =
+					drawIs2D ?
+						&gSpidey2DRangeValid :
+						&gSpidey3DRangeValid;
+				float* classMinX =
+					drawIs2D ?
+						&gSpidey2DMinX :
+						&gSpidey3DMinX;
+				float* classMaxX =
+					drawIs2D ?
+						&gSpidey2DMaxX :
+						&gSpidey3DMaxX;
+				float* classMinY =
+					drawIs2D ?
+						&gSpidey2DMinY :
+						&gSpidey3DMinY;
+				float* classMaxY =
+					drawIs2D ?
+						&gSpidey2DMaxY :
+						&gSpidey3DMaxY;
+
+				if (!*classRangeValid)
+				{
+					*classRangeValid = 1;
+					*classMinX = x;
+					*classMaxX = x;
+					*classMinY = y;
+					*classMaxY = y;
+				}
+				else
+				{
+					if (x < *classMinX)
+						*classMinX = x;
+					if (x > *classMaxX)
+						*classMaxX = x;
+					if (y < *classMinY)
+						*classMinY = y;
+					if (y > *classMaxY)
+						*classMaxY = y;
+				}
+
 				if (x < 0.0f ||
 					x > (float)gSpideyLegacyPhysicalWidth)
 				{
@@ -6436,6 +6488,16 @@ static void SpideyResetRetailD3D7DrawProbeFrame()
 	gSpideyModernVertexCount = 0;
 	gSpideyModernOutsidePhysicalX = 0;
 	gSpideyModernOutsidePhysicalY = 0;
+	gSpidey2DRangeValid = 0;
+	gSpidey2DMinX = 0.0f;
+	gSpidey2DMaxX = 0.0f;
+	gSpidey2DMinY = 0.0f;
+	gSpidey2DMaxY = 0.0f;
+	gSpidey3DRangeValid = 0;
+	gSpidey3DMinX = 0.0f;
+	gSpidey3DMaxX = 0.0f;
+	gSpidey3DMinY = 0.0f;
+	gSpidey3DMaxY = 0.0f;
 }
 
 static void SpideyFlushRetailD3D7DrawProbeFrame(
@@ -6458,7 +6520,7 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 		{
 			fprintf(
 				f,
-				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu d3d7_suppress=%d d3d7_suppressed=%lu d3d7_fallback=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
+				"draw_frame frame=%lu calls=%lu textured=%lu mirrored=%lu missing=%lu triangle_fan=%lu fvf_0x144=%lu other_primitive=%lu other_fvf=%lu class_2d=%lu class_3d=%lu tagged_2d=%lu shadow_submit=%lu shadow_skip=%lu shadow_offscreen_skip=%lu transient_queued=%lu transient_mirrored=%lu d3d7_suppress=%d d3d7_suppressed=%lu d3d7_fallback=%lu resident=%lu device=0x%08lX modern=%d logical=%lux%lu physical=%lux%lu range_valid=%d xrange=%.3f,%.3f yrange=%.3f,%.3f class2d_valid=%d class2d_x=%.3f,%.3f class2d_y=%.3f,%.3f class3d_valid=%d class3d_x=%.3f,%.3f class3d_y=%.3f,%.3f vertices=%lu outside_physical_x=%lu outside_physical_y=%lu\n",
 				frame,
 				gSpideyRetailDrawCalls,
 				gSpideyRetailDrawTextured,
@@ -6491,6 +6553,16 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 				gSpideyModernMaxX,
 				gSpideyModernMinY,
 				gSpideyModernMaxY,
+				gSpidey2DRangeValid,
+				gSpidey2DMinX,
+				gSpidey2DMaxX,
+				gSpidey2DMinY,
+				gSpidey2DMaxY,
+				gSpidey3DRangeValid,
+				gSpidey3DMinX,
+				gSpidey3DMaxX,
+				gSpidey3DMinY,
+				gSpidey3DMaxY,
 				gSpideyModernVertexCount,
 				gSpideyModernOutsidePhysicalX,
 				gSpideyModernOutsidePhysicalY);
