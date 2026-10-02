@@ -1204,11 +1204,13 @@ static char gSpideyGameplayUiScaleMenuLabel[64] =
 	"Gameplay UI Scale: 125%";
 static char gSpideyMenuTextScaleMenuLabel[64] =
 	"Menu/Text Scale: 100%";
+static char gSpideyPauseGameplayUiScaleMenuLabel[64] =
+	"UI Scale [=====-----] 125%";
+static char gSpideyPauseMenuTextScaleMenuLabel[64] =
+	"Menu Text [===-------] 100%";
 static char gSpideyPauseApplyUiScaleLabel[] =
 	"Apply UI Scale";
 static int gSpideyInLevelDisplayMenuActive = 0;
-static unsigned long gSpideyPauseUiDisplaySamples =
-	0;
 
 static const char* const gSpideyAspectLabels[] =
 {
@@ -1326,6 +1328,69 @@ static int SpideyUiScalePercentToSliderValue(
 }
 
 // @Ok
+static void SpideyBuildPauseUiScaleLabel(
+		char* destination,
+		const char* prefix,
+		int percent)
+{
+	if (!destination ||
+		!prefix)
+	{
+		return;
+	}
+
+	percent =
+		SpideyClampUiScalePercent(
+			percent);
+
+	const int slots =
+		10;
+	const int range =
+		kSpideyUiScaleMaxPercent -
+		kSpideyUiScaleMinPercent;
+	int filled =
+		0;
+
+	if (range > 0)
+	{
+		filled =
+			((percent -
+			  kSpideyUiScaleMinPercent) *
+			 slots +
+			 range / 2) /
+			range;
+	}
+
+	if (filled < 0)
+		filled =
+			0;
+	if (filled > slots)
+		filled =
+			slots;
+
+	char bar[11];
+	int i;
+	for (i = 0;
+		 i < slots;
+		 ++i)
+	{
+		bar[i] =
+			i < filled ?
+				'=' :
+				'-';
+	}
+	bar[slots] =
+		0;
+
+	sprintf(
+		destination,
+		"%s [%s] %d%%",
+		prefix,
+		bar,
+		percent);
+}
+
+// @Ok
 static void SpideyUpdateUiScaleMenuLabels()
 {
 	gSpideyPendingGameplayUiScalePercent =
@@ -1342,6 +1407,15 @@ static void SpideyUpdateUiScaleMenuLabels()
 	sprintf(
 		gSpideyMenuTextScaleMenuLabel,
 		"Menu/Text Scale: %d%%",
+		gSpideyPendingMenuTextScalePercent);
+
+	SpideyBuildPauseUiScaleLabel(
+		gSpideyPauseGameplayUiScaleMenuLabel,
+		"UI Scale",
+		gSpideyPendingGameplayUiScalePercent);
+	SpideyBuildPauseUiScaleLabel(
+		gSpideyPauseMenuTextScaleMenuLabel,
+		"Menu Text",
 		gSpideyPendingMenuTextScalePercent);
 }
 
@@ -2853,177 +2927,6 @@ static void SpideyPauseCommitUiScale()
 }
 
 // @Ok
-static void __fastcall SpideyPauseMenuDisplay(
-		CMenu* menu,
-		void*)
-{
-	typedef void (__fastcall *RetailDisplayFn)(
-			CMenu*,
-			void*);
-
-	RetailDisplayFn retailDisplay =
-		(RetailDisplayFn)0x004401B0;
-	retailDisplay(
-		menu,
-		0);
-
-	if (!menu ||
-		!SpideyPauseMenuHasEntry(
-			menu,
-			gSpideyPauseApplyUiScaleLabel))
-	{
-		return;
-	}
-
-	SpideyDisplaySliderDrawFn drawSlider =
-		(SpideyDisplaySliderDrawFn)0x00498060;
-
-	const int logPauseUi =
-		gSpideyPauseUiDisplaySamples < 12;
-	const int sliderX =
-		305;
-	int y =
-		0;
-	const char* selected =
-		0;
-
-	if (menu->mLine < menu->mNumLines)
-		selected =
-			menu->mEntry[menu->mLine].name;
-
-	if (logPauseUi)
-	{
-		FILE* f =
-			SpideyOpenConsolidatedLog(
-				"COMPAT");
-		if (f)
-		{
-			fprintf(
-				f,
-				"pause_ui_display phase=begin sample=%lu menu=0x%08lX rows=%u line=%u selected=%s pending_gameplay=%d pending_text=%d\n",
-				gSpideyPauseUiDisplaySamples,
-				(unsigned long)menu,
-				(unsigned int)menu->mNumLines,
-				(unsigned int)menu->mLine,
-				selected ? selected : "<none>",
-				gSpideyPendingGameplayUiScalePercent,
-				gSpideyPendingMenuTextScalePercent);
-			fclose(f);
-		}
-	}
-
-	if (SpideyGetDisplayScaleSliderY(
-			menu,
-			gSpideyGameplayUiScaleMenuLabel,
-			&y))
-	{
-		if (logPauseUi)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"COMPAT");
-			if (f)
-			{
-				fprintf(
-					f,
-					"pause_ui_display phase=before_gameplay_slider sample=%lu y=%d value=%d\n",
-					gSpideyPauseUiDisplaySamples,
-					y,
-					SpideyUiScalePercentToSliderValue(
-						gSpideyPendingGameplayUiScalePercent));
-				fclose(f);
-			}
-		}
-
-		drawSlider(
-			sliderX,
-			y,
-			selected ==
-				gSpideyGameplayUiScaleMenuLabel ? 1 : 0,
-			SpideyUiScalePercentToSliderValue(
-				gSpideyPendingGameplayUiScalePercent));
-
-		if (logPauseUi)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"COMPAT");
-			if (f)
-			{
-				fprintf(
-					f,
-					"pause_ui_display phase=after_gameplay_slider sample=%lu\n",
-					gSpideyPauseUiDisplaySamples);
-				fclose(f);
-			}
-		}
-	}
-
-	if (SpideyGetDisplayScaleSliderY(
-			menu,
-			gSpideyMenuTextScaleMenuLabel,
-			&y))
-	{
-		if (logPauseUi)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"COMPAT");
-			if (f)
-			{
-				fprintf(
-					f,
-					"pause_ui_display phase=before_text_slider sample=%lu y=%d value=%d\n",
-					gSpideyPauseUiDisplaySamples,
-					y,
-					SpideyUiScalePercentToSliderValue(
-						gSpideyPendingMenuTextScalePercent));
-				fclose(f);
-			}
-		}
-
-		drawSlider(
-			sliderX,
-			y,
-			selected ==
-				gSpideyMenuTextScaleMenuLabel ? 1 : 0,
-			SpideyUiScalePercentToSliderValue(
-				gSpideyPendingMenuTextScalePercent));
-
-		if (logPauseUi)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"COMPAT");
-			if (f)
-			{
-				fprintf(
-					f,
-					"pause_ui_display phase=after_text_slider sample=%lu\n",
-					gSpideyPauseUiDisplaySamples);
-				fclose(f);
-			}
-		}
-	}
-
-	if (logPauseUi)
-	{
-		FILE* f =
-			SpideyOpenConsolidatedLog(
-				"COMPAT");
-		if (f)
-		{
-			fprintf(
-				f,
-				"pause_ui_display phase=end sample=%lu\n",
-				gSpideyPauseUiDisplaySamples);
-			fclose(f);
-		}
-		++gSpideyPauseUiDisplaySamples;
-	}
-}
-
-// @Ok
 static void __fastcall SpideyPauseMenuUpdate(
 		CMenu* menu,
 		void*)
@@ -3049,11 +2952,11 @@ static void __fastcall SpideyPauseMenuUpdate(
 			retailAdd(
 				menu,
 				0,
-				gSpideyGameplayUiScaleMenuLabel);
+				gSpideyPauseGameplayUiScaleMenuLabel);
 			retailAdd(
 				menu,
 				0,
-				gSpideyMenuTextScaleMenuLabel);
+				gSpideyPauseMenuTextScaleMenuLabel);
 			retailAdd(
 				menu,
 				0,
@@ -3070,7 +2973,7 @@ static void __fastcall SpideyPauseMenuUpdate(
 			{
 				fprintf(
 					f,
-					"pause_ui_controls rows_added=3 rows=%u y=%d line_sep=%d gameplay=%d text=%d retail_display_options_disabled=1\n",
+					"pause_ui_controls rows_added=3 rows=%u y=%d line_sep=%d gameplay=%d text=%d retail_display_options_disabled=1 graphical_slider_resources=0 controls=left_right_apply\n",
 					(unsigned int)menu->mNumLines,
 					menu->mY,
 					menu->mLineSep,
@@ -3103,7 +3006,7 @@ static void __fastcall SpideyPauseMenuUpdate(
 
 	if (!strcmp(
 			selected,
-			gSpideyGameplayUiScaleMenuLabel))
+			gSpideyPauseGameplayUiScaleMenuLabel))
 	{
 		percent =
 			&gSpideyPendingGameplayUiScalePercent;
@@ -3112,7 +3015,7 @@ static void __fastcall SpideyPauseMenuUpdate(
 	}
 	else if (!strcmp(
 			selected,
-			gSpideyMenuTextScaleMenuLabel))
+			gSpideyPauseMenuTextScaleMenuLabel))
 	{
 		percent =
 			&gSpideyPendingMenuTextScalePercent;
@@ -3146,23 +3049,6 @@ static void __fastcall SpideyPauseMenuUpdate(
 			-1;
 	}
 
-	int y =
-		0;
-	if (!delta &&
-		SpideyGetDisplayScaleSliderY(
-			menu,
-			selected,
-			&y))
-	{
-		SpideyDisplaySliderMouseFn sliderMouse =
-			(SpideyDisplaySliderMouseFn)0x00497F80;
-		delta =
-			sliderMouse(
-				305,
-				y,
-				SpideyUiScalePercentToSliderValue(
-					*percent));
-	}
 
 	if (delta)
 	{
@@ -3250,10 +3136,10 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 
 	if (!strcmp(
 			selected,
-			gSpideyGameplayUiScaleMenuLabel) ||
+			gSpideyPauseGameplayUiScaleMenuLabel) ||
 		!strcmp(
 			selected,
-			gSpideyMenuTextScaleMenuLabel))
+			gSpideyPauseMenuTextScaleMenuLabel))
 	{
 		// Synthetic pause rows are adjusted with left/right or the slider.
 		// Consume confirm so retail does not dispatch an unknown string.
@@ -4189,13 +4075,6 @@ static void SpideyInstallDisplayAspectCompat()
 			(void*)&SpideyDisplayMenuDisplay,
 			"display_scale_slider_draw");
 
-	const int pauseUiDisplayInstalled =
-		SpideyPatchDirectCall(
-			0x00440CAC,
-			0x004401B0,
-			(void*)&SpideyPauseMenuDisplay,
-			"pause_ui_display");
-
 	const int pauseUiUpdateInstalled =
 		SpideyPatchDirectCall(
 			0x004415F8,
@@ -4216,7 +4095,7 @@ static void SpideyInstallDisplayAspectCompat()
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_inline=1 pause_display=%d pause_update=%d pause_confirm=%d range=%d-%d step=%d defaults=%d,%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_inline=1 pause_text_sliders=1 pause_display_hook=0 pause_update=%d pause_confirm=%d range=%d-%d step=%d defaults=%d,%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
@@ -4230,7 +4109,6 @@ static void SpideyInstallDisplayAspectCompat()
 			applyConfirmInstalled,
 			menuUpdateInstalled,
 			menuDisplayInstalled,
-			pauseUiDisplayInstalled,
 			pauseUiUpdateInstalled,
 			pauseConfirmInstalled,
 			kSpideyUiScaleMinPercent,
