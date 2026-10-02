@@ -5585,6 +5585,297 @@ static int SpideyRoundGameplayUiCoord(
 			value - 0.5f);
 }
 
+typedef int (__cdecl *SpideyRetailMessDrawTextFn)(
+		i32,
+		i32,
+		const char*,
+		i32,
+		u32);
+
+static unsigned long gSpideyCartridgeTextProbeSamples =
+	0;
+static unsigned long gSpideyCompassQPolyProbeSamples =
+	0;
+
+// @Ok
+static int SpideyGetGameplayHudTextScale(
+		int requestedScale)
+{
+	if (requestedScale <= 0)
+		return requestedScale;
+
+	long scaled =
+		requestedScale;
+
+	if (gSpideyShadowPreviewEnabled &&
+		gSpideyModernLogicalHeight > 480)
+	{
+		scaled =
+			((long)requestedScale * 480L) /
+			(long)gSpideyModernLogicalHeight;
+
+		const int minimumScale =
+			requestedScale < 64 ?
+				requestedScale :
+				64;
+
+		if (scaled < minimumScale)
+			scaled =
+				minimumScale;
+	}
+
+	scaled =
+		(scaled *
+		 (long)gSpideyGameplayUiScalePercent +
+		 50L) /
+		100L;
+
+	if (scaled < 1L)
+		scaled =
+			1L;
+	if (scaled > 65535L)
+		scaled =
+			65535L;
+
+	return (int)scaled;
+}
+
+// @Ok
+static int __cdecl SpideyCompatCartridgeCountText(
+		i32 x,
+		i32 y,
+		const char* text,
+		i32 option4,
+		u32 option5)
+{
+	const int beforeX =
+		x;
+	const int beforeY =
+		y;
+
+	float densityX =
+		1.0f;
+	float densityY =
+		1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	if (!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f))
+	{
+		x =
+			SpideyRoundGameplayUiCoord(
+				(float)x *
+				densityX);
+		y =
+			SpideyRoundGameplayUiCoord(
+				(float)y *
+				densityY);
+	}
+
+	const u16 savedScale =
+		*(u16*)0x0060D5A4;
+	const int hudScale =
+		SpideyGetGameplayHudTextScale(
+			gSpideyRequestedFrontendTextScale);
+	*(u16*)0x0060D5A4 =
+		(u16)hudScale;
+
+	if (gSpideyCartridgeTextProbeSamples < 24)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"gameplay_ui_alignment source=cartridge_text policy=top_left_compact before=%d,%d after=%d,%d density=%.6f,%.6f requested_scale=%d hud_scale=%d saved_text_scale=%u gameplay_percent=%d text_percent=%d text=%s\n",
+				beforeX,
+				beforeY,
+				x,
+				y,
+				(double)densityX,
+				(double)densityY,
+				gSpideyRequestedFrontendTextScale,
+				hudScale,
+				(unsigned int)savedScale,
+				gSpideyGameplayUiScalePercent,
+				gSpideyMenuTextScalePercent,
+				text ? text : "<null>");
+			fclose(log);
+		}
+		++gSpideyCartridgeTextProbeSamples;
+	}
+
+	SpideyRetailMessDrawTextFn retail =
+		(SpideyRetailMessDrawTextFn)0x00458700;
+	const int result =
+		retail(
+			x,
+			y,
+			text,
+			option4,
+			option5);
+
+	*(u16*)0x0060D5A4 =
+		savedScale;
+
+	return result;
+}
+
+// @Ok
+static void __cdecl SpideyCompatCompassQPoly2D(
+		float x0,
+		float y0,
+		float u0,
+		float v0,
+		u32 color0,
+		float x1,
+		float y1,
+		float u1,
+		float v1,
+		u32 color1,
+		float x2,
+		float y2,
+		float u2,
+		float v2,
+		u32 color2,
+		float x3,
+		float y3,
+		float u3,
+		float v3,
+		u32 color3,
+		float z)
+{
+	const float beforeX0 =
+		x0;
+	const float beforeY0 =
+		y0;
+	const float beforeX1 =
+		x1;
+	const float beforeY1 =
+		y1;
+	const float beforeX2 =
+		x2;
+	const float beforeY2 =
+		y2;
+	const float beforeX3 =
+		x3;
+	const float beforeY3 =
+		y3;
+
+	float densityX =
+		1.0f;
+	float densityY =
+		1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	if (!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f))
+	{
+		const float anchorX =
+			(float)gSpideyModernLogicalWidth;
+		const float anchorY =
+			(float)gSpideyModernLogicalHeight;
+
+		x0 =
+			SpideyScaleGameplayUiFloatCoord(
+				x0,
+				anchorX,
+				densityX);
+		x1 =
+			SpideyScaleGameplayUiFloatCoord(
+				x1,
+				anchorX,
+				densityX);
+		x2 =
+			SpideyScaleGameplayUiFloatCoord(
+				x2,
+				anchorX,
+				densityX);
+		x3 =
+			SpideyScaleGameplayUiFloatCoord(
+				x3,
+				anchorX,
+				densityX);
+		y0 =
+			SpideyScaleGameplayUiFloatCoord(
+				y0,
+				anchorY,
+				densityY);
+		y1 =
+			SpideyScaleGameplayUiFloatCoord(
+				y1,
+				anchorY,
+				densityY);
+		y2 =
+			SpideyScaleGameplayUiFloatCoord(
+				y2,
+				anchorY,
+				densityY);
+		y3 =
+			SpideyScaleGameplayUiFloatCoord(
+				y3,
+				anchorY,
+				densityY);
+	}
+
+	if (gSpideyCompassQPolyProbeSamples < 48)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"gameplay_ui_alignment source=compass_qpoly seq=%lu policy=bottom_right_compact logical=%lux%lu density=%.6f,%.6f before=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f after=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+				gSpideyCompassQPolyProbeSamples % 3,
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight,
+				(double)densityX,
+				(double)densityY,
+				(double)beforeX0,
+				(double)beforeY0,
+				(double)beforeX1,
+				(double)beforeY1,
+				(double)beforeX2,
+				(double)beforeY2,
+				(double)beforeX3,
+				(double)beforeY3,
+				(double)x0,
+				(double)y0,
+				(double)x1,
+				(double)y1,
+				(double)x2,
+				(double)y2,
+				(double)x3,
+				(double)y3);
+			fclose(log);
+		}
+		++gSpideyCompassQPolyProbeSamples;
+	}
+
+	SpideyRetailQPoly2DFn retail =
+		(SpideyRetailQPoly2DFn)0x00507910;
+	retail(
+		x0, y0, u0, v0, color0,
+		x1, y1, u1, v1, color1,
+		x2, y2, u2, v2, color2,
+		x3, y3, u3, v3, color3,
+		z);
+}
+
 // @Ok
 static void __cdecl SpideyCompatHealthBarQPoly2D(
 		float x0,
@@ -6287,6 +6578,36 @@ static void SpideyInstallGameplayUiScaleCompat()
 			0x00462CD0,
 			(void*)&SpideyCompatPanelSetCoordsTexture);
 
+	const int cartridgeTextInstalled =
+		SpideyPatchDirectCall(
+			0x00465A83,
+			0x00458700,
+			(void*)&SpideyCompatCartridgeCountText,
+			"cartridge_count_text");
+
+	const unsigned long compassQPolySites[] =
+	{
+		0x00463D19,
+		0x00464035,
+		0x00464257
+	};
+	int compassQPolyCalls =
+		0;
+	int compassQPolyIndex;
+	for (compassQPolyIndex = 0;
+		 compassQPolyIndex <
+			(int)(sizeof(compassQPolySites) /
+			 sizeof(compassQPolySites[0]));
+		 ++compassQPolyIndex)
+	{
+		compassQPolyCalls +=
+			SpideyPatchDirectCall(
+				compassQPolySites[compassQPolyIndex],
+				0x00507910,
+				(void*)&SpideyCompatCompassQPoly2D,
+				"compass_qpoly");
+	}
+
 	const int healthQPolyOne =
 		SpideyPatchDirectCall(
 			0x004644E3,
@@ -6388,9 +6709,11 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d health_qpoly=%d,%d,%d health_flat=%d,%d panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d cartridge_text=%d compass_qpoly=%d health_qpoly=%d,%d,%d health_flat=%d,%d panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
 			frameCalls,
 			textureCalls,
+			cartridgeTextInstalled,
+			compassQPolyCalls,
 			healthQPolyOne,
 			healthQPolyTwo,
 			healthQPolyThree,
