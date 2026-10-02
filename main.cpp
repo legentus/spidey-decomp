@@ -1205,9 +1205,9 @@ static char gSpideyGameplayUiScaleMenuLabel[64] =
 static char gSpideyMenuTextScaleMenuLabel[64] =
 	"Menu/Text Scale: 100%";
 static char gSpideyPauseGameplayUiScaleMenuLabel[64] =
-	"UI Scale [=====-----] 125%";
+	"UI Scale =====----- 125%";
 static char gSpideyPauseMenuTextScaleMenuLabel[64] =
-	"Menu Text [===-------] 100%";
+	"Menu Text ===------- 100%";
 static char gSpideyPauseApplyUiScaleLabel[] =
 	"Apply UI Scale";
 static int gSpideyInLevelDisplayMenuActive = 0;
@@ -1384,7 +1384,7 @@ static void SpideyBuildPauseUiScaleLabel(
 
 	sprintf(
 		destination,
-		"%s [%s] %d%%",
+		"%s %s %d%%",
 		prefix,
 		bar,
 		percent);
