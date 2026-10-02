@@ -7806,3 +7806,193 @@ For the next log, inspect:
 - Alt+Tab `background_message_pump` and post-return `foreground_acquire`.
 
 Do not make another visual HUD transform until the new holder/fill live bounds are compared numerically.
+
+
+## 21774ea runtime: pause slider-resource crash; health fixed, cartridge/compass still unanchored (2026-10-02)
+
+### Runtime tested revision
+
+The user tested:
+
+- `21774eae1695fa6541453c0c87ccdd579457e34f`
+
+with the same grounded retail executable fingerprint:
+
+- SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
+- PE timestamp `0x3B7A3167`
+- image size `0x02A0D000`
+
+Runtime observations:
+
+- the health bar/fill is now correctly inside its holder;
+- the cartridge-count number is no longer spatially attached to the scaled top-left HUD group;
+- the compass arrow is not inside the scaled bottom-right compass holder;
+- pressing Pause crashes immediately as the in-level scale controls begin drawing.
+
+### Health/QPoly correction is runtime confirmed
+
+At 2560x1440, Gameplay UI Scale 125%, the log shows exact holder/fill agreement after the QPoly passthrough correction.
+
+Example:
+
+- holder authored: `54,42 -> 86,58`
+- holder compact authored: `17,18 -> 27,24`
+- holder projected live: `85,108 -> 135,144`
+- adjacent panel QPoly arrives as exactly `85,108 -> 135,144`
+
+The same exact relationships repeat across the six broad-panel QPoly elements. The user's visual confirmation that the health bar is now inside its holder therefore confirms the passthrough policy and it must not be reverted.
+
+### Pause crash is the retail slider animation, not CMenu row insertion
+
+The final runtime sequence is:
+
+- `pause_ui_controls rows_added=3 rows=7 y=85 ...`
+- `pause_ui_display phase=begin ... selected=Continue ...`
+- `pause_ui_display phase=before_gameplay_slider ... y=133 value=128`
+- immediate `0xC0000005`
+- fault EIP `0x00462B3B`
+- read target `0x0000001C`
+
+Static RE of the original retail functions proves the chain:
+
+1. pause graphical wrapper called retail slider draw at `0x00498060`;
+2. slider draw calls `Spool_FindAnim @ 0x004CAB50`;
+3. in gameplay the frontend slider animation is not loaded, so the returned frame pointer is null;
+4. slider code advances that null base to `0x18`;
+5. it calls `Panel_DrawTexturedPoly_1 @ 0x00462B30`;
+6. `0x00462B3B` executes `mov ecx,[esi+4]`;
+7. with `esi=0x18`, the read target is exactly `0x1C`, matching the runtime crash.
+
+Therefore frontend graphical slider resources must not be used in the gameplay pause menu.
+
+### Resource-free in-level UI controls
+
+Commits:
+
+- `e89ca49fec856f00ee60a3fa4165e3200d4ee5c2` — **fix: use resource-free pause UI scale controls**
+- `ed4f6736b4d0a514989c711c82003fa3d023630e` — **fix: avoid font escape glyphs in pause scale bars**
+
+The custom pause `CMenu::Display` hook at `0x00440CAC` is removed entirely.
+
+There is now no call to:
+- retail graphical slider draw `0x00498060`;
+- pause graphical slider mouse handler;
+- frontend-only slider animation resources.
+
+The three pause rows remain:
+
+- `UI Scale =====----- 125%` (example)
+- `Menu Text ===------- 100%` (example)
+- `Apply UI Scale`
+
+The bars are plain text. `[` and `]` were deliberately avoided because Spider-Man's font parser treats brackets as escape/control characters.
+
+Controls:
+- left/right changes the selected scale in 5% steps;
+- Apply commits both values live and persists `spidey-modern-video.ini`;
+- no renderer/device rebuild;
+- no level reload;
+- normal frontend Display Options retains its graphical sliders.
+
+### Cartridge count: targeted HUD anchoring
+
+Static RE of `sub_4658C0` proves the cartridge-count text path:
+
+- `Mess_SetScale @ 0x00458620` called at `0x00465A36`;
+- `Mess_DrawText @ 0x00458700` called at **`0x00465A83`**;
+- the draw uses fixed virtual HUD coordinates (first coordinate `0x5F` / 95, second based on the panel's vertical HUD state), independent of the holder poly transformed by `Panel_SetStretchedScreenCoords`.
+
+That explains why the count did not stay attached after only the holder/graphic transforms were compacted.
+
+Commit:
+
+- `20f02f7d8dfdbd71224f8bf52631aaf9e7e87a9b` — **fix: anchor cartridge count and compass geometry to scaled HUD**
+
+The callsite `0x00465A83` now uses `SpideyCompatCartridgeCountText`.
+
+Policy:
+- transform cartridge text x/y in the same top-left compact coordinate policy as the gameplay HUD;
+- temporarily render the cartridge digits at a resolution-aware font scale derived from **Gameplay UI Scale**, not Menu Text Scale;
+- restore the previous text scale immediately after the one cartridge draw, so normal menu/mission typography remains independent.
+
+New telemetry:
+
+`gameplay_ui_alignment source=cartridge_text policy=top_left_compact before=... after=... density=... requested_scale=... hud_scale=... saved_text_scale=... gameplay_percent=... text_percent=... text=...`
+
+This provides exact source and corrected coordinates on the next run.
+
+### Compass arrow: targeted bottom-right geometry anchoring
+
+The existing holder telemetry proves the compass-frame group is compacted to:
+
+- authored before: `406,183 -> 457,223`
+- authored after: `479,216 -> 495,233`
+- projected live bounds: **`2395,1296 -> 2475,1398`** at 2560x1440 / 125%.
+
+Static RE of `Panel_DisplayCompass @ 0x00463860` shows three direct dynamic QPoly draws that do **not** pass through the holder's `Panel_SetStretchedScreenCoords` transform:
+
+- `0x00463D19 -> PCGfx_DrawQPoly2D`
+- `0x00464035 -> PCGfx_DrawQPoly2D`
+- `0x00464257 -> PCGfx_DrawQPoly2D`
+
+Those manually generated compass polygons are the missing coordinate path. They are now routed through `SpideyCompatCompassQPoly2D`, which applies the same gameplay density transform around the **bottom-right logical-screen anchor** used by the compact compass holder.
+
+New telemetry:
+
+`gameplay_ui_alignment source=compass_qpoly seq=0..2 policy=bottom_right_compact logical=... density=... before=... after=...`
+
+This lets the next log prove whether the dynamic arrow geometry is within the holder's `2395,1296 -> 2475,1398` live region.
+
+### Static validation after ed4f673
+
+Current source checks:
+
+- lexical parser ends in code;
+- braces, parentheses and brackets balance;
+- no `SpideyPauseMenuDisplay` remains;
+- no pause call to `0x00498060`;
+- no pause slider-mouse call remains;
+- pause controls use resource-free text rows;
+- new cartridge callsite `0x00465A83` is installed;
+- all three compass QPoly callsites are installed;
+- each new helper has exactly one `// @Ok` annotation;
+- new loops use VC6-safe declaration/scope style;
+- existing three panel installer loops remain distinct (`qpolyIndex`, `gouraudIndex`, `flatIndex`).
+
+This is source/static validated, **not yet matching-build or runtime proven**.
+
+### Mandatory next test
+
+Run:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Then:
+
+1. Enter the same gameplay scene and leave the HUD visible for several seconds.
+2. Check the top-left HUD:
+   - health fill should remain in its holder;
+   - cartridge-count number should now move/scale with that HUD cluster.
+3. Check the bottom-right compass:
+   - arrow/dynamic compass geometry should now be inside the compact holder.
+4. Press Pause.
+   - pause must open without crashing;
+   - the two resource-free text scale rows and Apply row should be visible.
+5. Select UI Scale and use left/right at least once.
+6. Select Menu Text and use left/right at least once.
+7. Choose Apply UI Scale.
+8. Return to gameplay.
+   - confirm the HUD change applies immediately without restart/reload.
+9. If stable, Alt+Tab out/back once.
+10. Send the consolidated log and a screenshot if convenient.
+
+On the next log inspect:
+- `gameplay_ui_alignment source=cartridge_text`;
+- `gameplay_ui_alignment source=compass_qpoly`;
+- holder `gameplay_ui_scale ... live_after=`;
+- `pause_ui_controls`;
+- `pause_ui_adjust`;
+- `pause_ui_apply`;
+- any crash lines.
+
+Do not change the proven broad-panel QPoly passthrough policy unless new runtime evidence contradicts it.
