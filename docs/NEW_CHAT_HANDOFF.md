@@ -1,3 +1,32 @@
+# HANDOFF PACKAGE CHECKPOINT — CAMERA FOLLOW-UP BATCH AWAITING ONE COMBINED RUNTIME (2026-10-04)
+
+This file was refreshed specifically for a new-chat handoff after an interrupted engineering turn.
+
+**Verified live dev before this handoff refresh:** `0c0f22614ca9e6b835e2b524d896659e47f8aec5`
+
+Nothing from the interrupted work was lost. The repository already contains:
+
+- the runtime-validated Stage-A 360-degree mode-3 orbit camera;
+- persistent Camera Sensitivity in Pause -> Options;
+- both periodic synchronous renderer readbacks disabled by default;
+- camera-forward web enemy auto-targeting at `SelectAutoAimTarget -> SelectTargetBaddy`;
+- reduced camera telemetry/logging traffic after the first camera success;
+- complete RE notes and the exact combined runtime test below.
+
+**Do not redo the RE or re-implement these features.** The next chat should fetch live `dev`, read the first/current section of this file plus the tail of `docs/CURRENT_STATUS.md`, and continue from the runtime test frontier.
+
+The next authoritative user action is still one combined run of `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` validating:
+
+1. Camera Sensitivity at an obvious low/high value and persistence after Apply.
+2. Whether the old repeating half-second-class freeze is gone; separately note smaller hitching.
+3. Camera-centered enemy web targeting while Spider-Man's body faces elsewhere.
+4. A brief normal movement/swing/camera regression pass.
+5. Upload only the single consolidated `spidey-decomp.log`.
+
+If web targeting is mirrored, behind, or vertically wrong, use `camera_web_target` telemetry and the documented transform convention before changing axes. If the large periodic freeze is gone but smaller hitching remains, keep profiling from the new no-readback baseline instead of re-enabling old readback diagnostics.
+
+---
+
 # LATEST FRONTIER — CAMERA FOLLOW-UP BATCH READY FOR COMBINED TEST (2026-10-04)
 
 The first modern mode-3 orbit camera is runtime-validated by the user and considered a strong success.
