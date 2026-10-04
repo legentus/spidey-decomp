@@ -9200,6 +9200,261 @@ static void SpideyInstallCameraWebTargetingCompat()
 	}
 }
 
+static void SpideyShadowWorldSpaceProbeActor(
+		CBody* body,
+		const char* label,
+		unsigned long frame)
+{
+	if (!body)
+		return;
+
+	int valid =
+		0;
+	int isSuper =
+		0;
+	int regionIndex =
+		-1;
+	int numParts =
+		0;
+	int modelVertices =
+		0;
+	int modelNormals =
+		0;
+	int modelFaces =
+		0;
+	int modelFlags =
+		0;
+	int sampleX =
+		0;
+	int sampleY =
+		0;
+	int sampleZ =
+		0;
+	int poseM00 =
+		0;
+	int poseM11 =
+		0;
+	int poseM22 =
+		0;
+	int poseTx =
+		0;
+	int poseTy =
+		0;
+	int poseTz =
+		0;
+	unsigned long regionPtr =
+		0;
+	unsigned long modelPtr =
+		0;
+	unsigned long decompressedPtr =
+		0;
+	unsigned long posePtr =
+		0;
+	unsigned long selectedPosePtr =
+		0;
+	char regionName[10];
+	memset(
+		regionName,
+		0,
+		sizeof(regionName));
+
+	__try
+	{
+		regionIndex =
+			(int)body->mRegion;
+		if (regionIndex < 0 ||
+			regionIndex >= MAXPSX)
+		{
+			__leave;
+		}
+
+		SPSXRegion* region =
+			&G_PSXREGION[regionIndex];
+		regionPtr =
+			(unsigned long)region;
+		isSuper =
+			region->IsSuper ? 1 : 0;
+
+		memcpy(
+			regionName,
+			region->Filename,
+			9);
+		regionName[9] =
+			0;
+
+		if (!isSuper ||
+			!region->ppModels ||
+			region->NumParts == 0 ||
+			region->NumParts > 96)
+		{
+			__leave;
+		}
+
+		CSuper* super =
+			(CSuper*)body;
+		numParts =
+			(int)region->NumParts;
+		decompressedPtr =
+			(unsigned long)super->mpDecompressedFrame;
+		posePtr =
+			(unsigned long)super->mpPoseBuffer;
+
+		SModel* model =
+			region->ppModels[0];
+		if (!model)
+		{
+			__leave;
+		}
+
+		modelPtr =
+			(unsigned long)model;
+		modelVertices =
+			(int)model->NumVertices;
+		modelNormals =
+			(int)model->NumNormals;
+		modelFaces =
+			(int)model->NumFaces;
+		modelFlags =
+			(int)model->Flags;
+
+		if (modelVertices <= 0 ||
+			modelVertices > 4096 ||
+			modelFaces <= 0 ||
+			modelFaces > 8192)
+		{
+			__leave;
+		}
+
+		SVECTOR* localVertices =
+			(SVECTOR*)&model->Vertices;
+		sampleX =
+			(int)localVertices[0].vx;
+		sampleY =
+			(int)localVertices[0].vy;
+		sampleZ =
+			(int)localVertices[0].vz;
+
+		SMatrix* pose =
+			super->mpPoseBuffer ?
+				super->mpPoseBuffer :
+				super->mpDecompressedFrame;
+		if (pose)
+		{
+			selectedPosePtr =
+				(unsigned long)pose;
+			poseM00 =
+				(int)pose[0].m[0][0];
+			poseM11 =
+				(int)pose[0].m[1][1];
+			poseM22 =
+				(int)pose[0].m[2][2];
+			poseTx =
+				(int)pose[0].t[0];
+			poseTy =
+				(int)pose[0].t[1];
+			poseTz =
+				(int)pose[0].t[2];
+		}
+
+		valid =
+			1;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		valid =
+			0;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"SHADOW");
+	if (f)
+	{
+		fprintf(
+			f,
+			"world_space_probe frame=%lu label=%s body=0x%08lX valid=%d region=%d region_ptr=0x%08lX name=%s super=%d parts=%d model0=0x%08lX verts=%d normals=%d faces=%d model_flags=0x%04X local_v0=%d,%d,%d decompressed=0x%08lX pose=0x%08lX selected_pose=0x%08lX pose_diag=%d,%d,%d pose_t=%d,%d,%d body_pos=%d,%d,%d shadow_pos=%d,%d,%d shadow_normal=%d,%d,%d shadow_scale=%u\n",
+			frame,
+			label ? label : "unknown",
+			(unsigned long)body,
+			valid,
+			regionIndex,
+			regionPtr,
+			regionName[0] ?
+				regionName :
+				"(none)",
+			isSuper,
+			numParts,
+			modelPtr,
+			modelVertices,
+			modelNormals,
+			modelFaces,
+			modelFlags & 0xFFFF,
+			sampleX,
+			sampleY,
+			sampleZ,
+			decompressedPtr,
+			posePtr,
+			selectedPosePtr,
+			poseM00,
+			poseM11,
+			poseM22,
+			poseTx,
+			poseTy,
+			poseTz,
+			body->mPos.vx,
+			body->mPos.vy,
+			body->mPos.vz,
+			body->mShadowPos.vx,
+			body->mShadowPos.vy,
+			body->mShadowPos.vz,
+			(int)body->mShadowNormal.vx,
+			(int)body->mShadowNormal.vy,
+			(int)body->mShadowNormal.vz,
+			(unsigned int)body->mShadowScale);
+		fclose(f);
+	}
+}
+
+static void SpideyShadowWorldSpaceProbe(
+		unsigned long frame)
+{
+	if (frame < 60 ||
+		(frame % 300) != 0)
+	{
+		return;
+	}
+
+	CBody* mech =
+		0;
+	__try
+	{
+		mech =
+			G_MECHLIST;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		mech =
+			0;
+	}
+
+	SpideyShadowWorldSpaceProbeActor(
+		mech,
+		"mech_head",
+		frame);
+
+	CBody* target =
+		gSpideyCameraWebTargetLastTarget;
+	if (target &&
+		target != mech)
+	{
+		SpideyShadowWorldSpaceProbeActor(
+			target,
+			"web_target",
+			frame);
+	}
+}
+
+
 static void SpideyCameraPassivePoll(
 		unsigned long frame)
 {
@@ -9431,6 +9686,9 @@ static void SpideyCameraPassivePoll(
 		camera;
 	gSpideyCameraTelemetryLastMode =
 		mode;
+
+	SpideyShadowWorldSpaceProbe(
+		frame);
 }
 
 static HMODULE gSpideyRenderer11Module = 0;
