@@ -8997,13 +8997,13 @@ static unsigned long gSpideyCameraWebTargetCalls = 0;
 // temporarily provide the active render camera's rotation matrix there.
 // Candidate eligibility, range weighting, LOS and final target selection all
 // remain inside the untouched retail scorer.
-static CBody* __fastcall SpideyCameraSelectTargetBaddy(
+static CBody* SpideyCameraSelectTargetBaddyCommon(
 		CPlayer* player,
-		void*,
 		int arg1,
 		int arg2,
 		int arg3,
-		int arg4)
+		int arg4,
+		const char* callSource)
 {
 	SpideyRetailSelectTargetBaddyFn retail =
 		(SpideyRetailSelectTargetBaddyFn)0x004C8410;
@@ -9062,9 +9062,6 @@ static CBody* __fastcall SpideyCameraSelectTargetBaddy(
 		// field_89C, normalizes it, then scores -localZ. The camera transform
 		// produced by QToM uses +localZ for camera-forward, so copying it
 		// verbatim makes a centered enemy look backwards to the retail scorer.
-		// Flip the camera's local forward row only for this temporary scoring
-		// matrix. Negating a row preserves the normalized-vector magnitude,
-		// while making camera-forward land on the -Z convention retail expects.
 		cameraTargetMatrix.m[2][0] =
 			-cameraTargetMatrix.m[2][0];
 		cameraTargetMatrix.m[2][1] =
@@ -9110,8 +9107,9 @@ static CBody* __fastcall SpideyCameraSelectTargetBaddy(
 		{
 			fprintf(
 				f,
-				"camera_web_target event=select call=%lu source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX args=%d,%d,%d,%d\n",
+				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX args=%d,%d,%d,%d\n",
 				gSpideyCameraWebTargetCalls,
+				callSource ? callSource : "unknown",
 				useCamera ?
 					"render_camera_transform" :
 					"retail_player_transform",
@@ -9139,14 +9137,54 @@ static CBody* __fastcall SpideyCameraSelectTargetBaddy(
 	return target;
 }
 
+static CBody* __fastcall SpideyCameraSelectTargetBaddyAutoAim(
+		CPlayer* player,
+		void*,
+		int arg1,
+		int arg2,
+		int arg3,
+		int arg4)
+{
+	return SpideyCameraSelectTargetBaddyCommon(
+		player,
+		arg1,
+		arg2,
+		arg3,
+		arg4,
+		"select_auto_aim");
+}
+
+static CBody* __fastcall SpideyCameraSelectTargetBaddyCheckWebShot(
+		CPlayer* player,
+		void*,
+		int arg1,
+		int arg2,
+		int arg3,
+		int arg4)
+{
+	return SpideyCameraSelectTargetBaddyCommon(
+		player,
+		arg1,
+		arg2,
+		arg3,
+		arg4,
+		"check_web_shot");
+}
+
 static void SpideyInstallCameraWebTargetingCompat()
 {
-	const int installed =
+	const int autoAimInstalled =
 		SpideyPatchDirectCall(
 			0x004C5B2F,
 			0x004C8410,
-			(void*)&SpideyCameraSelectTargetBaddy,
+			(void*)&SpideyCameraSelectTargetBaddyAutoAim,
 			"camera_web_autoaim");
+	const int checkWebShotInstalled =
+		SpideyPatchDirectCall(
+			0x004C09E2,
+			0x004C8410,
+			(void*)&SpideyCameraSelectTargetBaddyCheckWebShot,
+			"camera_web_check_web_shot");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -9155,8 +9193,9 @@ static void SpideyInstallCameraWebTargetingCompat()
 	{
 		fprintf(
 			f,
-			"camera_web_target_install installed=%d call=0x004C5B2F retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_transform forward_axis=negative_local_z scope=select_auto_aim_only fallback=retail_non_mode3\n",
-			installed);
+			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_transform forward_axis=negative_local_z scope=select_auto_aim_and_check_web_shot fallback=retail_non_mode3\n",
+			autoAimInstalled,
+			checkWebShotInstalled);
 		fclose(f);
 	}
 }
