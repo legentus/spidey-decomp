@@ -1,5 +1,89 @@
 # CURRENT STATUS
 
+## LIVE FRONTIER — MANUAL AIM INPUT DECOUPLING + DIRECT CAMERA-RAY HIP FIRE (2026-10-04)
+
+Latest user runtime: `bf1fb237dda30e51d2525ce9479e8c82843c0db9`, log `spidey-decomp(20261004-085912).log`.
+
+### Runtime result from the first manual-aim attempt
+
+The first patch installed exactly as intended at the byte/call-site level, but its behavioral model was incomplete:
+- `0x004C370B` mode-7 -> mode-3 patch installed;
+- `0x004BF8C5` aim-only CheckForwards JNE patch installed;
+- the mouse continued driving the mode-3 camera;
+- nevertheless manual aim still used WASD to move the reticle and Spider-Man remained stationary;
+- the reticle did not follow the camera/mouse.
+
+This proved that the retail reticle is not derived from camera orientation.
+
+Canonical `RenderLookaroundReticle @ 0x004C4940` projects `CPlayer::field_DC0`, an independent world-space aim point. `SetupLookaroundCamera @ 0x004C38A0` updates that lookaround state separately from the visible camera.
+
+The canonical input helper `0x004BD510` reads the ordinary signed movement axes into `field_E2D/E2E`; it does not special-case `field_8EA`. The canonical `CheckForwards @ 0x004BF8A0` contains an earlier gate before the already-NOPed `field_8EA` branch:
+`if (input[0x40] && (field_E1C & 1)) return 0`.
+That held-control gate is now bypassed only for the duration of the movement evaluation while manual aim is active.
+
+### New manual-aim implementation
+
+Commit:
+- `aabf69a90786b639c4e32e1d74e64cae88e3430e` — `gameplay: decouple manual aim from movement axes`
+
+New scoped wrappers:
+- `SpideyAI0 0x004B231A -> CheckForwards 0x004BF8A0` is wrapped;
+  - only while `field_8EA` is active, save `input[0x40]`, temporarily clear it, call untouched retail CheckForwards, then restore it under `__finally`;
+  - `field_E2D/E2E` are not cleared, so WASD/analogue remain real locomotion input;
+  - the previous exact-byte `field_8EA` JNE removal remains.
+- `SpideyAI0 0x004B8673 -> SetupLookaroundCamera 0x004C38A0` is wrapped;
+  - retail SetupLookaroundCamera still runs so trigger/web/lookaround state stays intact;
+  - before and after the retail call, `field_DC0` is set to an extended ray through active mode-3 `camera.mPos -> camera.field_144`;
+  - `field_DE4=1` while modern manual aim is active;
+  - therefore rendering and the following frame's attack logic see the visible camera's center ray, not the legacy WASD-derived lookaround point.
+
+New telemetry:
+- `modern_manual_aim event=movement ... aim_control=... axes=... state=... result=...`
+- `modern_manual_aim event=reticle ... aim_point=... camera_pos=... camera_focus=...`
+
+### Hip-fire result and new selector
+
+The `bf1fb237` run confirms the previous retail-wrapper selector still flickers:
+- a mode-3 camera-origin selection can acquire an enemy with player LOS;
+- a subsequent call at effectively the same camera heading can immediately return no target.
+
+So camera-transformed retail scoring is no longer the primary modern path.
+
+Commit:
+- `b44b3bdca3337c0cfe4a57dc8a042feaa0a946ea` — `gameplay: score hip-fire targets on visible camera ray`
+
+New mode-3 primary selector:
+- iterate `G_MECHLIST`;
+- preserve canonical retail basic eligibility:
+  - `mRMinor != 0`;
+  - `CBODY_TARGETTABLE`;
+  - not `CBODY_ZOMBIE`;
+- compute real player-to-candidate Euclidean range instead of relying on cached `mPlayerDist`;
+- preserve `arg1` as the range;
+- use `arg2 / 4096` as the camera cone threshold (current runtime arg is 2896, approximately the retail 45-degree cosine);
+- score candidates directly against the visible ray `camera.field_144 - camera.mPos`;
+- require untouched retail player LOS `0x004E67A0`;
+- pick the most camera-centered candidate, distance as tie-breaker.
+
+The old retail camera-origin/orientation wrappers remain only as fallbacks for unusual targetable bodies the modern scan does not select.
+
+New telemetry source:
+`source=modern_camera_scan camera_scan_candidates=N camera_scan_score=...`
+
+### Exact next runtime
+
+Update to `b44b3bdc...` or newer, then:
+1. enter manual aim and hold it;
+2. WASD should move Spider-Man, not the reticle;
+3. mouse should rotate the camera and the reticle should remain aligned with the visible camera center ray;
+4. fire while moving/aiming;
+5. hip-fire at close and medium enemies while Spider-Man faces away from the camera target;
+6. orbit across multiple enemies and check whether acquisition is stable and chooses the visually centered enemy;
+7. send the consolidated log.
+
+Do not advance real-shadow implementation until this gameplay test is evaluated; the world-space caster probe is already considered passed.
+
+
 ## LIVE FRONTIER — PAUSE PASSED; MODERN MANUAL AIM + CAMERA-ORIGIN TARGETING (2026-10-04)
 
 Runtime evidence: `turn122file0` from the user's latest current-build test.
