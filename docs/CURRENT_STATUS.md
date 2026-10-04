@@ -46,6 +46,63 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## BUILD CHECKPOINT — VC6 TIMER-HOOK TYPE ERRORS FIXED (2026-10-04)
+
+The first attempt to test the new free-aim / locomotion / timer build did **not** reach runtime.
+
+User build:
+- requested revision: `9e3679f7b5dc79d78f3acb2b4f55fc8f6645c75d`
+- matching compiler: VC6 `cl.exe`
+- failure occurred compiling `main.cpp`
+- game was never launched, so **none of the new runtime behavior has been tested yet**.
+
+Exact VC6 errors:
+- `main.cpp(12585): C2110 cannot add two pointers`
+- `main.cpp(12607): C2440 cannot convert unsigned long to unsigned long *`
+- `main.cpp(12857): C2664 InterlockedExchange volatile long * -> long *`
+- same InterlockedExchange qualifier error at lines 12879 and 12932 in that revision.
+
+Root cause:
+- the older VC6 Platform SDK types parts of `IMAGE_THUNK_DATA` as pointer members where modern headers expose raw integer RVA/function values;
+- VC6's `InterlockedExchange` prototype also takes `LONG*` rather than accepting the volatile-qualified pointer used by newer SDKs.
+
+Fix commits:
+- `9b7e6b32767adc4f941c0ef1a31331ae2c4885ca` — `compat: fix VC6 timer hook thunk types`
+  - copies the raw 32-bit `AddressOfData` thunk value into a `DWORD` before RVA arithmetic;
+  - copies the function pointer bits in/out of `FirstThunk` with `memcpy` instead of header-version-dependent union assignment;
+  - applies the VC6-safe cast to the first InterlockedExchange site.
+- `54185f2192320881a3c37d59d1e2b39b8c4ec18c` — `compat: finish VC6 interlocked timer casts`
+  - applies the same cast to the remaining two InterlockedExchange sites.
+
+Behavioral intent is unchanged:
+- no timer cadence algorithm was changed;
+- no manual-aim camera code was changed;
+- no locomotion mask logic was changed.
+
+Static source sanity after the compatibility edits:
+- braces balanced;
+- parentheses balanced;
+- brackets balanced;
+- all three timer-active InterlockedExchange calls now use the VC6-compatible cast.
+
+### Exact next step
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` again.
+
+The build must include **`54185f21...` or newer**.
+
+If compilation succeeds, perform the same combined runtime test already documented below:
+- free manual aim;
+- movement while aiming;
+- aim + move + camera + fire;
+- clean aim release / pause / camera-mode regression;
+- residual ~0.4 s hitch check;
+- quick hip-fire sanity;
+- upload the new single consolidated `spidey-decomp.log`.
+
+If VC6 reports a new compile error, send the console output before doing any gameplay testing.
+
+
 ## IMPLEMENTATION CHECKPOINT — FREE MANUAL-AIM VIEW + LOCOMOTION MASK + 60 HZ TIMER PHASE FIX READY (2026-10-04)
 
 **Status: implemented and committed, NOT runtime-tested yet.**
