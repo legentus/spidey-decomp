@@ -1,6 +1,35 @@
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
 
+## 2026-10-04 LATEST — THIRD-PASS MANUAL AIM / HIP-FIRE IMPLEMENTED
+
+Latest tested build before this source change: `7a6af671...`.
+User observed:
+- Spider-Man tried to move but remained stuck/twisted;
+- WASD still moved the old reticle;
+- reticle X and Y were both inverted;
+- hip-fire targeting remained inconsistent.
+
+Log proof:
+- CheckForwards received full axes and returned success while aim was held;
+- direct modern hip-fire selector never produced `source=modern_camera_scan`.
+
+New source commit:
+- `b074592eb6bd8d5b0b6f323165de71e8d97eb248` — `gameplay: isolate modern aim from legacy lookaround`
+
+Changes:
+- skip retail `SetupLookaroundCamera @ 0x004C38A0` entirely during modern mode-3 manual aim;
+- preserve `field_8EA` aim state but own `field_DC0/field_DE4` directly;
+- flip field_DC0 X/Y screen-plane convention while preserving forward Z;
+- this removes legacy WASD lookaround/pose ownership that was fighting locomotion;
+- hip-fire modern scan now walks the exact retail `SelectTargetBaddy` list at `0x0056E990` instead of `G_MECHLIST @ 0x006A9038`;
+- added periodic scan diagnostics and manual-aim body position/velocity/state/animation telemetry.
+
+NEXT:
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`, confirm `b074592e...` or newer, then test manual aim movement, natural reticle axes, simultaneous move+aim+fire, and camera-centered hip fire. Return consolidated log.
+
+
+
 ## 2026-10-04 CHECKPOINT — DO NOT LOSE THIS MANUAL-AIM FRONTIER
 
 Latest tested runtime: `7a6af671ec671d7f61a1003b296f59d655b39dcd` with `spidey-decomp(20261004-093356).log`.
