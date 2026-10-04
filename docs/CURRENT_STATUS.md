@@ -8362,3 +8362,55 @@ Post-edit audit of current `main.cpp` passes:
 - no health/web-cartridge/compass transform code was changed.
 
 No GitHub Actions run was surfaced through the current connector for this contents-API commit, so matching-build status is not being claimed here. The user-side updater/build remains the authoritative compile/runtime check for this final UI-scale regression.
+
+
+## Fast update-and-test workflow (2026-10-03)
+
+The user requested a materially faster iteration loop for frequent runtime tests.
+
+New launcher:
+
+- `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Supporting workflow:
+
+- `tools/FAST_UPDATE_AND_TEST_LATEST_BUILD.ps1`
+- `tools/TEST_LATEST_BUILD.ps1 -Fast`
+
+Commits:
+
+- `85094cccb709b96c1daa4f1553f6c902e7cf0b05` — **build: add fast incremental test mode**
+- `8741876dd89a7d847fa99bb3ca35f76d7cf711f0` — **build: add fast update-and-test workflow**
+- `f3ce676a468e0bbd2dbb478636c5c1e74a20dfa5` — **build: add fast update-and-test launcher**
+
+The normal `UPDATE_AND_TEST_LATEST_BUILD.bat` remains as the conservative full-build fallback.
+
+Fast-path behavior:
+
+1. performs the dev update exactly once;
+2. compares the previous and new exact dev SHAs through GitHub;
+3. for ordinary changed `.cpp` files:
+   - touches only those translation units;
+   - also touches `main.cpp` so the new runtime revision is embedded;
+   - uses incremental matching `nmake` instead of forced CLEAN;
+4. if a proxy header / makefile / resource / build-system file changed:
+   - automatically falls back to the forced-clean matching build;
+5. skips rebuilding Renderer11 when its source/build inputs did not change and an artifact exists;
+6. skips rebuilding Input11 when its source/build inputs did not change and both DLL/probe artifacts exist;
+7. still runs the modern-input preflight;
+8. still installs the exact artifacts, resets/creates the consolidated log, launches the game, waits for exit, and archives the single `spidey-decomp.log`;
+9. if compare information is missing, ambiguous, or too large:
+   - automatically uses the normal safe full rebuild for that run.
+
+This specifically removes two major routine costs from the old loop:
+
+- the update check is no longer performed twice;
+- the matching VC6 build is no longer forcibly cleaned for normal `.cpp`-only edits;
+- modern renderer/input trees are no longer regenerated when unrelated gameplay/UI code changes.
+
+Static PowerShell delimiter audit after creation:
+
+- fast workflow: braces=0, parentheses=0, brackets=0, terminal_state=code;
+- updated test workflow: braces=0, parentheses=0, brackets=0, terminal_state=code.
+
+The first user-side execution remains the authoritative Windows/PowerShell + VC6 runtime validation.
