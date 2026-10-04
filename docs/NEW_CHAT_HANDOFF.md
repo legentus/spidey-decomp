@@ -1,3 +1,23 @@
+# LIVE CONTINUATION — BAT WORKFLOW CLEANUP (2026-10-04)
+
+The repository launcher surface has been simplified. Old historical sections may mention deleted BAT names; those references are historical only.
+
+Current supported BAT entry points:
+- `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` — normal authoritative update/build/install/test workflow
+- `TEST_LATEST_BUILD.bat` — full non-fast recovery/test workflow
+- `UPDATE_SPIDEY_PROJECT.bat` — standalone updater
+- `GET_SPIDEY_PROJECT.bat` — first-machine bootstrap
+- `RUN_GAME.bat` — run the currently installed build only; no update/download/rebuild
+- `RESTORE_STOCK_GAME.bat` — restore retail Bink
+- `build.bat` / `clean.bat` — low-level build helpers
+
+Deleted obsolete wrappers:
+`BUILD_AND_INSTALL.bat`, `BUILD_DEV.bat`, `INSTALL_DEV_BUILD.bat`, `SETUP_FIRST_TIME.bat`, `SPIDEY_DEV_MENU.bat`, `UPDATE_AND_TEST_LATEST_BUILD.bat`, `UPDATE_PROJECT.bat`, and `scripts/update_project_worker.bat`.
+
+Do not recreate those wrappers unless a concrete workflow requires them.
+
+---
+
 # LIVE CONTINUATION — FRAME-PACING CLASSIFICATION ADDED TO THE COMBINED TEST (2026-10-04)
 
 The original full handoff frontier was verified exactly before continuing:
