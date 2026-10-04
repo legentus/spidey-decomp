@@ -739,3 +739,41 @@ The modern camera still logs:
 - periodic/input samples at a much lower cadence.
 
 This does not alter camera behavior or sensitivity.
+
+
+---
+
+## Modern manual aim — first implementation (2026-10-04)
+
+The legacy manual-aim mode has now been classified from canonical retail bytes and runtime telemetry.
+
+### Legacy behavior
+
+`CPlayer::EnterLookaroundMode @ 0x004C3580`:
+- keeps the reticle/aim state in `CPlayer::field_8EA`;
+- calls `CCamera::PushMode`;
+- explicitly changes the active camera to mode 7 / `FRONT`.
+
+The runtime confirms manual aiming enters FRONT and later returns to ordinary mode 3.
+
+Normal locomotion is separately blocked by `CPlayer::CheckForwards @ 0x004BF8A0`:
+- `cmp byte ptr [esi+0x8EA],0`;
+- `jne 0x004BFA0A` at `0x004BF8C5`.
+
+### Modern first pass
+
+Implementation keeps the useful retail aim state/reticle while removing only the two legacy constraints above:
+
+- EnterLookaroundMode's `push 7` becomes `push 3`, so aim stays on the already-working modern gameplay camera;
+- the CheckForwards aim-only JNE is NOPed, allowing movement while aiming;
+- mouse relative motion and Input11 right-stick remain the camera/aim input;
+- other actions that retail suppresses during `field_8EA` remain suppressed until runtime testing proves which ones should be modernized.
+
+This is intentionally a narrow compatibility step rather than a rewrite of Spider-Man locomotion.
+
+### Camera-centered web targeting refinement
+
+The earlier wrapper replaced the retail scoring rotation but not its origin. Canonical `SelectTargetBaddy` builds `candidate - player` before transforming it, causing third-person camera parallax for close screen-centered targets.
+
+The refined path uses the render camera position and rotation for centeredness selection, restores the real player transform immediately, then validates the shot from Spider-Man with the untouched retail LOS function. The previous orientation-only selector remains a fallback.
+
