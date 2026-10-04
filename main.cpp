@@ -8669,6 +8669,176 @@ static void SpideyInstallModernCameraCompat()
 	}
 }
 
+
+typedef CBody* (__fastcall *SpideyRetailSelectTargetBaddyFn)(
+		CPlayer*,
+		void*,
+		int,
+		int,
+		int,
+		int);
+typedef void (__cdecl *SpideyRetailQToMFn)(
+		CQuat*,
+		MATRIX*);
+
+static CBody* gSpideyCameraWebTargetLastTarget = 0;
+static unsigned long gSpideyCameraWebTargetCalls = 0;
+
+// Retail SelectTargetBaddy scores each candidate after transforming the
+// player->candidate vector through player + 0x89C. For web auto-aim only,
+// temporarily provide the active render camera's rotation matrix there.
+// Candidate eligibility, range weighting, LOS and final target selection all
+// remain inside the untouched retail scorer.
+static CBody* __fastcall SpideyCameraSelectTargetBaddy(
+		CPlayer* player,
+		void*,
+		int arg1,
+		int arg2,
+		int arg3,
+		int arg4)
+{
+	SpideyRetailSelectTargetBaddyFn retail =
+		(SpideyRetailSelectTargetBaddyFn)0x004C8410;
+	SpideyRetailQToMFn retailQToM =
+		(SpideyRetailQToMFn)0x0047C7F0;
+
+	if (!player)
+	{
+		return retail(
+			player,
+			0,
+			arg1,
+			arg2,
+			arg3,
+			arg4);
+	}
+
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+	const int useCamera =
+		camera &&
+		camera->mCameraMode ==
+			CAMERAMODE_DEMO;
+
+	CBody* target =
+		0;
+
+	if (!useCamera)
+	{
+		target =
+			retail(
+				player,
+				0,
+				arg1,
+				arg2,
+				arg3,
+				arg4);
+	}
+	else
+	{
+		MATRIX playerTargetMatrix;
+		MATRIX cameraTargetMatrix;
+
+		memcpy(
+			&playerTargetMatrix,
+			&player->field_89C,
+			sizeof(playerTargetMatrix));
+
+		// This is the same retail quaternion-to-matrix conversion used by
+		// CCamera::LoadIntoMikeCamera before the visible camera is published.
+		retailQToM(
+			&camera->field_214,
+			&cameraTargetMatrix);
+
+		memcpy(
+			&player->field_89C,
+			&cameraTargetMatrix,
+			sizeof(cameraTargetMatrix));
+
+		__try
+		{
+			target =
+				retail(
+					player,
+					0,
+					arg1,
+					arg2,
+					arg3,
+					arg4);
+		}
+		__finally
+		{
+			memcpy(
+				&player->field_89C,
+				&playerTargetMatrix,
+				sizeof(playerTargetMatrix));
+		}
+	}
+
+	++gSpideyCameraWebTargetCalls;
+
+	if (target !=
+			gSpideyCameraWebTargetLastTarget ||
+		gSpideyCameraWebTargetCalls <= 4)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"camera_web_target event=select call=%lu source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX args=%d,%d,%d,%d\n",
+				gSpideyCameraWebTargetCalls,
+				useCamera ?
+					"render_camera_transform" :
+					"retail_player_transform",
+				(unsigned long)camera,
+				camera ?
+					(int)camera->mCameraMode :
+					-1,
+				gSpideyModernCameraActive,
+				camera ?
+					((int)camera->field_23A &
+					 0x0FFF) :
+					-1,
+				(unsigned long)target,
+				arg1,
+				arg2,
+				arg3,
+				arg4);
+			fclose(f);
+		}
+
+		gSpideyCameraWebTargetLastTarget =
+			target;
+	}
+
+	return target;
+}
+
+static void SpideyInstallCameraWebTargetingCompat()
+{
+	const int installed =
+		SpideyPatchDirectCall(
+			0x004C5B2F,
+			0x004C8410,
+			(void*)&SpideyCameraSelectTargetBaddy,
+			"camera_web_autoaim");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"CAMERA");
+	if (f)
+	{
+		fprintf(
+			f,
+			"camera_web_target_install installed=%d call=0x004C5B2F retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_transform scope=select_auto_aim_only fallback=retail_non_mode3\n",
+			installed);
+		fclose(f);
+	}
+}
+
 static void SpideyCameraPassivePoll(
 		unsigned long frame)
 {
@@ -14510,6 +14680,7 @@ void game_patches(void)
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
 	SpideyInstallModernCameraCompat();
+	SpideyInstallCameraWebTargetingCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();
 	SpideyInstallGameplayUiScaleCompat();
