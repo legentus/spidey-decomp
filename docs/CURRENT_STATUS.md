@@ -8840,3 +8840,137 @@ If the camera behaves badly, do not immediately replace the whole system. Use mo
 - good floor orbit but bad wall/ceiling => classify those mode-3 sub-states before deciding whether to special-case them or advance to Stage B.
 
 User should provide the single consolidated spidey-decomp.log from the run.
+
+
+## Orbit camera validated; sensitivity + hitch mitigation + camera web targeting implemented (2026-10-04)
+
+User runtime report on revision 5ec06e1506840c48f97c16380cc4a49f3b65ef8a:
+- modern 3D orbit camera worked extremely well;
+- no meaningful camera-control defects were reported;
+- user requested camera sensitivity in the custom pause Options menu;
+- user reported constant frametime hitching plus a larger roughly half-second freeze every several seconds;
+- user requested enemy web selection to follow camera facing rather than Spider-Man body facing.
+
+Runtime evidence:
+- modern camera hook installed successfully;
+- sampled modern camera updates retained the requested yaw with retail_overrode_yaw=0;
+- gameplay timing has normal 59-61 Hz windows but intermittent degraded windows in the mid-40 Hz range, consistent with visible stalls.
+
+### Camera sensitivity
+
+New setting:
+- Camera Sensitivity
+- default 100 percent = exact first-prototype feel;
+- range 25..200 percent;
+- step 5 percent;
+- applies to mouse X/Y and right-stick X/Y;
+- persisted in spidey-modern-video.ini under [Controls] CameraSensitivityPercent.
+
+Pause -> Options now contains six rows:
+0 Options heading
+1 UI Scale
+2 Text Scale
+3 Camera Sensitivity
+4 Apply Settings
+5 Back
+
+Commits:
+- 2ca650606bf1c851859c699be7e019b131f69e5b
+- fdfe39ec6000856c655dbf137bf90c66d9c59aa8
+- f6fcaa31edb7ae5cc8ea8cb8df2091ecfd302413
+- fa0f7e230c210019d8c6066076585fb84144b8ee
+- fde069d43a284c27ca385ef427a6751f3b5bd06f
+
+### Periodic hitch root cause
+
+Two diagnostic readback paths were still active every 120 frames:
+
+1. main.cpp SpideyLogSurfaceState:
+   DirectDraw GetDC -> nine GetPixel calls -> ReleaseDC.
+
+2. renderer11 ShadowEndFrame:
+   nine CopySubresourceRegion calls into a staging texture -> blocking D3D11_MAP_READ.
+
+These are explicit CPU/GPU synchronization points. At ~60 FPS, 120 frames is approximately two seconds, closely matching the repeating freeze report.
+
+Both are now default OFF:
+- 61419a368c7a7e962673a74f7052fe55465254ff — disable periodic DX11 readback
+- 6cb305796f272043654ed3819bb92e7c6c53249a — disable periodic DirectDraw pixel sampling
+
+Optional diagnostic re-enable:
+- SPIDEY_RENDERER11_DIAG_READBACK=1
+- SPIDEY_DIAG_SURFACE_READBACK=1
+
+Do not claim all frametime issues are solved until runtime validation. These are high-confidence causes for the large periodic stall; smaller hitching may still have another cause.
+
+### Camera-forward web targeting RE
+
+Canonical retained-function addresses:
+- CheckWebShot 0x004C0510
+- SelectAutoAimTarget 0x004C5AA0
+- FireWeb 0x004C5DD0
+- SelectTargetBaddy 0x004C8410
+- SelectTargetSwitch 0x004C8570
+
+SelectAutoAimTarget call site:
+- 0x004C5B2F -> SelectTargetBaddy 0x004C8410.
+
+SelectTargetBaddy:
+- keeps candidate eligibility/range/LOS in retail code;
+- transforms candidate-relative world vectors through player + 0x89C before scoring centeredness;
+- therefore retail enemy selection is body-orientation-centered.
+
+The five retained function blobs were verified byte-for-byte against the materialized same-build executable using their Git blob SHA values. The targeting RE therefore matches the repo's canonical retained function bytes despite the separately materialized EXE having a different whole-file SHA.
+
+Implementation:
+- 954882bb63a86c39011bbc3996104f905b8559aa — gameplay: aim web auto-targeting from camera.
+
+Behavior:
+- patches only 0x004C5B2F;
+- other SelectTargetBaddy callers remain unchanged;
+- in ordinary camera mode 3, temporarily substitutes a target-scoring orientation built from active camera field_214 through retail QToM @ 0x0047C7F0;
+- calls untouched retail SelectTargetBaddy;
+- restores player field_89C immediately;
+- preserves candidate filtering, score/range rules, LOS and target result behavior;
+- non-mode-3 camera falls back to original player-facing targeting.
+
+Telemetry:
+- camera_web_target_install ...
+- camera_web_target event=select source=render_camera_transform ... target=...
+
+### Static audit
+
+- main.cpp delimiter balance clean: braces/parens/brackets all zero with no negative depth;
+- Renderer11 delimiter balance clean;
+- custom pause submenu shape is consistently 6; stale 5-row shape guard removed;
+- direct camera web patch target is guarded by SpideyPatchDirectCall;
+- no nullptr added to VC6 proxy;
+- sensitivity uses existing VC6-safe code style;
+- Renderer11 readback remains available only through explicit env opt-in.
+
+### Exact next runtime test
+
+Run FAST_UPDATE_AND_TEST_LATEST_BUILD.bat and test all three items in one session:
+
+1. Camera Sensitivity:
+   - verify row appears;
+   - set 50 percent, Apply, confirm slower camera;
+   - optionally set 150 percent, Apply, confirm faster camera;
+   - reopen Options and verify persistence.
+
+2. Frametime:
+   - play through several old freeze intervals;
+   - report whether the large periodic freeze disappeared;
+   - separately report whether smaller constant hitching remains.
+
+3. Camera web targeting:
+   - face Spider-Man away from an enemy;
+   - center that enemy with camera;
+   - fire enemy-targeting web;
+   - target should follow camera center rather than body heading;
+   - test left/right and above/below targets if practical.
+
+4. Brief movement/swing/camera regression check.
+
+Upload only the single consolidated spidey-decomp.log.
+
