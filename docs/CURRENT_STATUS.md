@@ -1,5 +1,95 @@
 # CURRENT STATUS
 
+## LIVE FRONTIER — PAUSE PASSED; MODERN MANUAL AIM + CAMERA-ORIGIN TARGETING (2026-10-04)
+
+Runtime evidence: `turn122file0` from the user's latest current-build test.
+
+### Runtime conclusions
+
+Pause lifecycle fix is **validated**:
+- user reports pause no longer crashes;
+- log contains six `pause_menu_box_refresh` events, all `mode=in_place`;
+- Options expands from parent `target_rect=0,83,512,75` to `0,83,512,107` and Back restores the parent size;
+- no exception entries were logged.
+
+World-space shadow-caster probe is **validated**:
+- Spider-Man samples are consistently valid `CSuper` casters: region `spidey`, 18 parts, model-0 36 verts / 82 normals / 46 faces, live pose buffer, changing pose matrices/translations;
+- NPC samples are valid super models too: `henchman` / `thug`, 15-16 parts, model-0 18 verts / 36 normals / 18 faces;
+- inactive NPCs can legitimately have no current pose buffer; an active thug later exposes a live pose buffer and changing transform;
+- therefore the next real-shadow implementation should submit original local model geometry + live per-part pose + `CSuper::mTransform` before projection instead of attempting to invert Renderer11's existing XYZRHW replay.
+
+Web targeting remained inconsistent:
+- 30 logged selections were all labeled `path=select_auto_aim`; no `check_web_shot` event appeared in this session;
+- user clarified manual aiming was used several times, so caller label is not treated as a fire-mode identifier;
+- target results repeatedly transition valid -> null while the modern mode-3 camera remains active.
+
+### Targeting parallax root cause
+
+Canonical `SelectTargetBaddy @ 0x004C8410` does more than transform by `player+0x89C`:
+- it filters target-table / zombie / distance state;
+- it uses cached player distance for range weighting;
+- for angular scoring it constructs `candidate.mPos - player.mPos`, then transforms that vector and scores `-localZ`;
+- it finally performs retail LOS.
+
+The previous camera patch changed the orientation matrix only. Because the visible third-person camera is behind/above Spider-Man, close enemies can be screen-centered yet still fall outside the retail ~45-degree cone when the direction vector originates at Spider-Man. This explains camera-centered misses without requiring a wider cone.
+
+Implemented:
+- `58742eb419fa755d2c044425ae2cbc44963ac731` — `gameplay: modernize manual aim and camera target origin`
+- `f34aa5ddc3efd3c2571dd0de8e9483276108b1fd` — `gameplay: validate camera targets with retail LOS`
+
+New targeting behavior in mode 3:
+1. preserve retail target filtering, cached range weighting and scorer;
+2. supply the active render camera orientation;
+3. temporarily supply the active render camera world position as the scorer origin, fixing third-person parallax;
+4. restore Spider-Man's world position and scoring matrix immediately under `__finally`;
+5. revalidate the selected target with untouched retail `Utils_LineOfSight @ 0x004E67A0` from Spider-Man's real position;
+6. if camera-origin selection cannot produce an acceptable shot, fall back to the previous orientation-only retail call.
+
+Telemetry now reports:
+- `source=render_camera_origin`;
+- `source=render_camera_orientation_fallback`;
+- `camera_origin_candidate=<0|1>`;
+- `player_los=<0|1>`.
+
+### Modern manual aim RE + implementation
+
+Retail manual aim is not camera enum LOOKAROUND in this build.
+
+`CPlayer::EnterLookaroundMode @ 0x004C3580`:
+- sets `player+0x8EA = 1` for the aim/reticle state;
+- calls `CCamera::PushMode`;
+- explicitly pushes mode `7` and calls `CCamera::SetMode`, which runtime telemetry identifies as `FRONT`.
+
+This is why manual aim temporarily leaves the modern mode-3 orbit path.
+
+The movement lock is narrow:
+- `CPlayer::CheckForwards(bool) @ 0x004BF8A0`;
+- `cmp byte ptr [esi+0x8EA],0`;
+- `jne 0x004BFA0A` at `0x004BF8C5`;
+- the JNE skips ordinary forward locomotion solely because manual aim is active.
+
+Modern aim patch:
+- `0x004C370B`: validated bytes `6A 07` -> `6A 03`, so retail still owns the aim/reticle state but keeps ordinary mode-3 camera ownership; existing relative mouse + Input11 right stick therefore continue to drive camera/aim;
+- `0x004BF8C5`: validated `0F 85 3F 01 00 00` -> six NOPs, enabling `CheckForwards` movement while aiming;
+- all other `field_8EA` restrictions (jump/swing/special moves etc.) remain retail for this first version;
+- both machine-code changes use exact-byte fail-closed validation through new `SpideyPatchBytes`.
+
+Expected marker:
+`modern_manual_aim_install camera_mode=1 ... movement=1 ...`
+
+### Next implementation / validation
+
+Before changing more aim-state restrictions, runtime-test this narrow first version:
+1. enter manual aim;
+2. move the camera/reticle with mouse and, if available, right stick;
+3. walk/strafe using normal movement controls while still aiming;
+4. fire at close and medium enemies centered by the camera while Spider-Man faces elsewhere;
+5. report any snap when leaving manual aim;
+6. brief pause regression.
+
+In parallel, shadow work may now advance from probing to a dedicated Renderer11 world-space caster ABI + directional depth pass.
+
+
 ## LIVE FRONTIER — TARGETING SECOND PATH + WORLD-SPACE SHADOW PROBE (2026-10-04)
 
 Source commits:
