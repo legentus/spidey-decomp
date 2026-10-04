@@ -4226,6 +4226,108 @@ static int SpideyPatchBytes(
 	return 1;
 }
 
+// Native-60 player compatibility without replacing retail player physics.
+//
+// Retail authored its movement quantum around the common field_80 == 2 case.
+// The master timer now dispatches one canonical update every 16/17 ms, so
+// field_80 == 1 must represent half of that old movement quantum. The force
+// hook below replaces only the two friction CALL sites. The five branch-byte
+// changes make the existing retail elapsed-vblank math handle field_80 == 1
+// through its general path while leaving field_80 == 2 on the original direct
+// path. Collision, grounding, landing, platform and cutscene code remains
+// 100% retail.
+//
+// The general retail expression is:
+//
+//     v + (v >> 1) * (field_80 - 2)
+//
+// which becomes v - (v >> 1) for field_80 == 1. This differs from a plain
+// arithmetic v >> 1 by at most one fixed-point unit for odd values.
+static void SpideyInstallPlayerPhysics60Compat()
+{
+	const int normalFrictionInstalled =
+		SpideyPatchDirectCall(
+			0x00466D84,
+			0x004E76B0,
+			(void*)&SpideyPhysicsFriction60,
+			"timing_player_friction_normal");
+	const int crawlFrictionInstalled =
+		SpideyPatchDirectCall(
+			0x0046801D,
+			0x004E76B0,
+			(void*)&SpideyPhysicsFriction60,
+			"timing_player_friction_crawl");
+
+	const unsigned char nearJleExpected[] = { 0x8E };
+	const unsigned char nearJeReplacement[] = { 0x84 };
+	const unsigned char shortJleExpected[] = { 0x7E };
+	const unsigned char shortJeReplacement[] = { 0x74 };
+
+	// Special no-collision animation displacement:
+	// 0F 8E (JLE field_80 <= 2) -> 0F 84 (JE field_80 == 2).
+	const int specialMoveInstalled =
+		SpideyPatchBytes(
+			0x00466DCB,
+			nearJleExpected,
+			nearJeReplacement,
+			sizeof(nearJleExpected),
+			"timing_player_special_move_halfstep");
+
+	// Main normal-physics displacement.
+	const int normalMoveInstalled =
+		SpideyPatchBytes(
+			0x00466E2B,
+			shortJleExpected,
+			shortJeReplacement,
+			sizeof(shortJleExpected),
+			"timing_player_move_halfstep");
+
+	// After collision, the retail general path rescales the per-tick move
+	// back into velocity. For field_80 == 1 this is (move << 1) / 1.
+	const int normalVelocityInstalled =
+		SpideyPatchBytes(
+			0x00467593,
+			shortJleExpected,
+			shortJeReplacement,
+			sizeof(shortJleExpected),
+			"timing_player_velocity_restore_halfstep");
+
+	// Vertical fall displacement uses the same authored elapsed-vblank form.
+	const int normalFallInstalled =
+		SpideyPatchBytes(
+			0x004677EE,
+			shortJleExpected,
+			shortJeReplacement,
+			sizeof(shortJleExpected),
+			"timing_player_fall_halfstep");
+
+	// Crawling uses the same field_80 <= 2/full-displacement shortcut.
+	const int crawlMoveInstalled =
+		SpideyPatchBytes(
+			0x00468057,
+			shortJleExpected,
+			shortJeReplacement,
+			sizeof(shortJleExpected),
+			"timing_player_crawl_move_halfstep");
+
+	FILE* f = SpideyOpenConsolidatedLog("TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"player_physics_60_install normal_friction=%d crawl_friction=%d special_move=%d normal_move=%d velocity_restore=%d fall=%d crawl_move=%d retail_friction=0x%08lX policy=retail_collision_halfstep_force_displacement rounding=general_retail_path_max_1_fixed_unit\n",
+			normalFrictionInstalled,
+			crawlFrictionInstalled,
+			specialMoveInstalled,
+			normalMoveInstalled,
+			normalVelocityInstalled,
+			normalFallInstalled,
+			crawlMoveInstalled,
+			0x004E76B0UL);
+		fclose(f);
+	}
+}
+
 // High-FPS compatibility: retail Mysterio laser liveness is a one-update
 // handshake. CMysterioLaser::SetPos writes byte +0x44 = 1, while virtual Move
 // at 0x0045BAC0 kills the bit if that byte was not refreshed since the
@@ -18360,6 +18462,7 @@ void game_patches(void)
 	SpideyInstallHorPlusCullCompat();
 	SpideyInstall2DPolyProvenanceCompat();
 	SpideyInstallHighFpsTimingCompat();
+	SpideyInstallPlayerPhysics60Compat();
 	SpideyInstallTimingTelemetry();
 	SpideyInstallPresentProbe();
 	SpideyInstallMovieFrameCompat();
