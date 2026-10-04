@@ -1,5 +1,60 @@
 # CURRENT STATUS
 
+## BUILD FIX — FIRST NATIVE-60 BATCH NOW COMPILES PAST REPORTED SOURCE ERRORS (2026-10-04)
+
+User build attempt:
+- requested revision: `33c3016d0a68202cdd0204d661da3bbe964b55a7`;
+- build stopped in VC6 before runtime, so **no gameplay result exists yet for the native-60 physics + RotY batch**.
+
+Reported compile blockers:
+1. `main.cpp`: `patch_physics` undeclared;
+2. `physics.cpp`: invalid `CVector +/- int` expressions in the crawling side-probe reconstruction;
+3. `spidey.cpp`: stale player collision aliases (`field_B74/B84/B8C`, `field_C18/C1C/C28/C30`) removed when the corrected `CPlayer` line-info layout was installed.
+
+Fixes committed:
+- `8043e1efb2929a4a1d2e93b523e6c0a841674262` — include `physics.h` in `main.cpp`, exposing `patch_physics(void)`;
+- `a2c022f2a67f8ec513ab095a1d10420ecbf5560b` — rewrite crawling left/right probe endpoints component-wise using `field_C78/C7C/C80`;
+- `8bce08e50fb5679fd12db2f54b44421c1a6041d7` — migrate stale collision aliases to the corrected structures:
+  - old `field_B74` -> `mLineInfo.pItem`;
+  - old `field_B84` -> `mLineInfo.Normal`;
+  - old `field_B8C[3]` -> `mLineInfo.pFace[3]`;
+  - old `field_C18` -> `mLineInfo2.pItem`;
+  - old `field_C1C` -> `mLineInfo2.Position`;
+  - old `field_C28` -> `mLineInfo2.Normal`;
+  - old `field_C30[3]` -> `mLineInfo2.pFace[3]`.
+
+Why those mappings are exact:
+- `mLineInfo` starts at `CPlayer+0xB0C`; the old aliases correspond to offsets `+0x68/+0x78/+0x80`, exactly `SLineInfo::pItem/Normal/pFace`;
+- `mLineInfo2` starts at `CPlayer+0xBB0`; old `C18/C1C/C28/C30` likewise map to `+0x68/+0x6C/+0x78/+0x80`, exactly `pItem/Position/Normal/pFace`;
+- the three contiguous `C78/C7C/C80` fields are used as the x/y/z components of the crawling side direction elsewhere in retail/decompiled player code.
+
+Static post-fix audit:
+- `physics.h` declares `patch_physics(void)`;
+- `main.cpp` includes `physics.h` and calls `patch_physics()`;
+- no invalid `hookPos +/- scalar` expressions remain;
+- all six crawl side endpoint components now use the proper C78/C7C/C80 axis component;
+- none of the seven stale player collision aliases remain in `spidey.cpp`;
+- the corrected `mLineInfo` / `mLineInfo2` members are present.
+
+The warnings shown by VC6 are unchanged pre-existing signed/unsigned and long-to-short warnings and are not the failure cause.
+
+### Exact next action
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` again.
+
+Expected revision:
+- `8bce08e50fb5679fd12db2f54b44421c1a6041d7` or a newer documentation-only descendant.
+
+If compilation succeeds, proceed with the already-defined combined native-60 runtime test:
+- normal traversal/jump/fall;
+- crawling if convenient;
+- enemy turning/AI behavior;
+- subjective overall game pace at 60;
+- quick manual-aim regression check;
+- ordinary scripted transition if convenient.
+
+If VC6 exposes another compile error, return the build output and fix that before runtime testing.
+
 ## IMPLEMENTED — FIRST COMBINED NATIVE-60 PHYSICS + AI BATCH READY (2026-10-04)
 
 Current `dev` source frontier:
