@@ -15311,7 +15311,7 @@ BOOL WINAPI DllMain(
     switch( fdwReason ) 
     { 
         case DLL_PROCESS_ATTACH:
-
+		{
 			if(GetModuleHandle("tobey_validator.exe") != NULL)
 			{
 				puts("In validator");
@@ -15352,6 +15352,7 @@ BOOL WINAPI DllMain(
 			runtime_patches();
 
             break;
+		}
 
         case DLL_THREAD_ATTACH:
         case DLL_THREAD_DETACH:
