@@ -1,6 +1,29 @@
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
 
+## 2026-10-04 LATEST FRONTIER — SECOND MANUAL-AIM PASS + DIRECT CAMERA TARGET SCAN
+
+Supersedes the prior first-pass modern-manual-aim test instructions.
+
+User tested `bf1fb237...`:
+- patches installed, but WASD still aimed the legacy reticle and Spider-Man remained locked;
+- mouse moved the modern camera, not the reticle;
+- hip-fire camera targeting remained inconsistent.
+
+Latest source:
+- `aabf69a90786b639c4e32e1d74e64cae88e3430e` — movement/reticle input decoupling
+- `b44b3bdca3337c0cfe4a57dc8a042feaa0a946ea` — direct visible-camera hip-fire target scan
+
+Manual aim now wraps the actual SpideyAI0 call sites:
+- `0x004B231A -> CheckForwards`: temporarily clear held input byte `player->field_E0C + 0x40` only while movement is evaluated, then restore; E2D/E2E movement axes remain intact.
+- `0x004B8673 -> SetupLookaroundCamera`: keep retail state logic but force `field_DC0` to the mode-3 camera center ray after retail lookaround processing; the reticle is rendered from field_DC0.
+
+Hip fire now scans targettable, non-zombie, valid-radius bodies directly against `camera.field_144-camera.mPos`, applies real player range + untouched retail LOS, and chooses the most centered candidate. The prior retail camera-transform selector remains fallback only.
+
+Next test must update to `b44b3bdc...` or newer and verify movement during manual aim, camera-centered reticle, firing while moving, and stable close/medium hip-fire acquisition. Return the consolidated log.
+
+
+
 ## 2026-10-04 LIVE UPDATE — PAUSE VALIDATED; MODERN MANUAL AIM + CAMERA-ORIGIN WEB TARGETING
 
 Fetch live `dev`; this section supersedes the earlier “rerun VC6 blocker” instructions below.
