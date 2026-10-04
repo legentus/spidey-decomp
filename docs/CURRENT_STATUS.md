@@ -46,6 +46,103 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## IMPLEMENTATION CHECKPOINT — CAMERA-RAY MANUAL AIM + LOW-OVERHEAD HITCH CORRELATION (2026-10-04)
+
+Latest gameplay source commit:
+- `303232155bf7bc61235aa18a883d6a9b89f4cc7a` — `gameplay: align manual aim ray and add hitch diagnostics`
+- **UNTESTED at runtime.** Do not describe the manual-aim behavior below as validated until the user runs the new build.
+
+### What changed
+
+1. **Manual aim now uses the exact visible camera ray already validated by hip-fire.**
+   - Removed the disproven third-pass X/Y reflection.
+   - `field_DC0` is now:
+     - X = `camera.mPos.x + (camera.field_144.x - camera.mPos.x) * 8`
+     - Y = `camera.mPos.y + (camera.field_144.y - camera.mPos.y) * 8`
+     - Z = `camera.mPos.z + (camera.field_144.z - camera.mPos.z) * 8`
+   - This keeps the aim point collinear with `camera.field_144 - camera.mPos`, exactly matching the camera-ray convention that the now-working hip-fire selector uses.
+   - Expected effect: remove the artificial inversion/off-screen drift caused by reflecting X/Y while leaving Z forward.
+   - If the legacy GTE reticle projection still does not land exactly on camera center, the next fix should replace/bypass only the reticle visual projection rather than changing the world ray again.
+
+2. **Manual-movement logging is now throttled instead of writing every successful call.**
+   - Previous condition `if (first calls || result)` caused a file open/close for effectively every successful CheckForwards evaluation while WASD was held.
+   - New condition logs:
+     - first six calls;
+     - axes/state/result transitions;
+     - one periodic sample every 60 movement calls.
+   - Expanded state includes body position/velocity, animation, collision flags, `field_8EA`, wall/ceiling state, ignore-input timer, and ground-grace timer.
+   - This deliberately reduces the chance that diagnostic logging itself creates or amplifies the periodic frametime spike.
+
+3. **Reticle telemetry now measures actual body translation.**
+   - Adds `body_delta=x,y,z` between sampled reticle calls.
+   - During held movement it samples every 30 reticle calls, plus the normal first/periodic samples.
+   - This will show whether the post-CheckForwards path ever commits even a small amount of position movement.
+
+4. **Exact slow-present events are captured in memory and published once per timing window.**
+   - Any present interval over 25 ms records:
+     - present frame;
+     - interval in microseconds;
+     - total camera-web-target calls;
+     - total `check_web_shot` calls.
+   - No file open/write is added to the hot path.
+   - The existing once-per-second timing flush now emits:
+     - `slow_event_count`
+     - `slow_event_stored`
+     - one `[TIMING] slow_present_events ...` line containing the buffered events.
+   - This directly supports the user's deliberate "fire a web when the hitch happens" timing method.
+
+5. **Hip-fire targeting logic was not changed.**
+   - The user reports it is now essentially correct.
+   - The runtime log contains successful `source=modern_camera_scan` acquisitions.
+   - Keep this path frozen unless a future regression is demonstrated.
+
+### Movement status
+
+This commit does **not** claim the remaining manual-aim locomotion freeze is fixed.
+
+The last runtime proves:
+- CheckForwards receives full WASD axes;
+- CheckForwards can return success;
+- state/animation can transition;
+- but later samples still show unchanged `mPos` and zero `mVel`.
+
+Therefore the next log must identify which post-CheckForwards state/collision/input condition prevents translation. Prefer a narrow scoped state mask around that exact locomotion gate rather than globally clearing `field_8EA`.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` and verify the loaded runtime contains `30323215...` or a newer commit.
+
+Test one gameplay session:
+
+1. **Manual reticle**
+   - enter manual aim;
+   - move camera left/right/up/down;
+   - report whether the reticle now follows naturally and whether it ever leaves the screen;
+   - specifically note whether it is centered on the camera/look direction or merely moving in the correct direction.
+
+2. **Manual-aim movement**
+   - while aim is held, hold W, A, S, and D individually for roughly two seconds each;
+   - then try diagonal movement;
+   - report whether Spider-Man actually translates, only twists/animates, or remains fully still.
+
+3. **Aim + movement + firing**
+   - try moving while rotating camera and firing;
+   - no special hip-fire stress test is needed beyond a quick regression check because hip-fire is already provisionally solved.
+
+4. **Hitch correlation**
+   - play long enough to observe several of the small periodic frametime blips;
+   - continue the useful method of firing a web on/near each observed hitch when practical;
+   - return the single consolidated `spidey-decomp.log`.
+
+Expected new markers:
+- `modern_manual_aim event=movement ... body_pos=... body_vel=... collision=... aim_state=... wall=... ceiling=... ignore_input=... ground_grace=...`
+- `modern_manual_aim event=reticle ... body_delta=... collision=...`
+- `timing_present ... slow_event_count=... slow_event_stored=...`
+- `[TIMING] slow_present_events frame=... interval_us=... web_calls=... check_web_shot_calls=...`
+
+Do not resume real-shadow implementation until this runtime is evaluated.
+
+
 ## RUNTIME CHECKPOINT — THIRD PASS TESTED; HIP-FIRE VALIDATED, MANUAL AIM STILL BROKEN (2026-10-04)
 
 User runtime log:
