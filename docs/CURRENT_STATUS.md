@@ -9121,3 +9121,38 @@ RUN_GAME.bat was refreshed to be self-contained:
 Post-cleanup audit:
 - exactly 8 BAT files remain;
 - no remaining BAT references any deleted BAT.
+
+
+## Camera-forward web targeting axis correction (2026-10-04)
+
+Runtime evidence from spidey-decomp(10).log showed that the existing camera-transform hook was active in mode 3 but target selection oscillated between a valid baddy and null while the user could not reliably hit enemies.
+
+Canonical retained-function RE then narrowed the failure to the SelectTargetBaddy scoring transform, not FireWeb:
+- SelectAutoAimTarget @ 0x004C5AA0 stores the SelectTargetBaddy result in player+0xDCC.
+- FireWeb @ 0x004C5DD0 reads player+0xDCC and directly consumes the selected target when present.
+- SelectTargetBaddy @ 0x004C8410 preserves retail eligibility, range weighting and LOS.
+- Its directional block transforms player->candidate through player+0x89C, normalizes the result, then uses NEGATED LOCAL Z as the centeredness/forward score.
+- The camera matrix produced by the same QToM path used by CCamera::LoadIntoMikeCamera represents visible camera-forward as positive local Z.
+
+Therefore the old raw camera-matrix substitution had an axis-convention mismatch: a centered camera-forward target could be scored as backwards.
+
+Implemented commit:
+- 5e3dd2e066de9bd89d94dd675f152baaf85d22e3 — gameplay: align camera web aim with retail forward axis
+
+Implementation:
+- continue to patch only the SelectAutoAimTarget -> SelectTargetBaddy call at 0x004C5B2F;
+- continue to call untouched retail SelectTargetBaddy;
+- continue to restore player+0x89C immediately after the call;
+- after QToM(camera->field_214), negate matrix row 2 for the temporary scoring matrix so camera-forward maps to retail's expected negative-local-Z direction;
+- no range, eligibility, LOS, FireWeb or player-facing logic was replaced.
+
+Static source delimiter validation after the edit:
+- braces 899/899
+- parentheses 4457/4457
+- brackets 322/322
+
+Runtime validation still required:
+- center a baddy with the camera while Spider-Man's body is turned away and fire an enemy-targeting web;
+- repeat left/right and above/below if practical;
+- verify normal straight-ahead targeting still works;
+- upload the single consolidated spidey-decomp.log if anything is wrong.
