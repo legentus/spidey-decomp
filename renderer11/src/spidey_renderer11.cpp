@@ -1056,6 +1056,32 @@ namespace
         return true;
     }
 
+    bool DiagnosticShadowReadbackEnabled()
+    {
+        static int enabled = -1;
+        if (enabled >= 0)
+            return enabled != 0;
+
+        char value[16] = {};
+        const DWORD length =
+            GetEnvironmentVariableA(
+                "SPIDEY_RENDERER11_DIAG_READBACK",
+                value,
+                static_cast<DWORD>(sizeof(value)));
+
+        enabled =
+            length > 0 &&
+            value[0] != '0' ?
+            1 :
+            0;
+
+        Log(
+            "diagnostic_shadow_readback enabled=%d source=%s",
+            enabled,
+            enabled ? "environment" : "default_off");
+        return enabled != 0;
+    }
+
     bool SampleShadowTarget(
         unsigned long& sampleHash,
         unsigned long& nonBlack,
@@ -2731,9 +2757,14 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
     unsigned long sampleHash = 0;
     unsigned long sampleNonBlack = 0;
     unsigned long samplePixels[9] = {};
+    // CPU readback of the render target is a blocking GPU synchronization
+    // point. It was useful while validating DX11 replay, but it causes a
+    // visible periodic hitch when sampled every 120 frames. Keep the
+    // diagnostic available only as an explicit opt-in.
     const int shouldSamplePixels =
-        frame <= 5 ||
-        (frame % 120) == 0;
+        DiagnosticShadowReadbackEnabled() &&
+        (frame <= 5 ||
+         (frame % 120) == 0);
     const int sampled =
         shouldSamplePixels &&
         SampleShadowTarget(
