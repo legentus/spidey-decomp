@@ -12696,16 +12696,20 @@ static void SpideyInstall2DPolyProvenanceCompat()
 // one ~32 ms present almost exactly every 24 frames / 0.4 s.
 //
 // Keep the retail TimerCallback, pause state, fractional accumulator and
-// MyVSync work intact. Only replace the fixed periodic source with chained
-// one-shot callbacks whose cumulative integer-millisecond schedule is always
-// just *after* the ideal 60 Hz deadline:
+// MyVSync work intact. Replace the fixed 16 ms source with one 1 ms periodic
+// WinMM heartbeat and dispatch the untouched retail callback only when an
+// absolute elapsed-time deadline reaches the next 60 Hz boundary. The
+// cumulative integer-millisecond delivery schedule stays just *after* the
+// ideal 60 Hz deadline:
 //
 //   deadline_ms(n) = floor(n * 1000 / 60) + 1
 //
-// This yields intervals such as 17,17,17,16,17,17,16... . Because cumulative
-// timer milliseconds never land exactly on a floating-point integer boundary,
-// retail's gTimerVblankRelated floor conversion advances one vblank per active
-// callback instead of periodically producing the old 32 ms hole.
+// This yields intervals such as 17,17,17,16,17,17,16... . The 1 ms heartbeat
+// is checked against timeGetTime rather than counted as perfect milliseconds,
+// so scheduler jitter cannot accumulate into the 58-59 Hz drift observed in
+// the first phased-timer runtime. Because cumulative retail timer milliseconds
+// stay just above exact integer boundaries, gTimerVblankRelated advances one
+// vblank per active delivery instead of reproducing the old 32 ms hole.
 typedef void (CALLBACK *SpideyRetailTimerCallbackFn)(
 		UINT,
 		UINT,
@@ -12722,6 +12726,8 @@ typedef UINT (WINAPI *SpideyTimeKillEventFn)(
 		UINT);
 typedef UINT (WINAPI *SpideyTimePeriodFn)(
 		UINT);
+typedef DWORD (WINAPI *SpideyTimeGetTimeFn)(
+		void);
 
 struct SpideyRetailTimerInfoCompat
 {
@@ -12735,6 +12741,7 @@ static SpideyTimeSetEventFn gSpideyOriginalTimeSetEvent = 0;
 static SpideyTimeKillEventFn gSpideyOriginalTimeKillEvent = 0;
 static SpideyTimePeriodFn gSpideyTimeBeginPeriod = 0;
 static SpideyTimePeriodFn gSpideyTimeEndPeriod = 0;
+static SpideyTimeGetTimeFn gSpideyTimeGetTime = 0;
 
 static volatile LONG gSpideyPacingTimerActive = 0;
 static UINT gSpideyPacingSyntheticTimerId = 0x5A17;
@@ -12746,6 +12753,7 @@ static unsigned long gSpideyPacingVirtualTick = 0;
 static unsigned long gSpideyPacingVirtualTotalMs = 0;
 static unsigned long gSpideyPacingSourceCallbackCount = 0;
 static unsigned long gSpideyPacingSourceMs = 0;
+static unsigned long gSpideyPacingSourceStartMs = 0;
 static unsigned long gSpideyPacingCallbackCount = 0;
 static unsigned long gSpideyPacingPausedCallbackCount = 0;
 static unsigned long gSpideyPacingUnexpectedVblankDelta = 0;
@@ -12908,37 +12916,6 @@ static int SpideyPatchMainImport(
 	return 0;
 }
 
-static UINT SpideyPacingNextIntervalMs(
-		unsigned long nextVirtualTick,
-		unsigned long currentVirtualTotalMs,
-		unsigned long* outTargetTotalMs)
-{
-	// +1 keeps the cumulative retail floating accumulator safely above the
-	// exact integer boundary at 50,100,150... ms instead of risking
-	// 5.999999999 -> floor(5), which is the original cadence hole.
-	const unsigned long targetTotalMs =
-		(unsigned long)(
-			((nextVirtualTick * 1000UL) /
-			 60UL) +
-			1UL);
-
-	if (outTargetTotalMs)
-	{
-		*outTargetTotalMs =
-			targetTotalMs;
-	}
-
-	if (targetTotalMs <=
-		currentVirtualTotalMs)
-	{
-		return 1;
-	}
-
-	return (UINT)(
-		targetTotalMs -
-		currentVirtualTotalMs);
-}
-
 static void CALLBACK SpideyPacingTimerThunk(
 		UINT timerId,
 		UINT message,
@@ -12953,7 +12930,14 @@ static void CALLBACK SpideyPacingTimerThunk(
 	}
 
 	++gSpideyPacingSourceCallbackCount;
-	++gSpideyPacingSourceMs;
+
+	const unsigned long nowMs =
+		gSpideyTimeGetTime ?
+			(unsigned long)gSpideyTimeGetTime() :
+			(unsigned long)GetTickCount();
+	gSpideyPacingSourceMs =
+		nowMs -
+		gSpideyPacingSourceStartMs;
 
 	const unsigned long nextVirtualTick =
 		gSpideyPacingVirtualTick +
@@ -13080,6 +13064,10 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 		0;
 	gSpideyPacingSourceMs =
 		0;
+	gSpideyPacingSourceStartMs =
+		gSpideyTimeGetTime ?
+			(unsigned long)gSpideyTimeGetTime() :
+			(unsigned long)GetTickCount();
 	gSpideyPacingCallbackCount =
 		0;
 	gSpideyPacingPausedCallbackCount =
@@ -13145,14 +13133,17 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	{
 		fprintf(
 			f,
-			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=17 policy=periodic_1ms_dispatch_16_17ms_60hz retail_callback_preserved=1\n",
+			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=17 policy=periodic_1ms_dispatch_16_17ms_60hz source_clock=%s retail_callback_preserved=1\n",
 			delay,
 			resolution,
 			flags,
 			callbackAddress,
 			(unsigned long)user,
 			gSpideyPacingSyntheticTimerId,
-			sourcePeriodMs);
+			sourcePeriodMs,
+			gSpideyTimeGetTime ?
+				"timeGetTime" :
+				"GetTickCount");
 		fclose(f);
 	}
 
@@ -13250,6 +13241,10 @@ static int SpideyInstallModernTimerPacing()
 			(SpideyTimePeriodFn)GetProcAddress(
 				winmm,
 				"timeEndPeriod");
+		gSpideyTimeGetTime =
+			(SpideyTimeGetTimeFn)GetProcAddress(
+				winmm,
+				"timeGetTime");
 	}
 
 	void* originalSet =
@@ -13295,13 +13290,14 @@ static int SpideyInstallModernTimerPacing()
 	{
 		fprintf(
 			f,
-			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX retail_match=16ms_periodic_main_exe policy=periodic_1ms_source_dispatch_16_17ms_60hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe policy=periodic_1ms_source_dispatch_16_17ms_60hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
 			setInstalled,
 			killInstalled,
 			(unsigned long)gSpideyOriginalTimeSetEvent,
 			(unsigned long)gSpideyOriginalTimeKillEvent,
 			(unsigned long)gSpideyTimeBeginPeriod,
-			(unsigned long)gSpideyTimeEndPeriod);
+			(unsigned long)gSpideyTimeEndPeriod,
+			(unsigned long)gSpideyTimeGetTime);
 		fclose(f);
 	}
 
@@ -13380,7 +13376,7 @@ static void SpideyLogTimingWindow(
 	{
 		fprintf(
 			f,
-			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu slow_event_count=%lu slow_event_stored=%lu timer_active=%ld timer_callbacks=%lu timer_virtual_ticks=%lu timer_paused_callbacks=%lu timer_unexpected_delta=%lu timer_last_interval_ms=%lu timer_source_callbacks=%lu fire_web_calls=%lu last_fire_frame=%lu\n",
+			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu slow_event_count=%lu slow_event_stored=%lu timer_active=%ld timer_callbacks=%lu timer_virtual_ticks=%lu timer_paused_callbacks=%lu timer_unexpected_delta=%lu timer_last_interval_ms=%lu timer_source_callbacks=%lu timer_source_ms=%lu fire_web_calls=%lu last_fire_frame=%lu\n",
 			kind,
 			elapsed,
 			count,
@@ -13411,6 +13407,7 @@ static void SpideyLogTimingWindow(
 			gSpideyPacingUnexpectedVblankDelta,
 			gSpideyPacingLastIntervalMs,
 			gSpideyPacingSourceCallbackCount,
+			gSpideyPacingSourceMs,
 			gSpideyFireWebCalls,
 			gSpideyLastFireWebFrame);
 
