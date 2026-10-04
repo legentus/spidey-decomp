@@ -1,6 +1,66 @@
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
 
+## 2026-10-04 LIVE UPDATE — PAUSE VALIDATED; MODERN MANUAL AIM + CAMERA-ORIGIN WEB TARGETING
+
+Fetch live `dev`; this section supersedes the earlier “rerun VC6 blocker” instructions below.
+
+Current gameplay commits:
+- `58742eb419fa755d2c044425ae2cbc44963ac731` — `gameplay: modernize manual aim and camera target origin`
+- `f34aa5ddc3efd3c2571dd0de8e9483276108b1fd` — `gameplay: validate camera targets with retail LOS`
+- `3f5b574cc5ca120902d119b042d32f3ebacaf3b4` — status checkpoint
+
+Latest runtime result:
+- pause/unpause is fixed; custom Pause Options box uses the in-place lifecycle path and no longer crashes;
+- world-space shadow probe passed for Spider-Man and NPC supers;
+- web targeting is still inconsistent in the old orientation-only camera patch;
+- user also wants manual aim modernized so mouse/right stick aim while Spider-Man can still move.
+
+Manual-aim RE:
+- `CPlayer::EnterLookaroundMode @ 0x004C3580` sets `field_8EA=1`, pushes the camera mode, then explicitly switches to retail mode 7 / FRONT;
+- `CPlayer::CheckForwards @ 0x004BF8A0` has the exact movement lock `jne` at `0x004BF8C5` when `field_8EA != 0`.
+
+New first-pass modern manual aim:
+- validated bytes `0x004C370B: 6A 07 -> 6A 03`, retaining the aim/reticle state but keeping normal mode-3 camera ownership;
+- validated bytes `0x004BF8C5: 0F 85 3F 01 00 00 -> NOP x6`, allowing ordinary CheckForwards locomotion while aiming;
+- all other retail aim-state restrictions remain untouched;
+- existing relative mouse and Input11 right-stick camera channels now remain active in aim mode;
+- patches fail closed through exact-byte validation.
+
+Web-targeting root cause:
+- retail `SelectTargetBaddy` builds the angular vector from Spider-Man's body position even when we replace its orientation matrix;
+- a third-person camera behind/above the player therefore creates parallax: screen-centered close targets can still fail the body's forward cone.
+
+New mode-3 targeting path:
+- use the visible render camera position + orientation for the retail centeredness scorer;
+- preserve retail candidate eligibility and cached player-distance weighting;
+- restore Spider-Man position/matrix immediately;
+- revalidate accepted target with untouched retail `Utils_LineOfSight @ 0x004E67A0` from Spider-Man's real position;
+- retain the previous orientation-only retail call as a fallback when necessary.
+
+Expected runtime markers:
+- `modern_manual_aim_install camera_mode=1 ... movement=1 ...`
+- `camera_web_target ... source=render_camera_origin ...`
+- fallback marker: `source=render_camera_orientation_fallback`
+
+Shadow status:
+- probe is complete/passed, not merely pending;
+- do not keep extending probe telemetry;
+- next shadow implementation is a dedicated Renderer11 world-space caster submission ABI, using local `SModel` geometry plus live per-part pose and `CSuper::mTransform`, then a directional depth-map pass and receiver sampling;
+- do not attempt to reconstruct world geometry from the current XYZRHW replay;
+- do not remove legacy blob shadows until the real shadow path is visually stable.
+
+Exact next runtime:
+1. run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. verify the loaded revision contains the two gameplay commits above;
+3. manual aim: enter aim, move view with mouse/right stick, move Spider-Man simultaneously, fire while moving;
+4. target close + medium enemies centered by camera while Spider-Man faces elsewhere;
+5. report any exit/recenter snap;
+6. quick pause regression;
+7. return the single consolidated `spidey-decomp.log`.
+
+
+
 ## 2026-10-04 LIVE UPDATE — PAUSE HARDENING, BOTH WEB PATHS, SHADOW CASTER PROBE
 
 The original ZIP handoff froze `dev` at `ea5f5f676d60ceb36a3c78df51aaffa73509b0dd`. **Continue from live `dev`, not that frozen commit.**
