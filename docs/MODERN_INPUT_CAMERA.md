@@ -399,3 +399,157 @@ Possible Stage-A experiment after passive runtime classification:
 - compare feel/collision/script behavior.
 
 This is only a compatibility experiment. Do not make the final modern camera dependent on USER/LOOSE/LOOKAROUND if those modes inherit undesirable legacy constraints.
+
+
+---
+
+## Stage A mode-3 orbit prototype — implemented 2026-10-04
+
+The pause/settings UI milestone is complete and camera work is now active.
+
+### New exact retail RE
+
+Canonical retail SpideyPC.exe disassembly grounds the ordinary gameplay seam inside:
+
+- CCamera::AI @ 0x00417CB0.
+
+The mode dispatch reads mCameraMode @ +0x2A0. For mode 3:
+
+- dispatch entry: 0x00418412;
+- ECX carries CCamera*;
+- direct call at 0x00418414;
+- retail target: 0x00418E00;
+- execution then rejoins at 0x00418456.
+
+The target at 0x00418E00 is the retail mode-3 normal gameplay camera generator used by the already-confirmed floor/wall/ceiling/swing/falling presets.
+
+Crucially, the rest of CCamera::AI still runs after that call:
+
+- 0x00416B10 camera post-processing/collision/orientation stage;
+- shake/orientation work;
+- final CCamera::LoadIntoMikeCamera @ 0x00416A20.
+
+This provides a narrow Stage-A hook: replace only the single mode-3 generator call, while keeping the retail camera pipeline before and after it.
+
+### Mode-3 orbit inputs
+
+Immediately before mode dispatch, retail copies the current camera distance values into:
+
+- XZ distance: 0x00548860;
+- Y distance: 0x00548864.
+
+For mode 3 it derives:
+
+- radial 3D distance: 0x0054885C = sqrt(xz^2 + y^2);
+- vertical orbit angle: 0x00548858 = ratan2(-y, xz).
+
+CM_Normal @ 0x00418E00 consumes:
+
+- 0x00548858 vertical angle;
+- 0x0054885C radial distance;
+- camera angles around +0x234/+0x236/+0x238;
+- focus/pivot data already produced by retail.
+
+It then builds the desired camera position at +0x24C and preserves the normal focus path.
+
+Therefore the first modern orbit prototype can change yaw and pitch without replacing the retail position/collision system:
+
+- horizontal orbit: own camera->field_236 @ +0x236;
+- vertical orbit: own a modern Y-distance, then recompute 0x548858/0x54885C;
+- preserve retail XZ distance;
+- preserve the retail post-mode collision/orientation stage.
+
+### Implemented source boundary
+
+Implementation commits:
+
+- e15892a8c76eef180a932b25d6bfb13e62795adb — feat: add mode-3 modern orbit camera prototype
+- d2d546551255be6d0b83919236d0aed7098dcbd3 — guard: reset modern camera ownership cleanly
+
+Hook:
+
+- call site: 0x00418414;
+- expected retail target: 0x00418E00;
+- replacement: SpideyModernMode3Camera.
+
+The wrapper uses an ABI-compatible __fastcall(CCamera*, void*) signature because the preserved VC6 build does not support an explicit __thiscall function-pointer typedef.
+
+### Ownership policy
+
+The prototype is intentionally conservative:
+
+1. Only mode 3 can be modern-owned.
+2. Until the player actually moves mouse/right stick, mode 3 runs completely retail.
+3. On first camera intent:
+   - seed modern yaw from live field_236;
+   - seed modern vertical distance from live 0x00548864;
+   - begin modern gameplay ownership.
+4. Other retail camera modes remain untouched.
+5. Ownership is dropped on:
+   - active camera pointer change;
+   - mode changing away from 3;
+   - camera detach.
+6. Returning to mode 3 does not restore stale modern state; a new input intent reseeds from the then-current retail camera.
+
+This means cinematics, bosses, special cameras, lookaround and other non-mode-3 ownership remain retail-controlled by default.
+
+### Input policy
+
+Mouse:
+- existing relative DirectInput deltas from the DXINPUT_PollMouse compatibility wrapper;
+- no screen-position or Win32 mouse API;
+- current initial yaw scale: 3 angle units per raw mouse X count;
+- current initial pitch scale: 2 Y-distance units per raw mouse Y count;
+- mouse-up is mapped to look-up.
+
+Controller:
+- existing normalized Input11 right stick;
+- XInput Y remains positive-up;
+- current initial full-stick yaw speed: 32 / 4096-angle units per completed frame;
+- current initial full-stick pitch speed: 7 Y-distance units per completed frame.
+
+Input is consumed at most once per completed-frame snapshot even if camera AI is evaluated more than once.
+
+### Vertical limits
+
+Initial Stage-A Y-distance clamp:
+
+- minimum: -480;
+- maximum: +260.
+
+Retail XZ distance is preserved. Because the effective pitch is derived from both XZ and Y distance, the exact angular limits naturally vary somewhat with the active retail distance preset.
+
+This is intentional for the first compatibility prototype. A dedicated Stage-B camera can own explicit pitch angles later.
+
+### Telemetry
+
+Install marker:
+
+modern_camera_install installed=1 call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only ... collision=retail_after_mode3
+
+Ownership:
+
+- modern_camera event=acquire ...
+- modern_camera event=release ...
+
+Updates:
+
+modern_camera event=update ... yaw=... retail_yaw=... y_dist=... xz_dist=... vertical_angle=... mouse=... stick=... retail_overrode_yaw=...
+
+retail_overrode_yaw=1 is especially important: CM_Normal has a conditional late yaw recomputation when its auxiliary angle fields are nonzero. This telemetry tells us whether that legacy behavior is fighting the modern yaw on floor/wall/ceiling states.
+
+### First runtime success criteria
+
+The first runtime is a proof of the seam, not final feel tuning.
+
+Success means:
+
+- moving the mouse left/right or right stick horizontally genuinely orbits the camera;
+- yaw can continue through a full 360-degree range in ordinary mode-3 gameplay;
+- mouse/right-stick vertical input pitches the camera up/down within the clamp;
+- stopping input preserves the chosen orbit instead of immediately snapping behind Spider-Man;
+- basic movement/swinging remains playable;
+- the existing retail collision stage prevents catastrophic wall penetration in ordinary cases;
+- entering a non-mode-3/scripted camera releases modern ownership instead of fighting it.
+
+Sensitivity, inversion, recenter behavior, wall/ceiling special handling, shoulder offset and smoothing are explicitly follow-up tuning/Stage-B work.
