@@ -1,3 +1,72 @@
+# NATIVE 60-HZ MASTER HANDOFF — TWO EXACT TIMING CAPTURES READY (2026-10-04)
+
+This supersedes the older high-FPS checkpoint below.
+
+Authoritative project:
+- Repo: https://github.com/legentus/spidey-decomp
+- Branch: `dev`
+- Google Drive root: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+- Handoff folder ID: `1l-4gLh-jftGT1aNrP73wD8n3IScqQcvO`
+- Logs folder ID: `1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s`
+
+Latest tested runtime:
+- `a4e1105d1f9568a24ca8817847573392a7f8324a`;
+- log `spidey-decomp(20261004-213030).log`;
+- logging cleanup eliminated the recurring hitching;
+- gameplay still feels slightly sped up at 60 FPS.
+
+User requirement:
+- **60 Hz is the native/minimum simulation target**;
+- do not preserve 20/30-Hz gameplay under a 60-Hz renderer;
+- make game speed, physics, AI, cutscenes and boss fights correct at 60;
+- later obtain >60 FPS by decoupled rendering/presentation + interpolation over a fixed maximum 60-Hz gameplay simulation.
+
+Current source frontier:
+- `6cf830b974316134a8a7813ac1eda42279eacd60` — runtime-proven Mysterio vtable guard;
+- `026322a195ecb16ef41d3803ff477356504e8713` — prune resolved timing probes; retain only unresolved exact captures;
+- `f835bbdb433af3edc722b3743f20e47bb05a3321` — CURRENT_STATUS native-60 frontier checkpoint.
+
+Current startup captures:
+- `CAIProc_RotY_Block @ 0x00401060`, size `0x120`;
+- `CVenom_SynthesizeAnalogueInput_Block @ 0x004E9B00`, size `0x19A0`.
+
+Critical RE already complete:
+- `Ob_AI` runs `EveryFrame`, optional `UpdateFrame`, then virtual `AI` every dispatch; there is no hidden 30-Hz AI interleave.
+- Therefore raw one-per-call countdowns really accelerate at higher Logic cadence.
+- `CBody::EveryFrame`, `CSuper::UpdateFrame`, `CBaddy::RunTimer`, `CAIProc_MoveTo`, camera and many movement paths already use canonical elapsed ticks.
+- `CAIProc::Wait` is a raw `field_C--` candidate, but do not patch until exact `CAIProc_RotY` retail semantics are captured.
+- Full `SpideyAI0` review found its direct increments are event/state counters, not generic timers; do not globally scale that giant state machine.
+- `CVenom_FollowDirections` is a small script/direction dispatcher and calls `CVenom_SynthesizeAnalogueInput`; the latter is the direct next target for the known chase/cutscene timing failure.
+
+Mysterio:
+- next runtime should now install the elapsed-time laser liveness fix;
+- expected guard: slot0/destructor `0x0045B540`, slot1/Move `0x0045BAC0`.
+
+Exact next test:
+1. run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. expected source is `026322a...` or newer docs-only descendant;
+3. boot into ordinary gameplay; no hitch reproduction is needed;
+4. return the one consolidated `spidey-decomp.log`.
+
+Required lines:
+- `high_fps_compat mysterio_laser=1 ...`;
+- `high_fps_re_bytes_done label=CAIProc_RotY_Block ... valid=1`;
+- `high_fps_re_bytes_done label=CVenom_SynthesizeAnalogueInput_Block ... valid=1`.
+
+After the log:
+1. reconstruct the two exact binaries;
+2. disassemble AI rotation/wait semantics;
+3. disassemble Venom synthesized input;
+4. implement the first broad native-60 timing correction batch;
+5. keep state/event counters unchanged;
+6. validate 60-Hz game speed before moving to >60 presentation interpolation.
+
+Hitch branch is closed unless a new independent stall appears.
+Manual aim is frozen unless regression.
+Real-shadow work remains paused until native-60 timing reaches a stable checkpoint.
+
+---
+
 # HIGH-FPS MASTER HANDOFF UPDATE — HITCHES FIXED; NATIVE 60-HZ GAMEPLAY FRONTIER (2026-10-04)
 
 Latest tested runtime:
