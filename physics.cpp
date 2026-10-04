@@ -878,11 +878,14 @@ void CPlayer::DoPhysics(void)
 	sqz = (move.vz >> 9) * (move.vz >> 9);
 	tryCount = 0;
 
-	// @Note original defect, kept: SLineInfo's members that have
-	// constructors get zeroed here, but pItem does not, and it is only
-	// written by M3dColij_InitLineInfo. If the player did not move at all
-	// this frame the sweep below never runs, and the "did I hit anything"
-	// test after it reads pItem uninitialized.
+	// Retail leaves pItem uninitialized until M3dColij_InitLineInfo runs.
+	// That is only accidentally safe in the original stack layout: if the
+	// player has zero movement, the sweep loop below is skipped and pItem is
+	// tested immediately. In the recompiled replacement a stationary
+	// live-cutscene spawn can therefore interpret stack garbage as a valid
+	// collision object and crash. Make the no-sweep path deterministic.
+	lineInfo.pItem = 0;
+
 	len3 = M3dMaths_SquareRoot0(sqz + sqx + (move.vy >> 9) * (move.vy >> 9));
 
 	while (len3 != 0)
