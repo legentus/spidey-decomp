@@ -9304,3 +9304,25 @@ Next runtime:
 2. then direct playtesting may use `RUN_GAME.bat` without updating/rebuilding;
 3. re-test pause, aggro/non-aggro camera web targeting, and blob-shadow camera anchoring;
 4. upload the freshly generated `spidey-decomp.log` if anything fails.
+
+
+## VC6 build fix for runtime revision logging (2026-10-04)
+
+User's FAST_UPDATE_AND_TEST_LATEST_BUILD run at revision `5709bdef9269f6d6e9e02c2c0ced6a74f3fbaf56` failed in `main.cpp` with VC6 C2360:
+
+- initialization of `runtimeVersionLog` skipped by later switch case labels;
+- declaration was inside `DllMain` directly under `case DLL_PROCESS_ATTACH:`.
+
+Fix:
+- commit `71290b003e895f179c2ab1921fb59bdb39b1753e` — `compat: scope process attach locals for VC6`;
+- wrapped the `DLL_PROCESS_ATTACH` case body in its own braces so the local `FILE* runtimeVersionLog` lifetime no longer crosses `DLL_THREAD_ATTACH`, `DLL_THREAD_DETACH`, or `DLL_PROCESS_DETACH` labels;
+- runtime behavior is otherwise unchanged.
+
+Static structure after edit:
+- braces 911/911
+- parentheses 4507/4507
+- brackets 323/323
+
+Next action:
+- rerun `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+- if it compiles, continue with the current runtime test for pause crash, aggro/non-aggro web targeting, blob-shadow anchoring, and dynamic pause box.
