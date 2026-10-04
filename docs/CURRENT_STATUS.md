@@ -8635,3 +8635,81 @@ Expected telemetry on Enter:
 - `pause_options_confirm action=apply ... source=keyboard_enter_mask_0x10`
 
 If this passes, close the pause Options/UI milestone and proceed directly to camera implementation.
+
+
+## Pause Options Enter: raw DirectInput latch path (2026-10-04)
+
+Runtime test on revision `081479c4741962a808bb7e326c3edb3e67685d9a` still showed:
+
+- Options row placement is correct: `options_row=3 quit_row=4 previous_last=Quit`;
+- mouse click opens Options successfully;
+- keyboard Enter still does not open Options;
+- Enter still does not activate Apply Settings or Back.
+
+The uploaded consolidated log also remained on the canonical retail executable fingerprint:
+
+- SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
+- PE timestamp `0x3B7A3167`
+- image size `0x02A0D000`.
+
+### Important correction to the previous diagnosis
+
+The prior `0x10` Enter code **was present in the tested source**. The startup telemetry string still said `pause_confirm_action=0x1000`, but that string itself had not been refreshed; it was not proof that the functional source patch was missing.
+
+Exact retail disassembly now explains why the `0x10` fallback can still fail:
+
+- pause flow calls retail `CMenu::Update @ 0x00440600` before the patched confirm call at `0x00441606`;
+- `PCSHELL_CheckTriggers @ 0x0050C180` has a dedicated Enter one-shot latch at `0x00AC1238`;
+- its `0x10` path checks DIK `0x1C`, but the latch can suppress a second/late query in the same frame;
+- retail raw keyboard state is stored by DirectInput with:
+  - `0xFF` = fresh press;
+  - `0x7F` = still held after the next poll;
+  - `0x80` = release;
+  - `0x00` = idle.
+
+### New implementation
+
+Commits:
+
+- `869237591a593eea214bc90f44b6e7cce42f57d7` — initial native DirectInput edge read at `PCINPUT_IsKeyPressed @ 0x0050A650`.
+- `c55f7dbc1a6bf38b76912d8ee44e17fb667e01a6` — **fix: latch raw DirectInput Enter for pause Options**
+  - reads retail raw key byte through `DXINPUT_GetKeyState @ 0x00501CB0` for DIK `0x1C`;
+  - derives physical down from the low seven bits, accepting both fresh `0xFF` and held `0x7F`;
+  - maintains an independent pause-menu latch so one physical press produces one custom activation;
+  - therefore remains robust if a second retail keyboard poll converted `0xFF` to `0x7F` before the custom confirm hook;
+  - does not use `GetAsyncKeyState`, Windows messages, or any external keyboard side path;
+  - preserves the existing mouse confirmation path;
+  - adds `pause_enter_state raw=... down=... edge=... held=... line=... selected=...` diagnostics;
+  - adds explicit Back confirmation telemetry.
+- `8fd5f5309facc7faf88fd53c4d3c05abb7609dbc` — startup telemetry now reports `pause_keyboard_source=raw_directinput_dik_0x1c`.
+
+Static source validation after the raw-input patch:
+
+- braces balanced;
+- parentheses balanced;
+- brackets balanced;
+- no negative delimiter depth.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Before entering gameplay, confirm the log startup includes:
+
+`pause_keyboard_source=raw_directinput_dik_0x1c`
+
+Then test only:
+
+1. highlight Options and press Enter;
+2. highlight Apply Settings and press Enter;
+3. highlight Back and press Enter;
+4. verify mouse clicks still work.
+
+Expected successful keyboard telemetry:
+
+- `pause_enter_state raw=0xFF ... edge=1 ...` or, if an extra poll occurred, `raw=0x7F ... edge=1 ...`;
+- `pause_options_confirm action=open ... source=raw_directinput_enter_edge`;
+- `pause_options_confirm action=apply ... source=raw_directinput_enter_edge`;
+- `pause_options_confirm action=back ... source=raw_directinput_enter_edge`.
+
+If activation still fails, the raw key-state telemetry is sufficient to distinguish “Enter never reaches DirectInput” from “custom routing logic failed” without another speculative mapping change.
