@@ -1,5 +1,64 @@
 # CURRENT STATUS
 
+## AUTHORITATIVE HIGH-FPS FRONTIER — SOURCE + RE CAPTURE READY (2026-10-04)
+
+Latest tested runtime:
+- `091c2345ef1d4c927878d6ec47c2c54efaadf9ce`
+- log: `spidey-decomp(20261004-203738).log`
+- manual aim validated as perfect-for-now; freeze camera/aim unless regression.
+
+Latest source frontier:
+- `98d52ec80b5876db8e347460be307555b905de4b` — disable proven hot-path timing success I/O by default;
+- `31f80818ab5ee73cacae4b3d952205add448fc86` — remove renderer hot-path success logging;
+- `6cfcd74aaecc72a2e1ac37885a03dc4aad0f52ae` — convert Mysterio laser one-update liveness handshake to elapsed `gTimerRelated` ticks;
+- `9f8a62f46d00e437861cd55facf0a6ef91a76b4e` — add startup-only missing-retail byte capture;
+- `62c7e71dc32f6cadec9c077dde13ec66d1645a0c` — extend startup capture to the full `SpideyAI0` body in 128-byte chunks;
+- `52c9a5cf9c22740839a2fc03d28a013605a5f240` — add `docs/HIGH_FPS_TIMING_AUDIT.md`.
+
+Current source is **implemented/committed but NOT runtime-tested**.
+
+The next runtime has two purposes:
+1. validate that removing synchronous success logging materially reduces the recurring hitches;
+2. collect the missing retail machine code needed to continue timing RE without guessing.
+
+Expected startup capture:
+- `Ob_AI @ 0x00460FC0`, size `0x1A0`;
+- `CVenom_FollowDirections @ 0x004EB530`, size `0x160`;
+- `SpideyAI0 @ 0x004B13F0`, size `0x73A0`;
+- each emitted as `high_fps_re_bytes ... offset=... hex=...`, followed by `high_fps_re_bytes_done ... valid=1`.
+
+Expected Mysterio install line:
+- `high_fps_compat mysterio_laser=1 ... move_found=0x0045BAC0 ... grace_ticks=3 ...`.
+
+Static source audit after the capture work:
+- braces: 1106 / 1106;
+- parentheses: 5146 / 5146;
+- brackets: 372 / 372;
+- no C++11 `auto` or `nullptr` introduced.
+
+Do **not** globally apply floating-point delta time. Current evidence proves a mixed timing model:
+- body/camera/animation/boss paths already consume canonical elapsed `field_80` ticks;
+- other AI/effect/cutscene paths still use raw per-update counters;
+- event/state counters such as most `dumbAssPad++` transitions are not timers and must remain unscaled.
+
+Current intended architecture:
+- first make 60-Hz simulation semantically correct;
+- then cap simulation advancement to canonical 60-Hz ticks;
+- finally decouple `Display`/presentation for 120/144/240+ Hz and interpolate render state where necessary.
+
+Exact audit and rationale:
+- `docs/HIGH_FPS_TIMING_AUDIT.md`.
+
+Exact next action:
+- run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+- move through the current level long enough to provoke several of the old recurring hitches;
+- web shots may still be used as user-visible hitch markers;
+- no extended manual-aim test is needed beyond a quick regression sanity;
+- return the single consolidated `spidey-decomp.log`.
+- After that log arrives, reconstruct/disassemble `Ob_AI` first, then `CVenom_FollowDirections`, then `SpideyAI0`, and continue directly into Catch Venom/cutscene timing repair.
+
+Do not resume real-shadow work until this timing phase is complete enough to support correct high-refresh gameplay.
+
 ## HIGH-FPS IMPLEMENTATION CHECKPOINT — MYSTERIO LIVENESS FIX + 60-HZ SIMULATION POLICY (2026-10-04)
 
 **Status: implemented/committed; NOT runtime-tested yet.**
