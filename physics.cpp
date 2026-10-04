@@ -359,7 +359,7 @@ void CPlayer::DoCrawlingPhysics(void)
 		// -96 units along the crawl surface's forward axis. The one-argument
 		// CVector constructor only fills vx, which is all the
 		// (CVector, CVector) operator* reads out of its left side.
-		alongUp = CVector(-96) * this->field_C6C;
+		alongUp = CVector(-96, 0, 0) * this->field_C6C;
 
 		this->mLineInfo.StartCoords.vx = (hookPos - alongUp / 4).vx;
 		this->mLineInfo.StartCoords.vy = (hookPos - alongUp / 4).vy;
