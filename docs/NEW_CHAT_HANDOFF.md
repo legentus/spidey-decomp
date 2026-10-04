@@ -1,3 +1,53 @@
+# LATEST FRONTIER — MODERN MODE-3 ORBIT CAMERA PROTOTYPE UNDER TEST (2026-10-04)
+
+Pause Options/UI scale milestone is closed. User confirmed keyboard Enter now works for Options, Apply Settings and Back, with mouse behavior preserved.
+
+The active task is now the requested modern 3D gameplay camera: 360-degree horizontal orbit where possible plus limited vertical pitch, using mouse/right stick.
+
+Implemented on dev:
+
+- e15892a8c76eef180a932b25d6bfb13e62795adb — mode-3 modern orbit prototype.
+- d2d546551255be6d0b83919236d0aed7098dcbd3 — camera ownership transition guards.
+- 09f0cd9cb65a65868d97a70f1bce8910118d75ba — detailed MODERN_INPUT_CAMERA.md documentation.
+- 9055c9a980ce5c89428b69a5e222050f8d6f0dfd — CURRENT_STATUS checkpoint.
+
+Exact retail seam:
+- CCamera::AI @ 0x00417CB0
+- mode-3 call site 0x00418414
+- retail CM_Normal target 0x00418E00
+- retail post-mode collision/orientation still runs at 0x00416B10
+- final LoadIntoMikeCamera @ 0x00416A20
+
+Prototype behavior:
+- only camera mode 3 can be modern-owned;
+- no camera mutation until explicit mouse/right-stick intent;
+- yaw seeds from live field_236 and wraps freely 0..4095;
+- vertical orbit seeds from live Y distance and is clamped -480..+260;
+- retail XZ distance remains intact;
+- derived retail mode-3 radius/vertical-angle inputs are recomputed before CM_Normal;
+- retail CM_Normal and the downstream collision/orientation pipeline still execute;
+- ownership drops on non-mode-3 camera, pointer change or detach, so scripted/boss/special cameras remain retail-controlled.
+
+Input:
+- relative DirectInput mouse X/Y already captured by existing wrapper;
+- Input11 normalized right stick already available;
+- mouse yaw scale 3; pitch scale 2;
+- full right-stick yaw 32 angle units/frame; pitch 7 Y-distance units/frame;
+- one input snapshot consumed at most once per completed frame.
+
+Key telemetry:
+- modern_camera_install ...
+- modern_camera event=acquire ...
+- modern_camera event=update ... retail_overrode_yaw=...
+- modern_camera event=release ...
+
+Next authoritative step:
+Run FAST_UPDATE_AND_TEST_LATEST_BUILD.bat and test ordinary gameplay orbit/pitch, movement/swinging, basic wall/corner collision, and right stick if available. Report direction/sensitivity and upload the single consolidated spidey-decomp.log. Use telemetry before making speculative architectural changes.
+
+If Stage A proves too constrained by wall/ceiling/orientation behavior, proceed toward the dedicated Stage-B modern gameplay camera described in docs/MODERN_INPUT_CAMERA.md rather than overfitting legacy camera modes.
+
+---
+
 # LATEST FRONTIER — RAW DIRECTINPUT ENTER LATCH UNDER TEST; CAMERA NEXT (2026-10-04)
 
 Runtime on `081479c4741962a808bb7e326c3edb3e67685d9a` still showed the custom pause Options UI working only by mouse for Open / Apply / Back. Options ordering remains correct immediately above Quit.
