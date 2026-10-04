@@ -7996,3 +7996,233 @@ On the next log inspect:
 - any crash lines.
 
 Do not change the proven broad-panel QPoly passthrough policy unless new runtime evidence contradicts it.
+
+
+## 0876ea5 runtime: scale inputs detected but never committed; compass double-transform isolated; custom pause Options submenu (2026-10-03)
+
+### Runtime tested revision
+
+The user tested:
+
+- `0876ea54ecd535bcfaa19e77742040bbc69f9b36`
+
+with the same grounded retail executable fingerprint:
+
+- SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
+- PE timestamp `0x3B7A3167`
+- image size `0x02A0D000`
+
+User observations:
+- health and web-cartridge HUD pieces are now in the correct place;
+- the compass arrow is still outside its holder;
+- changing UI Scale or Text Scale appears to do nothing;
+- the user wants a dedicated in-level **Options** submenu, not the retail frontend Options menu.
+
+### Scale-control runtime proof: adjustment worked; Apply did not
+
+The log proves both scale rows were receiving left/right input:
+
+- Gameplay UI pending value moved through values including 120, 125, 130, 135 and eventually up to 200;
+- Text Scale pending value moved through values including 95, 100, 105, 110, 115, 120, 125, 130, 135 and 140;
+- throughout those events the committed values remained Gameplay UI = 125 and Text = 100.
+
+There is no `pause_ui_apply` event in the run.
+
+Therefore the old problem was **not** the left/right adjustment path. The problem was that the old confirm wrapper looked up the pause menu through stale/global state and never committed the pending values.
+
+The new handler now captures the actual CMenu pointer from the hooked pause-menu update and uses that same owner for confirm/apply dispatch. It no longer reads `*(CMenu**)0x005FAED0`.
+
+### Custom in-level Options submenu
+
+Commit:
+
+- `d45947c0241e9f226f0a8dd326f2a23fa113194c` — **feat: add standalone pause Options submenu**
+
+Follow-up repair:
+
+- `018b16c3ecdd1f8ad8746a0d75e4013a43152f8a` — **fix: repair atomic pause options handler region**
+
+Current pause behavior:
+
+Parent pause menu:
+- all original retail rows remain;
+- exactly one new row is appended: **Options**.
+
+Selecting **Options** opens a custom submenu built entirely from the already-live gameplay `CMenu`; it does **not** call `Shell_Options`, `PCSHELL_DoDisplayOptions`, or any frontend-only PShell resource.
+
+Custom submenu rows:
+
+1. `UI Scale: N%`
+2. `Text Scale: N%`
+3. `Apply Settings`
+4. `Back`
+
+Behavior:
+- UI Scale changes only the pending gameplay-HUD value in 5% steps;
+- Text Scale changes only the pending text value in 5% steps;
+- Apply Settings commits both values and persists `spidey-modern-video.ini`;
+- gameplay scale takes effect on subsequent HUD draws;
+- text scale is explicitly re-applied immediately through `SpideyApplyFrontendTextScale("pause_options_apply")`;
+- Back restores the exact parent pause-menu state;
+- Back without Apply discards uncommitted changes;
+- Apply followed by further edits then Back preserves the applied values and discards only the later pending edits.
+
+The existing title/frontend Display Options menu remains independent and unchanged.
+
+### Parent-menu preservation / object safety
+
+The submenu reuses the same live pause `CMenu` object.
+
+The project validates:
+
+- `sizeof(CMenu) == 0x53C`;
+- vtable at offset `+0x0`;
+- expanding-box pointer at offset `+0x4`;
+- menu data begins at `+0x8`.
+
+The custom submenu snapshots only bytes `+0x8 .. +0x53B`. It deliberately never copies or restores the live vtable or box pointer.
+
+Hardening commit:
+
+- `47129a8ef6d9de995206b61e9ea04f3dcef79b98` — **guard: lock pause Options snapshot to CMenu layout**
+
+This adds a C++98/MSVC6-compatible compile-time size guard:
+
+`sizeof(CMenu) == 0x53C`
+
+and sizes the snapshot as:
+
+`sizeof(CMenu) - 8`.
+
+A future layout drift now fails the build instead of silently corrupting memory.
+
+### Pause Options edge-case simulation
+
+The custom submenu state machine was simulated before requesting another runtime test.
+
+PASS cases:
+
+1. normal parent -> Options -> adjust UI/Text -> Apply -> Back;
+2. Back without Apply:
+   - pending changes are discarded;
+   - committed settings remain unchanged;
+3. min/max bounds:
+   - 50% cannot decrement further;
+   - 200% cannot increment further;
+4. Apply with no changes:
+   - safe no-op;
+5. menu pointer changes while Options is active:
+   - submenu ownership is abandoned safely;
+   - pending values reset to committed;
+6. retail rebuilds the same menu object while Options is active:
+   - missing submenu shape is detected;
+   - stale state is abandoned safely;
+7. parent menu already has 40 rows:
+   - Options insertion is refused instead of overflowing the fixed 40-entry array;
+8. Apply followed by more pending edits then Back:
+   - already-applied values remain committed;
+   - post-Apply edits are discarded.
+
+Runtime telemetry for these paths:
+
+- `pause_options_entry ...`
+- `pause_options_pending_reset ...`
+- `pause_options_state action=enter ...`
+- `pause_options_adjust ...`
+- `pause_options_confirm action=apply ...`
+- `pause_ui_apply ...`
+- `pause_options_state action=restore ...`
+- `pause_options_state action=abandon ...`
+
+### Compass runtime proof: only one of the three QPolys is the arrow path needing transform
+
+At 2560x1440 / Gameplay UI 125%, the compact compass holder is:
+
+- authored: `406,183 -> 457,223`
+- live compact bounds: approximately `2395,1296 -> 2475,1398`.
+
+The three prior compass QPoly hooks produced:
+
+1. `0x00463D19` irregular dynamic polygon:
+   - before: `2185,1170 / 2135,1188 / 2055,1152 / 2130,1224`
+   - after compact transform: `2442.81,1327.50 / 2427.19,1335 / 2402.19,1320 / 2425.63,1350`
+   - **all four transformed points are inside the compact holder bounds**.
+
+2. `0x00464035` rectangle:
+   - before is already in live HUD space;
+   - applying the compact transform again pushes it to approximately `2521..2546 / 1380..1423`, outside the holder.
+
+3. `0x00464257` rectangle:
+   - likewise already in live HUD space;
+   - the second transform pushes it to approximately `2496..2521 / 1380..1423`.
+
+Therefore the last build was transforming two already-live compass polygons twice.
+
+Commit:
+
+- `5f309f4709902995a1648882a1b5b8ffa2a30f8b` — **fix: transform only dynamic compass arrow geometry**
+
+Current compass policy:
+
+- hook and compact only `0x00463D19`;
+- leave `0x00464035` and `0x00464257` on the retail live-space path;
+- new telemetry names the transformed call explicitly:
+  `gameplay_ui_alignment source=compass_arrow_qpoly ... call=0x00463D19 ...`.
+
+A geometry simulation across UI Scale values 50%, 100%, 125%, 150% and 200% confirms all four arrow vertices remain inside the correspondingly scaled holder at every tested value.
+
+### Static validation at current frontier
+
+Current `dev` source has been re-audited after `47129a8`:
+
+- lexical state ends in normal C++ code;
+- braces, parentheses and brackets balance;
+- each new Options helper has exactly one `// @Ok` annotation;
+- confirm dispatch uses `gSpideyPauseMenuOwner`;
+- stale `*(CMenu**)0x005FAED0` lookup is absent;
+- custom Options menu is installed;
+- retail frontend Options is not invoked from gameplay;
+- compile-time `CMenu == 0x53C` guard is present;
+- parent snapshot is `sizeof(CMenu) - 8`;
+- only compass callsite `0x00463D19` is hooked;
+- old compass transform sites `0x00464035` and `0x00464257` are absent from the compatibility installer;
+- health/web-cartridge fixes remain untouched.
+
+This frontier is **source/static validated and simulation-tested, but not yet matching-build/runtime proven**.
+
+### Mandatory next runtime test
+
+Run:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Then at 2560x1440:
+
+1. enter gameplay and inspect the HUD:
+   - health remains correct;
+   - web cartridge remains correct;
+   - compass arrow should now sit inside its holder;
+2. press Pause;
+3. confirm the parent pause menu contains one new row:
+   - `Options`;
+4. select `Options`;
+5. confirm the custom submenu contains:
+   - `UI Scale: N%`
+   - `Text Scale: N%`
+   - `Apply Settings`
+   - `Back`;
+6. change UI Scale to a clearly different value, e.g. 150%;
+7. change Text Scale to a clearly different value, e.g. 125%;
+8. choose `Apply Settings`;
+9. return to gameplay:
+   - HUD geometry should change immediately on the next draw;
+   - text should reflect the new scale without restart/reload;
+10. pause again -> Options:
+   - values should still show the applied values;
+11. change both values again, but choose `Back` without Apply;
+12. reopen Options:
+   - values should have reverted to the last applied values;
+13. if stable, Alt+Tab out/back once;
+14. inspect the consolidated log for all `pause_options_*`, `pause_ui_apply`, `ui_text_scale reason=pause_options_apply`, and `compass_arrow_qpoly` events.
+
+Do not modify the health or web-cartridge paths unless new runtime evidence contradicts their now-confirmed alignment.
