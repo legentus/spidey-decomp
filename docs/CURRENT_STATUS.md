@@ -8345,3 +8345,20 @@ Inspect the consolidated log for:
 - any `[CRASH]` lines.
 
 If this passes, checkpoint it immediately and move to the requested **camera implementation**. Do not spend another runtime cycle on already-proven UI paths unless this short test exposes a regression.
+
+
+### Static validation of the row-0 fix
+
+Post-edit audit of current `main.cpp` passes:
+
+- lexer ends in normal code state;
+- braces, parentheses and brackets balance to zero with no negative-depth transition;
+- exactly one five-entry pause-submenu initialization loop is present;
+- exactly one five-row submenu shape guard is present;
+- row 0 is explicitly disabled;
+- initial submenu selection is explicitly row 1;
+- the old `mNumLines != 4` shape guard is absent;
+- Gameplay UI and Text Scale adjustment dispatch remain separate;
+- no health/web-cartridge/compass transform code was changed.
+
+No GitHub Actions run was surfaced through the current connector for this contents-API commit, so matching-build status is not being claimed here. The user-side updater/build remains the authoritative compile/runtime check for this final UI-scale regression.
