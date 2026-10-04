@@ -12159,28 +12159,9 @@ int SpideyRenderer11MirrorLegacyTexture(
 
 	surface->Unlock(0);
 
-	FILE* f = SpideyOpenConsolidatedLog(
-		"TEXTURE");
-	if (f)
-	{
-		fprintf(
-			f,
-			"dx11_mirror id=%lu result=%d size=%lux%lu pitch=%ld bpp=%lu masks=%08lX,%08lX,%08lX,%08lX retry=%d resident=%lu\n",
-			textureId,
-			mirrored,
-			(unsigned long)desc.dwWidth,
-			(unsigned long)desc.dwHeight,
-			(long)desc.lPitch,
-			(unsigned long)desc.ddpfPixelFormat.dwRGBBitCount,
-			(unsigned long)desc.ddpfPixelFormat.dwRBitMask,
-			(unsigned long)desc.ddpfPixelFormat.dwGBitMask,
-			(unsigned long)desc.ddpfPixelFormat.dwBBitMask,
-			(unsigned long)desc.ddpfPixelFormat.dwRGBAlphaBitMask,
-			lockRetry,
-			SpideyRenderer11GetMirroredTextureCount());
-		fclose(f);
-	}
-
+	// Successful texture mirroring is a normal streaming path. Do not open,
+	// write and close the consolidated log for every upload; failures above
+	// remain logged and resident totals are available from draw diagnostics.
 	return mirrored;
 }
 
@@ -12199,20 +12180,8 @@ int SpideyRenderer11AssociateLegacyTexture(
 			textureId,
 			(unsigned long)legacySurface);
 
-	FILE* f = SpideyOpenConsolidatedLog(
-		"TEXTURE");
-	if (f)
-	{
-		fprintf(
-			f,
-			"dx11_associate id=%lu handle=0x%08lX result=%d resident=%lu\n",
-			textureId,
-			(unsigned long)legacySurface,
-			associated,
-			SpideyRenderer11GetMirroredTextureCount());
-		fclose(f);
-	}
-
+	// Association succeeds for essentially every streamed texture. Logging
+	// each success synchronously perturbs the very frame pacing being measured.
 	return associated;
 }
 
@@ -13408,6 +13377,11 @@ static unsigned long gSpideyTimingOutsideLogicRetailUs = 0;
 static unsigned long gSpideyTimingOutsideLogicTelemetryUs = 0;
 static unsigned long gSpideyTimingOutsideLogicCalls = 0;
 
+// The phase probe proved that synchronous once-per-second timing writes can
+// stall the game thread for hundreds of milliseconds. Keep the in-memory
+// counters, but make file publication an explicit diagnostic opt-in.
+static int gSpideyTimingFileTelemetryEnabled = 0;
+
 static unsigned long SpideyTimingElapsedUs(
 		const LARGE_INTEGER* start,
 		const LARGE_INTEGER* end)
@@ -13466,7 +13440,8 @@ static void SpideyLogTimingWindow(
 		unsigned long elapsed,
 		unsigned long count)
 {
-	if (!kind ||
+	if (!gSpideyTimingFileTelemetryEnabled ||
+		!kind ||
 		!elapsed)
 	{
 		return;
@@ -13860,6 +13835,22 @@ static void SpideyRecordPresentTiming()
 
 static void SpideyInstallTimingTelemetry()
 {
+	char timingTelemetryValue[8];
+	memset(
+		timingTelemetryValue,
+		0,
+		sizeof(timingTelemetryValue));
+	const DWORD timingTelemetryLength =
+		GetEnvironmentVariableA(
+			"SPIDEY_TIMING_FILE_TELEMETRY",
+			timingTelemetryValue,
+			sizeof(timingTelemetryValue));
+	gSpideyTimingFileTelemetryEnabled =
+		timingTelemetryLength > 0 &&
+		timingTelemetryValue[0] != '0' ?
+			1 :
+			0;
+
 	const int timerPacingInstalled =
 		SpideyInstallModernTimerPacing();
 
@@ -13883,11 +13874,12 @@ static void SpideyInstallTimingTelemetry()
 	{
 		fprintf(
 			f,
-			"timing_install logic=%d call=0x00455A8B retail=0x00455400 engine_vblanks=0x006B4CA0 modern_timer_pacing=%d fire_web_hooks=%d fire_web_target=0x004C5DD0 slow_threshold_us=%u\n",
+			"timing_install logic=%d call=0x00455A8B retail=0x00455400 engine_vblanks=0x006B4CA0 modern_timer_pacing=%d fire_web_hooks=%d fire_web_target=0x004C5DD0 slow_threshold_us=%u file_telemetry=%d opt_in_env=SPIDEY_TIMING_FILE_TELEMETRY\n",
 			logicInstalled,
 			timerPacingInstalled,
 			fireWebHooks,
-			SPIDEY_TIMING_SLOW_EVENT_THRESHOLD_US);
+			SPIDEY_TIMING_SLOW_EVENT_THRESHOLD_US,
+			gSpideyTimingFileTelemetryEnabled);
 		fclose(f);
 	}
 }
@@ -15257,7 +15249,6 @@ static void SpideyFlushRetailD3D7DrawProbeFrame(
 {
 	const int shouldLog =
 		frame <= 5 ||
-		(frame % 120) == 0 ||
 		gSpideyRetailDrawMissing != 0 ||
 		gSpideyRetailDrawOtherPrimitive != 0 ||
 		gSpideyRetailDrawOtherFvf != 0;
@@ -16934,8 +16925,7 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 			"dx11_authoritative_ready");
 	}
 
-	if ((frame <= 5 ||
-		 (frame % 120) == 0) &&
+	if (frame <= 5 &&
 		!shadowFrameResult)
 	{
 		FILE* f = SpideyOpenConsolidatedLog(
@@ -17001,7 +16991,6 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 
 	const int shouldLog =
 		frame <= 5 ||
-		(frame % 120) == 0 ||
 		rectCorrected ||
 		shadowPreviewToggled ||
 		d3d7SuppressionToggled;
