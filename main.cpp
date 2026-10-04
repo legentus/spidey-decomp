@@ -2982,6 +2982,72 @@ typedef void (__fastcall *SpideyRetailMenuSetLineFn)(
 		CMenu*,
 		void*,
 		char);
+typedef void (__fastcall *SpideyRetailMenuZoomFn)(
+		CMenu*,
+		void*,
+		int);
+
+// Rebuild the live expanding box from the CMenu's current rows instead of
+// carrying a box sized for the previous menu shape. Retail CMenu::Zoom kills
+// the old box and derives the replacement height from GetMenuHeight(), so
+// future custom rows grow/shrink the container without another hard-coded
+// height adjustment.
+static int SpideyPauseRefreshMenuBox(
+		CMenu* menu,
+		const char* reason)
+{
+	if (!menu)
+		return 0;
+
+	const int zoomType =
+		(int)menu->mZoomBoxType;
+
+	if (zoomType < 0 ||
+		zoomType > 2)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_menu_box_refresh reason=%s refreshed=0 zoom_type=%d rows=%u y=%d line_sep=%d\n",
+				reason ? reason : "unknown",
+				zoomType,
+				(unsigned int)menu->mNumLines,
+				menu->mY,
+				menu->mLineSep);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	SpideyRetailMenuZoomFn zoom =
+		(SpideyRetailMenuZoomFn)0x0043FC60;
+	zoom(
+		menu,
+		0,
+		zoomType);
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_menu_box_refresh reason=%s refreshed=1 zoom_type=%d rows=%u y=%d line_sep=%d\n",
+			reason ? reason : "unknown",
+			zoomType,
+			(unsigned int)menu->mNumLines,
+			menu->mY,
+			menu->mLineSep);
+		fclose(f);
+	}
+
+	return 1;
+}
 
 // @Ok
 static void SpideyPauseResetPendingToCommitted(
@@ -3066,7 +3132,9 @@ static int SpideyPauseEnterOptions(
 		menu->mY;
 
 	// Reuse the same live CMenu object. The expanding-box pointer at +4 is
-	// deliberately left untouched; only menu data from +8 onward changes.
+	// not part of the parent snapshot because it owns live heap state. After
+	// the row shape is rebuilt below, retail CMenu::Zoom recreates that box
+	// from the current row count/spacing.
 	menu->menu_width =
 		0;
 	menu->mCursorLine =
@@ -3135,6 +3203,10 @@ static int SpideyPauseEnterOptions(
 		0,
 		1);
 
+	SpideyPauseRefreshMenuBox(
+		menu,
+		"enter_options");
+
 	gSpideyPauseOptionsActive =
 		1;
 
@@ -3187,6 +3259,13 @@ static int SpideyPauseRestoreParent(
 		((unsigned char*)menu) + 8,
 		gSpideyPauseParentState,
 		sizeof(gSpideyPauseParentState));
+
+	// The snapshot restores the parent rows/style but intentionally not the
+	// live expanding-box pointer. Rebuild the box from the restored menu so
+	// Back returns to the parent's exact dynamic height as well.
+	SpideyPauseRefreshMenuBox(
+		menu,
+		reason ? reason : "restore_parent");
 
 	gSpideyPauseOptionsActive =
 		0;
@@ -3378,6 +3457,13 @@ static void __fastcall SpideyPauseMenuUpdate(
 			// One added row: preserve approximately the retail visual center.
 			menu->mY -=
 				menu->mLineSep / 2;
+
+			// The original pause box was authored before our Options row
+			// existed. Rebuild it from the now-current parent row list so Quit
+			// remains inside the container and later row additions scale too.
+			SpideyPauseRefreshMenuBox(
+				menu,
+				"add_options_parent");
 
 			FILE* f =
 				SpideyOpenConsolidatedLog(
