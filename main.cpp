@@ -4076,6 +4076,58 @@ static int SpideyPatchDirectCall(
 	return 1;
 }
 
+static int SpideyPatchDirectCallsToTargetInRange(
+		unsigned long startAddress,
+		unsigned long endAddress,
+		unsigned long expectedTarget,
+		void* replacement,
+		const char* name)
+{
+	if (!startAddress ||
+		endAddress <= startAddress ||
+		!expectedTarget ||
+		!replacement)
+	{
+		return 0;
+	}
+
+	int installed =
+		0;
+
+	for (unsigned long address = startAddress;
+		 address + 5 <= endAddress;
+		 ++address)
+	{
+		unsigned char* call =
+			(unsigned char*)address;
+		if (call[0] != 0xE8)
+			continue;
+
+		const long rel =
+			*(long*)(call + 1);
+		const unsigned long target =
+			(unsigned long)(
+				call +
+				5 +
+				rel);
+		if (target != expectedTarget)
+			continue;
+
+		if (SpideyPatchDirectCall(
+				address,
+				expectedTarget,
+				replacement,
+				name))
+		{
+			++installed;
+			address +=
+				4;
+		}
+	}
+
+	return installed;
+}
+
 static int SpideyPatchBytes(
 		unsigned long address,
 		const unsigned char* expected,
@@ -4285,6 +4337,47 @@ typedef int (__fastcall *SpideyRetailCheckForwardsFn)(
 typedef void (__fastcall *SpideyRetailSetupLookaroundCameraFn)(
 		CPlayer*,
 		void*);
+typedef void (__fastcall *SpideyRetailEnterLookaroundModeFn)(
+		CPlayer*,
+		void*);
+
+static unsigned long gSpideyModernAimEnterRetailCalls = 0;
+static unsigned long gSpideyModernAimEnterSuppressedCalls = 0;
+static unsigned long gSpideyModernAimRawFlagReclearCount = 0;
+
+static void __fastcall SpideyModernAimEnterLookaroundMode(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailEnterLookaroundModeFn retail =
+		(SpideyRetailEnterLookaroundModeFn)0x004C3580;
+
+	if (player &&
+		gSpideyModernAimLocomotionMaskedPlayer ==
+			player &&
+		gSpideyModernAimLocomotionSavedState != 0)
+	{
+		// The raw aim flag is intentionally hidden from locomotion while the
+		// modern sidecar continues to own effective manual aim. Do not let
+		// held-input retail logic repeatedly re-enter lookaround mode: the
+		// retail entry routine writes field_8EA=1 and reinitializes the stand
+		// pose, which the 93d633 runtime exposed as the movement vibration.
+		if (player->field_8EA)
+		{
+			player->field_8EA =
+				0;
+			++gSpideyModernAimRawFlagReclearCount;
+		}
+
+		++gSpideyModernAimEnterSuppressedCalls;
+		return;
+	}
+
+	++gSpideyModernAimEnterRetailCalls;
+	retail(
+		player,
+		0);
+}
 
 static int __fastcall SpideyModernAimCheckForwards(
 		CPlayer* player,
@@ -4338,6 +4431,17 @@ static int __fastcall SpideyModernAimCheckForwards(
 	const int movementHeld =
 		player->field_E2D != 0 ||
 		player->field_E2E != 0;
+
+	if (movementHeld &&
+		gSpideyModernAimLocomotionMaskedPlayer ==
+			player &&
+		gSpideyModernAimLocomotionSavedState != 0 &&
+		player->field_8EA)
+	{
+		player->field_8EA =
+			0;
+		++gSpideyModernAimRawFlagReclearCount;
+	}
 
 	// If a prior movement mask is still active but either control was
 	// released, restore retail manual-aim state before continuing so the
@@ -4433,7 +4537,7 @@ static int __fastcall SpideyModernAimCheckForwards(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d body_pos=%d,%d,%d body_vel=%d,%d,%d anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d mask_count=%lu restore_count=%lu wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
+				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d body_pos=%d,%d,%d body_vel=%d,%d,%d anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d mask_count=%lu restore_count=%lu enter_retail=%lu enter_suppressed=%lu raw_reclear=%lu wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimMovementCalls,
 				(unsigned int)savedAimControl,
 				axisX,
@@ -4456,6 +4560,9 @@ static int __fastcall SpideyModernAimCheckForwards(
 					player ? 1 : 0,
 				gSpideyModernAimLocomotionMaskCount,
 				gSpideyModernAimLocomotionRestoreCount,
+				gSpideyModernAimEnterRetailCalls,
+				gSpideyModernAimEnterSuppressedCalls,
+				gSpideyModernAimRawFlagReclearCount,
 				(unsigned int)player->field_8E8,
 				(unsigned int)player->field_8E9,
 				(int)player->field_E18,
@@ -4724,6 +4831,13 @@ static void SpideyInstallModernManualAimCompat()
 			0x004C38A0,
 			(void*)&SpideyModernAimSetupLookaroundCamera,
 			"modern_manual_aim_reticle");
+	const int enterReentryCallsInstalled =
+		SpideyPatchDirectCallsToTargetInRange(
+			0x004B0000,
+			0x004B9000,
+			0x004C3580,
+			(void*)&SpideyModernAimEnterLookaroundMode,
+			"modern_manual_aim_enter_guard");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -4732,11 +4846,12 @@ static void SpideyInstallModernManualAimCompat()
 	{
 		fprintf(
 			f,
-				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=mode3_camera_center_ray locomotion_mask=field_8EA_while_aim_plus_move effective_aim_sidecar=1 frame_end_release_guard=1\n",
+				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 enter_reentry_calls=%d enter_target=0x004C3580 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=mode3_camera_center_ray locomotion_mask=field_8EA_while_aim_plus_move effective_aim_sidecar=1 frame_end_release_guard=1\n",
 				cameraInstalled,
 				movementAimGateInstalled,
 				movementControlInstalled,
-				reticleInstalled);
+				reticleInstalled,
+				enterReentryCallsInstalled);
 		fclose(f);
 	}
 }
@@ -9892,6 +10007,109 @@ static void __fastcall SpideyModernMode3Camera(
 	}
 }
 
+typedef void (__fastcall *SpideyRetailLoadIntoMikeCameraFn)(
+		CCamera*,
+		void*);
+
+static unsigned long gSpideyManualAimPublishCalls = 0;
+static unsigned long gSpideyManualAimPublishApplied = 0;
+
+static void __fastcall SpideyModernAimLoadIntoMikeCamera(
+		CCamera* camera,
+		void*)
+{
+	SpideyRetailLoadIntoMikeCameraFn retail =
+		(SpideyRetailLoadIntoMikeCameraFn)0x00416A20;
+
+	if (!camera ||
+		!gSpideyManualAimViewActive ||
+		!gSpideyManualAimViewPlayer ||
+		camera->mCameraMode !=
+			CAMERAMODE_DEMO ||
+		!SpideyModernAimIsEffectivelyActive(
+			gSpideyManualAimViewPlayer))
+	{
+		retail(
+			camera,
+			0);
+		return;
+	}
+
+	++gSpideyManualAimPublishCalls;
+
+	// CM_Normal and the shared 0x00416B10 post-process have already generated
+	// the retail position/collision state by this point. Only replace the
+	// orientation used for the final gMikeCamera publish. This is deliberately
+	// temporary so the next frame's retail camera interpolation remains intact.
+	CQuat savedOrientation =
+		camera->field_214;
+	const i16 savedTransformHeading =
+		camera->field_23A;
+
+	SVECTOR aim;
+	aim.vx =
+		0;
+	aim.vy =
+		0;
+	aim.vz =
+		0;
+	Utils_CalcAim(
+		(CSVector*)&aim,
+		&camera->mPos,
+		&camera->field_144);
+
+	MATRIX manualTransform;
+	M3dMaths_RotMatrixYXZ(
+		&aim,
+		&manualTransform);
+	MToQ(
+		manualTransform,
+		camera->field_214);
+
+	retail(
+		camera,
+		0);
+
+	const i16 publishedTransformHeading =
+		camera->field_23A;
+
+	camera->field_214 =
+		savedOrientation;
+	camera->field_23A =
+		savedTransformHeading;
+
+	++gSpideyManualAimPublishApplied;
+
+	if (gSpideyManualAimPublishApplied <= 6 ||
+		(gSpideyManualAimPublishApplied % 60) == 0)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"modern_manual_camera event=publish call=%lu applied=%lu camera=0x%08lX aim_angles=%d,%d,%d pos=%d,%d,%d focus=%d,%d,%d published_heading=%d restored_heading=%d\n",
+				gSpideyManualAimPublishCalls,
+				gSpideyManualAimPublishApplied,
+				(unsigned long)camera,
+				(int)aim.vx,
+				(int)aim.vy,
+				(int)aim.vz,
+				camera->mPos.vx,
+				camera->mPos.vy,
+				camera->mPos.vz,
+				camera->field_144.vx,
+				camera->field_144.vy,
+				camera->field_144.vz,
+				(int)publishedTransformHeading,
+				(int)savedTransformHeading);
+			fclose(f);
+		}
+	}
+}
+
 static void SpideyInstallModernCameraCompat()
 {
 	const int installed =
@@ -9900,6 +10118,12 @@ static void SpideyInstallModernCameraCompat()
 			0x00418E00,
 			(void*)&SpideyModernMode3Camera,
 			"modern_camera_mode3");
+	const int manualPublishInstalled =
+		SpideyPatchDirectCall(
+			0x0041865F,
+			0x00416A20,
+			(void*)&SpideyModernAimLoadIntoMikeCamera,
+			"modern_manual_camera_publish");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -9908,7 +10132,7 @@ static void SpideyInstallModernCameraCompat()
 	{
 		fprintf(
 			f,
-			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=post_retail_forward\n",
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=post_retail_forward manual_publish=%d manual_publish_call=0x0041865F retail_publish=0x00416A20\n",
 			installed,
 			gSpideyCameraSensitivityPercent,
 			kSpideyCameraSensitivityMinPercent,
@@ -9916,7 +10140,8 @@ static void SpideyInstallModernCameraCompat()
 			kSpideyModernCameraMinYDistance,
 			kSpideyModernCameraMaxYDistance,
 			kSpideyManualAimMaxYawOffset,
-			kSpideyManualAimMaxPitchOffset);
+			kSpideyManualAimMaxPitchOffset,
+			manualPublishInstalled);
 		fclose(f);
 	}
 }
