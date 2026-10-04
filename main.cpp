@@ -1219,6 +1219,8 @@ static char gSpideyPauseBackLabel[] =
 static int gSpideyPauseOptionsActive = 0;
 static int gSpideyPauseParentSnapshotValid = 0;
 static CMenu* gSpideyPauseMenuOwner = 0;
+static int gSpideyPauseEnterHeld = 0;
+static int gSpideyPauseLastEnterRawState = -1;
 // CMenu is validated as 0x53C bytes. Preserve everything after the vtable
 // and expanding-box pointer while the same retail pause CMenu is repurposed
 // as our custom Options submenu. The compile-time guard prevents a future
@@ -3392,14 +3394,13 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			u32,
 			i32,
 			i32);
-	typedef i32 (__cdecl *RetailIsKeyPressedFn)(
-			u8,
-			i32);
+	typedef u8 (__cdecl *RetailGetKeyStateFn)(
+			u8);
 
 	RetailCheckTriggersFn retail =
 		(RetailCheckTriggersFn)0x0050C180;
-	RetailIsKeyPressedFn isKeyPressed =
-		(RetailIsKeyPressedFn)0x0050A650;
+	RetailGetKeyStateFn getKeyState =
+		(RetailGetKeyStateFn)0x00501CB0;
 	u8 triggered =
 		retail(
 			mask,
@@ -3407,6 +3408,19 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			option3);
 	int keyboardEnterTriggered =
 		0;
+	const int enterRawState =
+		(int)getKeyState(
+			0x1C);
+	const int enterDown =
+		(enterRawState & 0x7F) ?
+			1 :
+			0;
+
+	keyboardEnterTriggered =
+		enterDown &&
+		!gSpideyPauseEnterHeld;
+	gSpideyPauseEnterHeld =
+		enterDown;
 
 	CMenu* menu =
 		gSpideyPauseMenuOwner;
@@ -3420,30 +3434,63 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			menu->mEntry[menu->mLine].name;
 	}
 
+	if (selected &&
+		(gSpideyPauseOptionsActive ||
+		 !strcmp(
+			 selected,
+			 gSpideyPauseOptionsLabel)) &&
+		enterRawState !=
+			gSpideyPauseLastEnterRawState)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_enter_state raw=0x%02X down=%d edge=%d held=%d line=%u selected=%s\n",
+				(unsigned int)(enterRawState & 0xFF),
+				enterDown,
+				keyboardEnterTriggered,
+				gSpideyPauseEnterHeld,
+				(unsigned int)menu->mLine,
+				selected);
+			fclose(f);
+		}
+		gSpideyPauseLastEnterRawState =
+			enterRawState;
+	}
+	else if (!selected ||
+			 (!gSpideyPauseOptionsActive &&
+			  strcmp(
+				  selected,
+				  gSpideyPauseOptionsLabel)))
+	{
+		gSpideyPauseLastEnterRawState =
+			-1;
+	}
+
 	// The pause call patched at 0x00441606 services the mouse-oriented
 	// trigger path (runtime-observed mask 0x00000100). Calling
 	// PCSHELL_CheckTriggers again for keyboard Enter is too late here:
 	// its mask-0x10 branch is gated by retail's global one-shot latch at
-	// 0x00AC1238, which may already be set earlier in the frame. Read the
-	// game's own DirectInput edge state instead. PCINPUT_IsKeyPressed at
-	// 0x0050A650 with a2=1 returns true only for the fresh 0xFF press edge,
-	// so this does not add a held-key repeat or a Win32 keyboard side path.
+	// 0x00AC1238. Read the game's raw DirectInput key-state byte instead.
+	// Retail stores 0xFF for a fresh press, 0x7F while still held after the
+	// next poll, 0x80 for release, and 0x00 for idle. The low seven bits
+	// therefore give a stable physical-down state even if another keyboard
+	// poll already converted the fresh 0xFF edge into 0x7F. Our own latch
+	// turns that down state back into one activation per press.
 	if (!triggered &&
+		keyboardEnterTriggered &&
 		selected &&
 		(gSpideyPauseOptionsActive ||
 		 !strcmp(
 			 selected,
 			 gSpideyPauseOptionsLabel)))
 	{
-		keyboardEnterTriggered =
-			isKeyPressed(
-				0x1C,
-				1) ? 1 : 0;
-		if (keyboardEnterTriggered)
-		{
-			triggered =
-				1;
-		}
+		triggered =
+			1;
 	}
 
 	if (!triggered)
@@ -3475,7 +3522,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				entered,
 				(unsigned long)mask,
 				keyboardEnterTriggered ?
-					"directinput_enter_edge" :
+					"raw_directinput_enter_edge" :
 					"retail_call_mask");
 			fclose(f);
 		}
@@ -3503,7 +3550,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
 				keyboardEnterTriggered ?
-					"directinput_enter_edge" :
+					"raw_directinput_enter_edge" :
 					"retail_call_mask",
 				gSpideyGameplayUiScalePercent,
 				gSpideyMenuTextScalePercent);
@@ -3528,7 +3575,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
 				keyboardEnterTriggered ?
-					"directinput_enter_edge" :
+					"raw_directinput_enter_edge" :
 					"retail_call_mask");
 			fclose(f);
 		}
