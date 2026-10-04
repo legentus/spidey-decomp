@@ -1,5 +1,51 @@
 # CURRENT STATUS
 
+## MANDATORY INTERRUPTION-SAFE GIT / DOCUMENTATION PROTOCOL
+
+This project is being developed through long interactive ChatGPT sessions where an input/output stream can fail without warning. **Do not allow meaningful work to exist only in chat text or an uncommitted working tree.**
+
+During every continuation session:
+
+1. **Fetch and verify live `dev` before doing RE or code work.**
+   - Treat GitHub `dev` as the authoritative recoverable state.
+   - Compare the live HEAD with the revision named in this file and `docs/NEW_CHAT_HANDOFF.md`.
+   - If chat text and the repository disagree, inspect the newest commit/doc checkpoint before redoing work.
+
+2. **Live-update `docs/CURRENT_STATUS.md` throughout the session.**
+   - Record each confirmed RE finding, implementation decision, runtime result, failure, and exact next step as soon as it becomes useful.
+   - Do not wait until the end of the session.
+   - Mark hypotheses separately from runtime-validated facts.
+
+3. **Commit and push meaningful source changes immediately.**
+   - Commit after each coherent fix/RE implementation, not after a giant batch.
+   - Prefer small descriptive commits that can be independently recovered.
+   - Never leave a useful source change uncommitted while moving on to another subsystem.
+
+4. **Checkpoint documentation frequently even when source has not changed.**
+   - If several minutes of RE produce an important address, call graph, data-structure conclusion, or ruled-out hypothesis, write it to `CURRENT_STATUS.md` and commit/push the documentation.
+   - The goal is that a stream failure loses at most a small amount of exploratory reasoning, never the project frontier.
+
+5. **Before asking the user for a runtime test, checkpoint everything first.**
+   - Source changes committed/pushed.
+   - `CURRENT_STATUS.md` updated with expected telemetry and exact test steps.
+   - `NEW_CHAT_HANDOFF.md` updated when the recovery frontier materially changes.
+   - State the exact `dev` HEAD / source commit that the test must contain.
+
+6. **After a runtime result, document it before starting the next implementation.**
+   - Record the tested session revision, filename, visible user result, decisive log evidence, what was proven/disproven, and the next code target.
+   - Then commit/push that checkpoint.
+
+7. **If a stream interruption occurs:**
+   - do not reconstruct from memory first;
+   - fetch live `dev`;
+   - read the top of `CURRENT_STATUS.md` and `NEW_CHAT_HANDOFF.md`;
+   - inspect the newest commits;
+   - determine what survived;
+   - continue from the newest committed frontier without repeating completed RE.
+
+This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
+
+
 ## LIVE FRONTIER — MANUAL AIM THIRD PASS IMPLEMENTED; RETAIL TARGET LIST FIXED (2026-10-04)
 
 Latest tested runtime remains:
