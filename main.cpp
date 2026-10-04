@@ -11910,6 +11910,638 @@ static void SpideyInstall2DPolyProvenanceCompat()
 }
 
 
+// The retail PC timer requests a fixed 16 ms periodic multimedia timer.
+// 16 ms is 62.5 Hz, while TimerCallback converts elapsed milliseconds into a
+// 60 Hz virtual-vblank clock. Runtime cadence telemetry now proves the beat:
+// one ~32 ms present almost exactly every 24 frames / 0.4 s.
+//
+// Keep the retail TimerCallback, pause state, fractional accumulator and
+// MyVSync work intact. Only replace the fixed periodic source with chained
+// one-shot callbacks whose cumulative integer-millisecond schedule is always
+// just *after* the ideal 60 Hz deadline:
+//
+//   deadline_ms(n) = floor(n * 1000 / 60) + 1
+//
+// This yields intervals such as 17,17,17,16,17,17,16... . Because cumulative
+// timer milliseconds never land exactly on a floating-point integer boundary,
+// retail's gTimerVblankRelated floor conversion advances one vblank per active
+// callback instead of periodically producing the old 32 ms hole.
+typedef void (CALLBACK *SpideyRetailTimerCallbackFn)(
+		UINT,
+		UINT,
+		DWORD,
+		DWORD,
+		DWORD);
+typedef UINT (WINAPI *SpideyTimeSetEventFn)(
+		UINT,
+		UINT,
+		SpideyRetailTimerCallbackFn,
+		DWORD,
+		UINT);
+typedef UINT (WINAPI *SpideyTimeKillEventFn)(
+		UINT);
+typedef UINT (WINAPI *SpideyTimePeriodFn)(
+		UINT);
+
+struct SpideyRetailTimerInfoCompat
+{
+	UINT uTimerID;
+	UINT field_4;
+	UINT uPeriod;
+	UINT field_C;
+};
+
+static SpideyTimeSetEventFn gSpideyOriginalTimeSetEvent = 0;
+static SpideyTimeKillEventFn gSpideyOriginalTimeKillEvent = 0;
+static SpideyTimePeriodFn gSpideyTimeBeginPeriod = 0;
+static SpideyTimePeriodFn gSpideyTimeEndPeriod = 0;
+
+static volatile LONG gSpideyPacingTimerActive = 0;
+static UINT gSpideyPacingSyntheticTimerId = 0x5A17;
+static UINT gSpideyPacingRealTimerId = 0;
+static SpideyRetailTimerCallbackFn gSpideyPacingRetailCallback = 0;
+static DWORD gSpideyPacingRetailUser = 0;
+static UINT gSpideyPacingRetailFlags = 0;
+static unsigned long gSpideyPacingVirtualTick = 0;
+static unsigned long gSpideyPacingVirtualTotalMs = 0;
+static unsigned long gSpideyPacingCallbackCount = 0;
+static unsigned long gSpideyPacingPausedCallbackCount = 0;
+static unsigned long gSpideyPacingUnexpectedVblankDelta = 0;
+static unsigned long gSpideyPacingLastIntervalMs = 0;
+static int gSpideyPacingBeginPeriodOne = 0;
+
+static int SpideyPatchMainImport(
+		const char* dllName,
+		const char* functionName,
+		void* replacement,
+		void** original)
+{
+	if (!dllName ||
+		!functionName ||
+		!replacement ||
+		!original)
+	{
+		return 0;
+	}
+
+	unsigned char* base =
+		(unsigned char*)GetModuleHandleA(
+			0);
+	if (!base)
+		return 0;
+
+	IMAGE_DOS_HEADER* dos =
+		(IMAGE_DOS_HEADER*)base;
+	if (dos->e_magic !=
+		IMAGE_DOS_SIGNATURE)
+	{
+		return 0;
+	}
+
+	IMAGE_NT_HEADERS* nt =
+		(IMAGE_NT_HEADERS*)(
+			base +
+			dos->e_lfanew);
+	if (nt->Signature !=
+		IMAGE_NT_SIGNATURE)
+	{
+		return 0;
+	}
+
+	const IMAGE_DATA_DIRECTORY& imports =
+		nt->OptionalHeader.DataDirectory[
+			IMAGE_DIRECTORY_ENTRY_IMPORT];
+	if (!imports.VirtualAddress)
+		return 0;
+
+	IMAGE_IMPORT_DESCRIPTOR* descriptor =
+		(IMAGE_IMPORT_DESCRIPTOR*)(
+			base +
+			imports.VirtualAddress);
+
+	for (;
+		 descriptor->Name;
+		 ++descriptor)
+	{
+		const char* importedDll =
+			(const char*)(
+				base +
+				descriptor->Name);
+		if (_stricmp(
+				importedDll,
+				dllName) != 0)
+		{
+			continue;
+		}
+
+		IMAGE_THUNK_DATA* nameThunk =
+			(IMAGE_THUNK_DATA*)(
+				base +
+				(descriptor->OriginalFirstThunk ?
+				 descriptor->OriginalFirstThunk :
+				 descriptor->FirstThunk));
+		IMAGE_THUNK_DATA* addressThunk =
+			(IMAGE_THUNK_DATA*)(
+				base +
+				descriptor->FirstThunk);
+
+		for (;
+			 nameThunk->u1.AddressOfData;
+			 ++nameThunk,
+			 ++addressThunk)
+		{
+			if (IMAGE_SNAP_BY_ORDINAL(
+					nameThunk->u1.Ordinal))
+			{
+				continue;
+			}
+
+			IMAGE_IMPORT_BY_NAME* importName =
+				(IMAGE_IMPORT_BY_NAME*)(
+					base +
+					nameThunk->u1.AddressOfData);
+			if (strcmp(
+					(const char*)importName->Name,
+					functionName) != 0)
+			{
+				continue;
+			}
+
+			DWORD oldProtect =
+				0;
+			if (!VirtualProtect(
+					&addressThunk->u1.Function,
+					sizeof(addressThunk->u1.Function),
+					PAGE_READWRITE,
+					&oldProtect))
+			{
+				return 0;
+			}
+
+			*original =
+				(void*)addressThunk->u1.Function;
+			addressThunk->u1.Function =
+				(DWORD)replacement;
+
+			DWORD ignoredProtect =
+				0;
+			VirtualProtect(
+				&addressThunk->u1.Function,
+				sizeof(addressThunk->u1.Function),
+				oldProtect,
+				&ignoredProtect);
+			FlushInstructionCache(
+				GetCurrentProcess(),
+				&addressThunk->u1.Function,
+				sizeof(addressThunk->u1.Function));
+
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+static UINT SpideyPacingNextIntervalMs(
+		unsigned long nextVirtualTick,
+		unsigned long currentVirtualTotalMs,
+		unsigned long* outTargetTotalMs)
+{
+	// +1 keeps the cumulative retail floating accumulator safely above the
+	// exact integer boundary at 50,100,150... ms instead of risking
+	// 5.999999999 -> floor(5), which is the original cadence hole.
+	const unsigned long targetTotalMs =
+		(unsigned long)(
+			((nextVirtualTick * 1000UL) /
+			 60UL) +
+			1UL);
+
+	if (outTargetTotalMs)
+	{
+		*outTargetTotalMs =
+			targetTotalMs;
+	}
+
+	if (targetTotalMs <=
+		currentVirtualTotalMs)
+	{
+		return 1;
+	}
+
+	return (UINT)(
+		targetTotalMs -
+		currentVirtualTotalMs);
+}
+
+static void CALLBACK SpideyPacingTimerThunk(
+		UINT timerId,
+		UINT message,
+		DWORD,
+		DWORD param1,
+		DWORD param2)
+{
+	if (!gSpideyPacingTimerActive ||
+		!gSpideyPacingRetailCallback ||
+		!gSpideyOriginalTimeSetEvent)
+	{
+		return;
+	}
+
+	const unsigned long nextVirtualTick =
+		gSpideyPacingVirtualTick +
+		1;
+	unsigned long targetTotalMs =
+		gSpideyPacingVirtualTotalMs;
+	UINT interval =
+		SpideyPacingNextIntervalMs(
+			nextVirtualTick,
+			gSpideyPacingVirtualTotalMs,
+			&targetTotalMs);
+
+	if (interval < 1)
+		interval = 1;
+	if (interval > 20)
+		interval = 20;
+
+	gSpideyPacingLastIntervalMs =
+		interval;
+
+	SpideyRetailTimerInfoCompat* timerInfo =
+		(SpideyRetailTimerInfoCompat*)
+			gSpideyPacingRetailUser;
+
+	if (timerInfo)
+	{
+		__try
+		{
+			timerInfo->field_4 =
+				interval;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
+	const unsigned long beforeVblanks =
+		(unsigned long)*(volatile long*)0x006B4CA0;
+
+	gSpideyPacingRetailCallback(
+		timerId,
+		message,
+		gSpideyPacingRetailUser,
+		param1,
+		param2);
+
+	const unsigned long afterVblanks =
+		(unsigned long)*(volatile long*)0x006B4CA0;
+	const unsigned long deltaVblanks =
+		afterVblanks -
+		beforeVblanks;
+
+	++gSpideyPacingCallbackCount;
+
+	if (deltaVblanks == 1)
+	{
+		gSpideyPacingVirtualTick =
+			nextVirtualTick;
+		gSpideyPacingVirtualTotalMs =
+			targetTotalMs;
+	}
+	else if (deltaVblanks == 0)
+	{
+		// Retail TimerCallback intentionally does nothing while PCTIMER is
+		// paused. Do not consume the virtual 60 Hz phase while paused; the
+		// same next interval will be used when retail resumes.
+		++gSpideyPacingPausedCallbackCount;
+	}
+	else
+	{
+		// Fail soft: preserve retail's observed advancement, but count it so
+		// validation can catch any unexpected multi-vblank behavior.
+		++gSpideyPacingUnexpectedVblankDelta;
+		gSpideyPacingVirtualTick +=
+			deltaVblanks;
+		gSpideyPacingVirtualTotalMs =
+			(unsigned long)(
+				(gSpideyPacingVirtualTick *
+				 1000UL) /
+				60UL) +
+			1UL;
+	}
+
+	if (!gSpideyPacingTimerActive)
+	{
+		return;
+	}
+
+	const unsigned long followingVirtualTick =
+		gSpideyPacingVirtualTick +
+		1;
+	unsigned long followingTargetTotalMs =
+		gSpideyPacingVirtualTotalMs;
+	UINT followingInterval =
+		SpideyPacingNextIntervalMs(
+			followingVirtualTick,
+			gSpideyPacingVirtualTotalMs,
+			&followingTargetTotalMs);
+
+	if (followingInterval < 1)
+		followingInterval = 1;
+	if (followingInterval > 20)
+		followingInterval = 20;
+
+	const UINT newTimerId =
+		gSpideyOriginalTimeSetEvent(
+			followingInterval,
+			1,
+			SpideyPacingTimerThunk,
+			0,
+			0);
+
+	gSpideyPacingRealTimerId =
+		newTimerId;
+
+	if (!gSpideyPacingTimerActive &&
+		newTimerId &&
+		gSpideyOriginalTimeKillEvent)
+	{
+		gSpideyOriginalTimeKillEvent(
+			newTimerId);
+		gSpideyPacingRealTimerId =
+			0;
+	}
+}
+
+static UINT WINAPI SpideyCompatTimeSetEvent(
+		UINT delay,
+		UINT resolution,
+		SpideyRetailTimerCallbackFn callback,
+		DWORD user,
+		UINT flags)
+{
+	if (!gSpideyOriginalTimeSetEvent)
+		return 0;
+
+	const unsigned long callbackAddress =
+		(unsigned long)callback;
+	const int looksLikeRetailPcTimer =
+		delay == 16 &&
+		resolution == 16 &&
+		callback &&
+		callbackAddress >= 0x00401000 &&
+		callbackAddress < 0x0053B000 &&
+		(flags & 1) != 0;
+
+	if (!looksLikeRetailPcTimer ||
+		gSpideyPacingTimerActive)
+	{
+		return gSpideyOriginalTimeSetEvent(
+			delay,
+			resolution,
+			callback,
+			user,
+			flags);
+	}
+
+	gSpideyPacingRetailCallback =
+		callback;
+	gSpideyPacingRetailUser =
+		user;
+	gSpideyPacingRetailFlags =
+		flags;
+	gSpideyPacingVirtualTick =
+		0;
+	gSpideyPacingVirtualTotalMs =
+		0;
+	gSpideyPacingCallbackCount =
+		0;
+	gSpideyPacingPausedCallbackCount =
+		0;
+	gSpideyPacingUnexpectedVblankDelta =
+		0;
+	gSpideyPacingLastIntervalMs =
+		0;
+
+	if (gSpideyTimeBeginPeriod &&
+		gSpideyTimeBeginPeriod(1) == 0)
+	{
+		gSpideyPacingBeginPeriodOne =
+			1;
+	}
+
+	InterlockedExchange(
+		&gSpideyPacingTimerActive,
+		1);
+
+	unsigned long targetTotalMs =
+		0;
+	const UINT firstInterval =
+		SpideyPacingNextIntervalMs(
+			1,
+			0,
+			&targetTotalMs);
+
+	gSpideyPacingRealTimerId =
+		gSpideyOriginalTimeSetEvent(
+			firstInterval,
+			1,
+			SpideyPacingTimerThunk,
+			0,
+			0);
+
+	if (!gSpideyPacingRealTimerId)
+	{
+		InterlockedExchange(
+			&gSpideyPacingTimerActive,
+			0);
+
+		if (gSpideyPacingBeginPeriodOne &&
+			gSpideyTimeEndPeriod)
+		{
+			gSpideyTimeEndPeriod(1);
+			gSpideyPacingBeginPeriodOne =
+				0;
+		}
+
+		gSpideyPacingRetailCallback =
+			0;
+		gSpideyPacingRetailUser =
+			0;
+
+		return gSpideyOriginalTimeSetEvent(
+			delay,
+			resolution,
+			callback,
+			user,
+			flags);
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u first_interval_ms=%u policy=chained_oneshot_60hz_deadline_plus_1ms retail_callback_preserved=1\n",
+			delay,
+			resolution,
+			flags,
+			callbackAddress,
+			(unsigned long)user,
+			gSpideyPacingSyntheticTimerId,
+			firstInterval);
+		fclose(f);
+	}
+
+	return gSpideyPacingSyntheticTimerId;
+}
+
+static UINT WINAPI SpideyCompatTimeKillEvent(
+		UINT timerId)
+{
+	if (timerId ==
+			gSpideyPacingSyntheticTimerId &&
+		gSpideyPacingTimerActive)
+	{
+		InterlockedExchange(
+			&gSpideyPacingTimerActive,
+			0);
+
+		const UINT realTimerId =
+			gSpideyPacingRealTimerId;
+		gSpideyPacingRealTimerId =
+			0;
+
+		UINT result =
+			0;
+		if (realTimerId &&
+			gSpideyOriginalTimeKillEvent)
+		{
+			result =
+				gSpideyOriginalTimeKillEvent(
+					realTimerId);
+		}
+
+		if (gSpideyPacingBeginPeriodOne &&
+			gSpideyTimeEndPeriod)
+		{
+			gSpideyTimeEndPeriod(1);
+			gSpideyPacingBeginPeriodOne =
+				0;
+		}
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"timer_pacing event=kill callbacks=%lu virtual_ticks=%lu paused_callbacks=%lu unexpected_vblank_delta=%lu last_interval_ms=%lu result=%u\n",
+				gSpideyPacingCallbackCount,
+				gSpideyPacingVirtualTick,
+				gSpideyPacingPausedCallbackCount,
+				gSpideyPacingUnexpectedVblankDelta,
+				gSpideyPacingLastIntervalMs,
+				result);
+			fclose(f);
+		}
+
+		gSpideyPacingRetailCallback =
+			0;
+		gSpideyPacingRetailUser =
+			0;
+
+		return result;
+	}
+
+	if (gSpideyOriginalTimeKillEvent)
+	{
+		return gSpideyOriginalTimeKillEvent(
+			timerId);
+	}
+
+	return 0;
+}
+
+static int SpideyInstallModernTimerPacing()
+{
+	HMODULE winmm =
+		GetModuleHandleA(
+			"winmm.dll");
+	if (!winmm)
+	{
+		winmm =
+			LoadLibraryA(
+				"winmm.dll");
+	}
+
+	if (winmm)
+	{
+		gSpideyTimeBeginPeriod =
+			(SpideyTimePeriodFn)GetProcAddress(
+				winmm,
+				"timeBeginPeriod");
+		gSpideyTimeEndPeriod =
+			(SpideyTimePeriodFn)GetProcAddress(
+				winmm,
+				"timeEndPeriod");
+	}
+
+	void* originalSet =
+		0;
+	void* originalKill =
+		0;
+
+	const int setInstalled =
+		SpideyPatchMainImport(
+			"WINMM.dll",
+			"timeSetEvent",
+			(void*)&SpideyCompatTimeSetEvent,
+			&originalSet);
+	const int killInstalled =
+		SpideyPatchMainImport(
+			"WINMM.dll",
+			"timeKillEvent",
+			(void*)&SpideyCompatTimeKillEvent,
+			&originalKill);
+
+	if (setInstalled)
+	{
+		gSpideyOriginalTimeSetEvent =
+			(SpideyTimeSetEventFn)originalSet;
+	}
+	if (killInstalled)
+	{
+		gSpideyOriginalTimeKillEvent =
+			(SpideyTimeKillEventFn)originalKill;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX retail_match=16ms_periodic_main_exe policy=chained_16_17ms_exact_60hz_phase fallback=retail\n",
+			setInstalled,
+			killInstalled,
+			(unsigned long)gSpideyOriginalTimeSetEvent,
+			(unsigned long)gSpideyOriginalTimeKillEvent,
+			(unsigned long)gSpideyTimeBeginPeriod,
+			(unsigned long)gSpideyTimeEndPeriod);
+		fclose(f);
+	}
+
+	return
+		setInstalled &&
+		killInstalled &&
+		gSpideyOriginalTimeSetEvent &&
+		gSpideyOriginalTimeKillEvent;
+}
+
 typedef void (__cdecl *SpideyRetailLogicFn)(void);
 
 static unsigned long gSpideyTimingLogicWindowStart = 0;
@@ -11975,7 +12607,7 @@ static void SpideyLogTimingWindow(
 	{
 		fprintf(
 			f,
-			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu slow_event_count=%lu slow_event_stored=%lu\n",
+			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu slow_event_count=%lu slow_event_stored=%lu timer_active=%ld timer_callbacks=%lu timer_virtual_ticks=%lu timer_paused_callbacks=%lu timer_unexpected_delta=%lu timer_last_interval_ms=%lu\n",
 			kind,
 			elapsed,
 			count,
@@ -11998,7 +12630,13 @@ static void SpideyLogTimingWindow(
 			gSpideyTimingPresentVblankMulti,
 			gSpideyTimingPresentVblankMaxDelta,
 			gSpideyTimingSlowEventCount,
-			gSpideyTimingSlowEventStored);
+			gSpideyTimingSlowEventStored,
+			(long)gSpideyPacingTimerActive,
+			gSpideyPacingCallbackCount,
+			gSpideyPacingVirtualTick,
+			gSpideyPacingPausedCallbackCount,
+			gSpideyPacingUnexpectedVblankDelta,
+			gSpideyPacingLastIntervalMs);
 
 		if (gSpideyTimingSlowEventStored)
 		{
@@ -12242,6 +12880,9 @@ static void SpideyRecordPresentTiming()
 
 static void SpideyInstallTimingTelemetry()
 {
+	const int timerPacingInstalled =
+		SpideyInstallModernTimerPacing();
+
 	const int logicInstalled =
 		SpideyPatchDirectCall(
 			0x00455A8B,
@@ -12255,8 +12896,9 @@ static void SpideyInstallTimingTelemetry()
 	{
 		fprintf(
 			f,
-			"timing_install logic=%d call=0x00455A8B retail=0x00455400 engine_vblanks=0x006B4CA0\n",
-			logicInstalled);
+			"timing_install logic=%d call=0x00455A8B retail=0x00455400 engine_vblanks=0x006B4CA0 modern_timer_pacing=%d\n",
+			logicInstalled,
+			timerPacingInstalled);
 		fclose(f);
 	}
 }
