@@ -1,3 +1,56 @@
+# HIGH-FPS MASTER HANDOFF UPDATE — HITCHES FIXED; NATIVE 60-HZ GAMEPLAY FRONTIER (2026-10-04)
+
+Latest tested runtime:
+- `a4e1105d1f9568a24ca8817847573392a7f8324a`
+- log `spidey-decomp(20261004-213030).log`
+
+User-confirmed:
+- manual aim remains frozen/accepted;
+- **logging cleanup got rid of the recurring hitches**;
+- gameplay still feels slightly sped up at 60 FPS;
+- 60 Hz must be the minimum/native simulation rate;
+- higher refresh is to come from render interpolation/presentation above a correct 60-Hz simulation.
+
+Current source:
+- `6cf830b974316134a8a7813ac1eda42279eacd60` — correct Mysterio vtable guard to runtime-proven slot 0 `0x0045B540`; remove completed first RE byte dumps;
+- `62f9500c4085a0841f5afbe9f85ee7d68b021e1f` — startup-only capture of `AIProcBlock @ 0x00401000..0x00402100` and `CPlayer_DoPhysics @ 0x004BFEC0..0x004C00B0`.
+
+Critical new RE:
+- complete `Ob_AI` capture proves no hidden 30-Hz object-AI interleave;
+- each active object gets `EveryFrame()`, optional `UpdateFrame()`, then virtual `AI()` each dispatch;
+- therefore raw per-call AI timers really advance at the full Logic cadence;
+- `CAIProc::Wait` is the clearest reusable raw-counter candidate;
+- do not patch it yet: the next build captures the exact retail AI-proc block so constructor/count semantics can be proven first;
+- player physics is also captured next because user-visible speed-up could include player integration and that retail function is still missing from the decompiled tree.
+
+Hitch branch:
+- CLOSED unless a new reproducible stall appears.
+- Do not re-enable high-frequency diagnostic success logging.
+
+Timing architecture:
+1. make gameplay genuinely correct at native 60 Hz;
+2. preserve existing `field_80` / `gTimerRelated` elapsed-time paths;
+3. convert only proven raw frame-count timing primitives;
+4. keep player input/camera at 60 Hz;
+5. later separate render/present from simulation;
+6. interpolate for 120/144/165/240+ Hz without running gameplay faster than 60 Hz.
+
+Exact next runtime:
+- build `62f9500c...` or newer;
+- verify startup line `high_fps_compat mysterio_laser=1`;
+- verify `high_fps_re_bytes_done label=AIProcBlock ... valid=1`;
+- verify `high_fps_re_bytes_done label=CPlayer_DoPhysics ... valid=1`;
+- normal gameplay is enough; no hitch reproduction work is needed;
+- return the consolidated log.
+
+After that:
+- reconstruct AI-proc block;
+- classify Wait/RotY/LookAt timing semantics;
+- reconstruct player DoPhysics;
+- implement the first broad native-60 timing conversion batch.
+
+---
+
 # HIGH-FPS MASTER HANDOFF — 60-HZ CORRECTNESS + STARTUP RE CAPTURE READY (2026-10-04)
 
 This supersedes the older reticle/hitch handoff below. Do **not** redo the camera/reticle RE.
