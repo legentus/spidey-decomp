@@ -1,5 +1,34 @@
 # CURRENT STATUS
 
+## LIVE FRONTIER — PAUSE BOX HEAP LIFECYCLE HARDENED (2026-10-04)
+
+Source commit:
+- `f7c2532a956610768609e6732ec64e83b89bd463` — `pause: resize expanding box in place`
+
+Reason:
+- the previous dynamic Pause Options container called retail `CMenu::Zoom @ 0x0043FC60`;
+- `CMenu::Zoom` calls `KillBox()`, deletes the live heap-owned `CExpandingBox`, then allocates a replacement;
+- our hook runs inside the pause menu's live update/confirm frame, so deleting that object there creates an avoidable lifecycle/use-after-free risk if surrounding retail code still references the old box.
+
+New behavior:
+- preserve the existing `CExpandingBox*`;
+- derive the same target rectangle retail Zoom would use from `GetMenuHeight()`, zoom type, font and menu geometry;
+- update `field_1C/field_20/field_C/field_10` in place;
+- clamp current width/height only when shrinking;
+- guard the box write with SEH and log `mode=in_place`, old/target rectangles and any write fault;
+- no gameplay/menu row semantics changed.
+
+Static verification after commit:
+- replacement function present on live `dev`;
+- old `SpideyRetailMenuZoomFn zoom` call absent from the refresh function;
+- local brace/parenthesis counts balanced.
+
+NEXT:
+1. finish the remaining camera-web targeting path now that the user reports targeting is improved but still not complete;
+2. then begin the DX11 world-space capture/shadow bridge groundwork;
+3. next user build should validate pause repeatedly plus both targeting paths in one session.
+
+
 **Project:** Spider-Man 2000 PC decomp / developer build  
 **Repository:** `legentus/spidey-decomp`  
 **Working branch:** `dev`  
