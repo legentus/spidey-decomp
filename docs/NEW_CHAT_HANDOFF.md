@@ -1,3 +1,78 @@
+# LIVE CONTINUATION — WEB TARGET AXIS + QUADBIT CAMERA ANCHOR READY FOR RUNTIME TEST (2026-10-04)
+
+This continuation supersedes older web-target/shadow hypotheses below.
+
+## New source fixes
+
+### Camera-forward web targeting
+Commit:
+- `5e3dd2e066de9bd89d94dd675f152baaf85d22e3` — `gameplay: align camera web aim with retail forward axis`
+
+Canonical retained-function RE established:
+- `SelectAutoAimTarget @ 0x004C5AA0` stores the result of `SelectTargetBaddy @ 0x004C8410` into `player+0xDCC`.
+- `FireWeb @ 0x004C5DD0` directly consumes `player+0xDCC` when a target exists; there is no separate body-facing hit gate that needs replacing first.
+- `SelectTargetBaddy` transforms player-to-candidate through `player+0x89C`, normalizes it, and scores **negative local Z** for forward/centeredness.
+- the active camera QToM transform uses **positive local Z** as visible camera-forward.
+
+Fix:
+- continue temporarily substituting only the scoring matrix at the existing `0x004C5B2F` hook;
+- after QToM(camera->field_214), negate row 2 of the temporary camera matrix;
+- preserve untouched retail eligibility/range/LOS/scoring and restore `player+0x89C` immediately after selection.
+
+### Character blob-shadow anchoring
+Commit:
+- `a24b4d27f586c97af175e5202bb9fb7db2268cbe` — `render: restore camera transform for world quad bits`
+
+Canonical RE established:
+- standard thug/cop floor shadows are the CBody -> CQuadBit path.
+- `CBody::UpdateShadow @ 0x004605A0` and `CQuadBit::OrientUsing @ 0x00409400` produce camera-independent world-space geometry.
+- `Bit_Init @ 0x00407FC0` registers `QuadBitList` with `DisplayQuadBitList @ 0x004097E0`.
+- registration PUSH is at `0x004081D4`, dword target operand `0x004081D5`.
+- `DisplayQuadBitList` subtracts `gMikeCamera[0].Position` and projects with `gte_rtps`, but does not reload the camera rotation matrix itself.
+- `M3d_RenderSetup @ 0x00472DC0` loads `SCamera::Transform` through `gte_SetRotMatrix @ 0x0046D7B0`; later model rendering can overwrite that shared GTE rotation state.
+- active retail camera transform is `gMikeCamera[0].Transform @ 0x0056F1E4`.
+
+Fix:
+- replace only the QuadBitList display callback registered by retail Bit_Init;
+- wrapper reloads `0x0056F1E4` via untouched `gte_SetRotMatrix`;
+- wrapper then calls untouched retail `DisplayQuadBitList`;
+- no shadow world position, floor/collision data, quad corner generation, or Renderer11 replay coordinates are altered.
+- `patch_CBit()` was checked and does not replace Bit_Init, so this registration hook remains live.
+
+## Exact next combined runtime test
+
+Run:
+`FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Then in one gameplay session:
+
+1. **Web targeting**
+   - put Spider-Man's body facing away from a baddy;
+   - center the baddy with the camera;
+   - fire the normal enemy-targeting web;
+   - it should acquire/hit based on the camera center;
+   - repeat with baddy somewhat left/right and above/below if practical;
+   - also verify normal straight-ahead targeting still works.
+
+2. **Blob shadow**
+   - find a thug/cop/NPC with the normal circular/soft floor blob;
+   - keep the NPC stationary;
+   - orbit the camera around them;
+   - blob should remain under the NPC instead of sliding as camera angle changes;
+   - briefly watch other world-space QuadBit effects for regressions.
+
+3. **Quick regression**
+   - move/swing/orbit for a minute;
+   - no need to re-test the already-confirmed large-hitch removal or sensitivity unless something looks wrong.
+
+If either new fix is wrong, upload **only** the single consolidated `spidey-decomp.log` and describe the visible result. Useful startup lines are:
+- `camera_web_target_install ... forward_axis=negative_local_z`
+- `quadbit_camera_anchor installed=1 ... reason=ok`
+
+Do not re-enable the old blocking readbacks.
+
+---
+
 # LIVE CONTINUATION — BAT WORKFLOW CLEANUP (2026-10-04)
 
 The repository launcher surface has been simplified. Old historical sections may mention deleted BAT names; those references are historical only.
