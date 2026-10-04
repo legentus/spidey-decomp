@@ -8226,3 +8226,122 @@ Then at 2560x1440:
 14. inspect the consolidated log for all `pause_options_*`, `pause_ui_apply`, `ui_text_scale reason=pause_options_apply`, and `compass_arrow_qpoly` events.
 
 Do not modify the health or web-cartridge paths unless new runtime evidence contradicts their now-confirmed alignment.
+
+
+## Pause Options runtime success + gameplay UI-scale row fix (2026-10-03)
+
+### Runtime result received
+
+The user tested the custom pause Options frontier from session revision:
+
+- `bfdaf30d9c6eb75983862e168d753b9903fbf8ae`
+
+That session still carried the latest code checkpoint:
+
+- `47129a8ef6d9de995206b61e9ea04f3dcef79b98`
+
+User result:
+
+- the custom in-level **Options** submenu works;
+- **Text Scale** works correctly and applies live;
+- the **Gameplay UI Scale** control was not exposed/usable;
+- once Gameplay UI Scale is fixed, the user wants to move directly to camera work.
+
+The runtime log proves the backend settings/apply path is healthy:
+
+- submenu entered with `rows=4`, Gameplay UI = 125, Text = 100;
+- every scale adjustment event in the successful interaction was `kind=menu_text line=1`;
+- Text moved through 105 / 110 / 115%;
+- Apply completed with:
+  - `old_gameplay=125 new_gameplay=125`
+  - `old_text=100 new_text=115`
+  - settings saved successfully;
+- Back restored the parent pause menu cleanly.
+
+Therefore this is not a Gameplay UI scaling-backend failure. The first custom actionable row was placed at submenu entry 0, while the runtime behavior shows the first usable scale row was entry 1.
+
+### Fix implemented
+
+Commits:
+
+- `ba5691d4fb84feeb6334269bb1edce1778c23627` — **fix: expose gameplay UI scale in pause Options**
+- `4159190bcaa7341896561f913504cc34f437c987` — **chore: tighten pause Options row fix**
+
+The custom submenu is now five rows:
+
+0. `Options` — disabled heading / sacrificial retail first row
+1. `UI Scale: N%`
+2. `Text Scale: N%`
+3. `Apply Settings`
+4. `Back`
+
+Implementation details:
+
+- row 0 is explicitly marked disabled (`what=1`);
+- initial selected line is row 1, so the submenu opens directly on Gameplay UI Scale;
+- the menu is centered using the original parent Y now that parent/submenu are both five rows;
+- submenu-shape validation now requires all five expected entries;
+- entry telemetry now records:
+  - row count;
+  - selected line;
+  - cursor line;
+  - heading-disabled state;
+  - pending Gameplay UI/Text values.
+
+Expected enter telemetry:
+
+`pause_options_state action=enter ... rows=5 line=1 cursor=0 ... heading_disabled=1 ...`
+
+Expected Gameplay UI adjustment telemetry:
+
+`pause_options_adjust kind=gameplay_ui line=1 ... pending_gameplay=...`
+
+Expected Text adjustment telemetry:
+
+`pause_options_adjust kind=menu_text line=2 ... pending_text=...`
+
+Expected Apply telemetry should now normally report `line=3 rows=5`.
+
+### Compass evidence from the same runtime
+
+The current single-hook compass-arrow path continued to emit compact bottom-right geometry. Sample transformed arrow vertices remained inside the previously measured compact holder region at the tested 125% Gameplay UI setting.
+
+No new runtime evidence contradicts the current policy:
+
+- transform only `0x00463D19`;
+- keep `0x00464035` and `0x00464257` on their already-live retail paths.
+
+Do not reopen the compass/broad HUD transforms unless the user reports a visual problem.
+
+### Mandatory next runtime test
+
+Run:
+
+`UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+Then perform only the short regression needed to close this frontier:
+
+1. Enter gameplay and Pause -> Options.
+2. Confirm the submenu now visibly contains:
+   - `UI Scale: N%`
+   - `Text Scale: N%`
+   - `Apply Settings`
+   - `Back`.
+3. The highlight should initially be on **UI Scale**.
+4. Change UI Scale to a clearly different value, e.g. 150%.
+5. Optionally nudge Text Scale once to confirm it still works.
+6. Choose Apply Settings.
+7. Return to gameplay and confirm the HUD geometry changes immediately.
+8. Reopen Options and confirm the applied UI Scale value persisted.
+9. Back out and confirm normal pause navigation still works.
+
+Inspect the consolidated log for:
+
+- `pause_options_state action=enter ... rows=5 line=1 ... heading_disabled=1`;
+- `pause_options_adjust kind=gameplay_ui line=1`;
+- `pause_options_adjust kind=menu_text line=2` if tested;
+- `pause_ui_apply old_gameplay=... new_gameplay=...`;
+- `pause_options_confirm action=apply line=3 rows=5`;
+- any `[CRASH]` lines.
+
+If this passes, checkpoint it immediately and move to the requested **camera implementation**. Do not spend another runtime cycle on already-proven UI paths unless this short test exposes a regression.
