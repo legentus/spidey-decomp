@@ -4315,11 +4315,17 @@ static int SpideyModernAimApplyCameraPoint(
 	const int rayScale =
 		8;
 
+	// RenderLookaroundReticle projects field_DC0 through the legacy GTE
+	// camera basis. With the modern mode-3 camera point fed directly into
+	// that path, its screen-plane convention is mirrored on both X and Y.
+	// Keep Z on the real camera-forward ray so the point remains in front of
+	// the camera, but flip X/Y around the camera origin so mouse/right-stick
+	// directions are natural on screen: left=left, right=right, up=up.
 	player->field_DC0.vx =
-		camera->mPos.vx +
+		camera->mPos.vx -
 		dx * rayScale;
 	player->field_DC0.vy =
-		camera->mPos.vy +
+		camera->mPos.vy -
 		dy * rayScale;
 	player->field_DC0.vz =
 		camera->mPos.vz +
@@ -4353,67 +4359,67 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 		camera->mCameraMode ==
 			CAMERAMODE_DEMO;
 
-	// Seed the frame with the modern camera ray. More importantly, reapply it
-	// after retail SetupLookaroundCamera has consumed the legacy WASD-driven
-	// lookaround axes. Fire/attack state processing on the following frame
-	// therefore sees the same world aim point that RenderLookaroundReticle
-	// projects for the player.
-	if (modernAim)
+	if (!modernAim)
 	{
+		retail(
+			player,
+			0);
+		return;
+	}
+
+	// Do NOT run retail SetupLookaroundCamera in modern manual aim.
+	//
+	// Runtime proved that it still owns the legacy lookaround accumulators
+	// and pose/joint steering: WASD continued moving the old cursor while
+	// normal locomotion simultaneously tried to run, leaving Spider-Man
+	// twisted in place. The modern path already owns the gameplay camera and
+	// reticle world point, so running the legacy lookaround controller only
+	// creates a second controller fighting movement.
+	//
+	// Keep field_8EA intact so enter/exit/fire code still sees manual aim.
+	// field_DC0 + field_DE4 are the pieces RenderLookaroundReticle needs.
+	const int applied =
 		SpideyModernAimApplyCameraPoint(
 			player,
 			camera);
-	}
 
-	retail(
-		player,
-		0);
-
-	int applied =
-		0;
-	if (modernAim &&
-		player->field_8EA)
+	++gSpideyModernAimLookaroundCalls;
+	if (gSpideyModernAimLookaroundCalls <= 12 ||
+		(gSpideyModernAimLookaroundCalls %
+		 60) == 0)
 	{
-		applied =
-			SpideyModernAimApplyCameraPoint(
-				player,
-				camera);
-	}
-
-	if (modernAim)
-	{
-		++gSpideyModernAimLookaroundCalls;
-		if (gSpideyModernAimLookaroundCalls <= 6 ||
-			(gSpideyModernAimLookaroundCalls %
-			 120) == 0)
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
 		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"CAMERA");
-			if (f)
-			{
-				fprintf(
-					f,
-					"modern_manual_aim event=reticle call=%lu applied=%d camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d\n",
-					gSpideyModernAimLookaroundCalls,
-					applied,
-					(unsigned long)camera,
-					camera ?
-						(int)camera->mCameraMode :
-						-1,
-					(int)player->field_E2D,
-					(int)player->field_E2E,
-					player->field_DC0.vx,
-					player->field_DC0.vy,
-					player->field_DC0.vz,
-					camera ? camera->mPos.vx : 0,
-					camera ? camera->mPos.vy : 0,
-					camera ? camera->mPos.vz : 0,
-					camera ? camera->field_144.vx : 0,
-					camera ? camera->field_144.vy : 0,
-					camera ? camera->field_144.vz : 0);
-				fclose(f);
-			}
+			fprintf(
+				f,
+				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d body_pos=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u\n",
+				gSpideyModernAimLookaroundCalls,
+				applied,
+				(unsigned long)camera,
+				(int)camera->mCameraMode,
+				(int)player->field_E2D,
+				(int)player->field_E2E,
+				player->field_DC0.vx,
+				player->field_DC0.vy,
+				player->field_DC0.vz,
+				camera->mPos.vx,
+				camera->mPos.vy,
+				camera->mPos.vz,
+				camera->field_144.vx,
+				camera->field_144.vy,
+				camera->field_144.vz,
+				player->mPos.vx,
+				player->mPos.vy,
+				player->mPos.vz,
+				player->mVel.vx,
+				player->mVel.vy,
+				player->mVel.vz,
+				(unsigned long)player->field_E1C,
+				(unsigned int)player->mAnim);
+			fclose(f);
 		}
 	}
 }
@@ -9417,6 +9423,7 @@ typedef int (__cdecl *SpideyRetailLineOfSightFn)(
 
 static CBody* gSpideyCameraWebTargetLastTarget = 0;
 static unsigned long gSpideyCameraWebTargetCalls = 0;
+static unsigned long gSpideyCameraModernScanCalls = 0;
 
 // Retail SelectTargetBaddy scores each candidate after transforming the
 // player->candidate vector through player + 0x89C. For web auto-aim only,
@@ -9429,9 +9436,17 @@ static CBody* SpideyCameraSelectModernTarget(
 		int rangeArg,
 		int coneArg,
 		SpideyRetailLineOfSightFn lineOfSight,
+		int* outListNodes,
+		int* outEligibleCount,
 		int* outCandidateCount,
 		double* outScore)
 {
+	if (outListNodes)
+		*outListNodes =
+			0;
+	if (outEligibleCount)
+		*outEligibleCount =
+			0;
 	if (outCandidateCount)
 		*outCandidateCount =
 			0;
@@ -9494,13 +9509,21 @@ static CBody* SpideyCameraSelectModernTarget(
 		-1.0;
 	double bestPlayerDistanceSquared =
 		0.0;
+	int listNodes =
+		0;
+	int eligible =
+		0;
 	int candidates =
 		0;
 
 	__try
 	{
+		// Canonical SelectTargetBaddy @ 0x004C8410 starts from the body-list
+		// head stored at 0x0056E990 and advances through CItem::mNextItem
+		// (+0x20). G_MECHLIST is the player/mech list at 0x006A9038 and is
+		// not the retail auto-aim candidate universe.
 		CBody* candidate =
-			G_MECHLIST;
+			*(CBody**)0x0056E990;
 
 		// Fail closed on a corrupted list rather than walking forever.
 		for (int guard = 0;
@@ -9510,6 +9533,7 @@ static CBody* SpideyCameraSelectModernTarget(
 		{
 			CBody* next =
 				(CBody*)candidate->mNextItem;
+			++listNodes;
 
 			if (candidate != player &&
 				candidate->mRMinor != 0 &&
@@ -9518,6 +9542,8 @@ static CBody* SpideyCameraSelectModernTarget(
 				!(candidate->mCBodyFlags &
 				  CBODY_ZOMBIE))
 			{
+				++eligible;
+
 				const double playerDx =
 					((double)candidate->mPos.vx -
 					 (double)player->mPos.vx) /
@@ -9614,6 +9640,12 @@ static CBody* SpideyCameraSelectModernTarget(
 			-1.0;
 	}
 
+	if (outListNodes)
+		*outListNodes =
+			listNodes;
+	if (outEligibleCount)
+		*outEligibleCount =
+			eligible;
 	if (outCandidateCount)
 		*outCandidateCount =
 			candidates;
@@ -9674,6 +9706,10 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		0;
 	int cameraOriginPlayerLos =
 		0;
+	int cameraScanListNodes =
+		0;
+	int cameraScanEligible =
+		0;
 	int cameraScanCandidates =
 		0;
 	double cameraScanScore =
@@ -9699,6 +9735,8 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 				arg1,
 				arg2,
 				retailLineOfSight,
+				&cameraScanListNodes,
+				&cameraScanEligible,
 				&cameraScanCandidates,
 				&cameraScanScore);
 
@@ -9824,9 +9862,14 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 
 	++gSpideyCameraWebTargetCalls;
 
+	++gSpideyCameraModernScanCalls;
+
 	if (target !=
 			gSpideyCameraWebTargetLastTarget ||
-		gSpideyCameraWebTargetCalls <= 4)
+		gSpideyCameraWebTargetCalls <= 4 ||
+		(useCamera &&
+		 (gSpideyCameraModernScanCalls %
+		  120) == 0))
 	{
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -9835,7 +9878,7 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		{
 			fprintf(
 				f,
-				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX camera_scan_candidates=%d camera_scan_score=%.6f camera_origin_candidate=%d player_los=%d args=%d,%d,%d,%d\n",
+				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX camera_scan_nodes=%d camera_scan_eligible=%d camera_scan_candidates=%d camera_scan_score=%.6f camera_origin_candidate=%d player_los=%d args=%d,%d,%d,%d\n",
 				gSpideyCameraWebTargetCalls,
 				callSource ? callSource : "unknown",
 				selectionSource,
@@ -9849,6 +9892,8 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 					 0x0FFF) :
 					-1,
 				(unsigned long)target,
+				cameraScanListNodes,
+				cameraScanEligible,
 				cameraScanCandidates,
 				cameraScanScore,
 				cameraOriginCandidate,
@@ -9923,7 +9968,7 @@ static void SpideyInstallCameraWebTargetingCompat()
 	{
 		fprintf(
 			f,
-			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 primary=modern_camera_scan filters=targettable_non_zombie_real_range_player_los cone=arg2_over_4096 scope=select_auto_aim_and_check_web_shot fallback=retail_camera_origin_then_orientation\n",
+			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 primary=modern_camera_scan retail_list=0x0056E990 filters=targettable_non_zombie_real_range_player_los cone=arg2_over_4096 scope=select_auto_aim_and_check_web_shot fallback=retail_camera_origin_then_orientation\n",
 			autoAimInstalled,
 			checkWebShotInstalled);
 		fclose(f);
