@@ -46,6 +46,119 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## RUNTIME CHECKPOINT — MANUAL AIM RAY WORKS; FINAL CAMERA TRANSFORM + AIM RE-ENTRY RESET IDENTIFIED (2026-10-04)
+
+Tested revision:
+- `93d63347505da81a769c1d58ba62361c4650f4b5`
+
+Runtime logs:
+- `spidey-decomp(20261004-190816).log` — manual aim / firing / hitch correlation
+- `spidey-decomp(20261004-191012).log` — dedicated movement-while-aiming test
+
+### User-visible result
+
+Manual aim:
+- much better than the prior build;
+- reticle/cursor now moves around;
+- webbing mostly follows the aimed direction and appears reasonably accurate;
+- however the **visible gameplay camera itself does not rotate while manual aim is held**.
+
+Movement while aiming:
+- still does not translate Spider-Man;
+- visually Spider-Man "vibrates" / repeatedly tries to move and is reset back to the same position.
+
+Hitch:
+- user still observes a small hitch;
+- near the end of the first run, the user tried to fire a web at each visible hitch (one known mistimed shot).
+
+### Manual camera evidence — final publish seam is the missing layer
+
+The new free-aim state is alive:
+- `modern_manual_camera event=update` shows changing `view_yaw`, `view_pitch`, offsets, and changing world-space `focus`;
+- manual web direction follows that changed focus well enough to be visibly useful.
+
+Therefore the problem is no longer mouse/right-stick input or the free-aim world ray.
+
+Canonical `CCamera::AI @ 0x00417CB0` retained binary was re-scanned:
+- `0x00418414 -> CM_Normal @ 0x00418E00`;
+- `0x00418458 -> shared postprocess/collision/orientation @ 0x00416B10`;
+- `0x0041865F -> CCamera::LoadIntoMikeCamera @ 0x00416A20`.
+
+`LoadIntoMikeCamera` publishes `camera->field_214` through `QToM` into `gMikeCamera[0].Transform`.
+
+Interpretation:
+- the current manual-aim code changes `field_144` after CM_Normal;
+- that is sufficient for the reticle/web ray;
+- but the visible transform quaternion has already been produced from the old Spider-Man-centered orientation;
+- the correct next seam is the final `LoadIntoMikeCamera` call, not another change to `field_144` or the web ray.
+
+Planned implementation:
+- patch only direct call `0x0041865F -> 0x00416A20`;
+- during effective manual aim, build a temporary camera quaternion from `camera->mPos -> camera->field_144` using the retail `Utils_CalcAim -> M3dMaths_RotMatrixYXZ -> MToQ` convention;
+- call untouched retail `LoadIntoMikeCamera`;
+- restore the internal retail quaternion afterward so normal mode-3 collision/interpolation state is not contaminated;
+- all non-manual camera modes remain untouched.
+
+### Movement evidence — mask is engaged, then retail reasserts aim
+
+Dedicated movement log proves:
+- locomotion mask engages: `locomotion_mask=1`;
+- first masked samples show `actual_aim_state=0`;
+- `CheckForwards` can enter `state=0x10`, `anim=1`, `result=1`;
+- immediately afterward, while the sidecar still reports `locomotion_mask=1`, `actual_aim_state` is back to `1`;
+- subsequent samples oscillate between stand `0x1/anim=0` and run `0x10/anim=1`;
+- `body_delta=0,0,0` throughout.
+
+This exactly matches the user's visible vibration/reset.
+
+Canonical `EnterLookaroundMode @ 0x004C3580` retained binary was inspected and contains an explicit:
+- `mov byte ptr [esi+0x8EA], 1`.
+
+Strong current hypothesis:
+- hiding `field_8EA` makes untouched retail held-aim logic think manual aim is inactive;
+- retail calls `EnterLookaroundMode` again;
+- that reasserts `field_8EA=1` and reinitializes the standing aim state;
+- movement then starts again on the next pass, creating the vibration loop.
+
+Next implementation:
+- do **not** globally fight/reclear `field_8EA` after every write;
+- intercept direct SpideyAI0 calls to `EnterLookaroundMode`;
+- if the modern effective-aim sidecar is already active, suppress redundant retail re-entry and keep the raw locomotion-facing aim flag masked;
+- initial manual-aim entry still calls untouched retail.
+
+### Timer / hitch result
+
+The phased timer is definitely active:
+- `timer_pacing_install set_event=1 kill_event=1 ... atomic_cleanup=1`;
+- retail 16 ms request is intercepted by the chained 16/17 ms source.
+
+Most importantly, the old stable **24-frame / ~0.4 s sequence of 31–33 ms gameplay frames is no longer present in settled gameplay**.
+
+Both new logs contain long ordinary gameplay windows with:
+- 58–59 presents/sec;
+- zero `over25ms` / `over30ms`;
+- max present intervals around 18–19 ms.
+
+So the old 62.5-vs-60 beat appears materially fixed.
+
+There is still one transition-era `timer_unexpected_delta=1` event with a multi-vblank jump, and the user still sees a smaller hitch. Do not declare frame pacing fully solved yet.
+
+The old `check_web_shot_calls` correlation remains zero even when the user intentionally fires near hitches, so it is not a reliable fire timestamp.
+
+Next hitch diagnostic:
+- record the actual retail **web action / fire event** directly;
+- lower the small-hitch capture threshold below the old 25 ms diagnostic cutoff so sub-25 ms graph blips can be correlated;
+- keep this buffered/in-memory and flush only with the existing timing window.
+
+### Frozen validated behavior
+
+Do not regress:
+- hip-fire camera targeting;
+- manual aim world ray / web direction;
+- existing mode-3 orbit camera outside manual aim;
+- phased timer behavior that removed the old 24-frame ~32 ms cadence.
+
+
 ## BUILD CHECKPOINT — VC6 TIMER-HOOK TYPE ERRORS FIXED (2026-10-04)
 
 The first attempt to test the new free-aim / locomotion / timer build did **not** reach runtime.
