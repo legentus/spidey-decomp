@@ -1,3 +1,193 @@
+# CURRENT NEW-CHAT FRONTIER — PAUSE OPTIONS SUBMENU + COMPASS ISOLATION (2026-10-03/04)
+
+**READ THIS SECTION BEFORE ALL OLDER MATERIAL BELOW.**
+
+The user is actively runtime-testing the current build while this handoff is being prepared.
+
+## Source of truth / fetch-first rule
+
+1. Fetch live `dev` first.
+2. Read the tail of `docs/CURRENT_STATUS.md`.
+3. Let live GitHub outrank this ZIP if `dev` has advanced.
+4. Do not redo already-grounded RE unless new runtime evidence contradicts it.
+5. Repo/status is the checkpoint; chat is not.
+
+Active repository:
+https://github.com/legentus/spidey-decomp
+
+Dev branch:
+https://github.com/legentus/spidey-decomp/tree/dev
+
+Google Drive project root:
+https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+
+Runtime Logs folder:
+https://drive.google.com/drive/folders/1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s
+
+Handoff folder:
+https://drive.google.com/drive/folders/1l-4gLh-jftGT1aNrP73wD8n3IScqQcvO
+
+## Exact checkpoint at handoff creation
+
+Live `dev` HEAD when this handoff was prepared:
+
+`bfdaf30d9c6eb75983862e168d753b9903fbf8ae`
+
+That HEAD is documentation-only:
+- `bfdaf30` — **docs: checkpoint pause Options submenu and compass isolation**
+
+Latest code checkpoint immediately beneath it:
+- `47129a8ef6d9de995206b61e9ea04f3dcef79b98` — **guard: lock pause Options snapshot to CMenu layout**
+
+Current code frontier also includes:
+- `d45947c0241e9f226f0a8dd326f2a23fa113194c` — standalone custom pause **Options** submenu
+- `018b16c3ecdd1f8ad8746a0d75e4013a43152f8a` — atomic pause-options handler repair
+- `5f309f4709902995a1648882a1b5b8ffa2a30f8b` — transform only the dynamic compass-arrow geometry
+
+The user is currently testing this frontier. **Wait for their test result before changing these paths again.**
+
+## Current behavior under test
+
+Parent pause menu:
+- original retail rows remain;
+- exactly one new row is added: **Options**.
+
+Custom in-level Options submenu:
+1. `UI Scale: N%`
+2. `Text Scale: N%`
+3. `Apply Settings`
+4. `Back`
+
+Important architecture:
+- this is our own gameplay-safe submenu;
+- it does **not** invoke retail `Shell_Options` or `PCSHELL_DoDisplayOptions`;
+- the same live pause `CMenu` object is temporarily repurposed;
+- bytes from CMenu offset `+0x8` onward are snapshotted/restored;
+- vtable and expanding-box pointer are never overwritten;
+- compile-time guard requires `sizeof(CMenu) == 0x53C`.
+
+Expected controls:
+- left/right adjusts UI Scale or Text Scale by 5%;
+- Apply Settings commits both and saves `spidey-modern-video.ini`;
+- UI scale changes on subsequent HUD draws;
+- text scale is re-applied immediately;
+- Back without Apply discards pending changes;
+- Apply, then later edit, then Back preserves applied values and discards only later edits.
+
+## Latest runtime facts that MUST NOT be lost
+
+### Health/web-cartridge paths
+
+The user has confirmed:
+- health bar/fill is now inside its holder;
+- web-cartridge HUD pieces are in the correct location.
+
+The broad-panel QPoly passthrough fix is proven. **Do not rescale those six already-live QPolys again.**
+
+### Compass
+
+Prior build transformed all three compass QPolys. Runtime logging proved:
+- only `0x00463D19` is the dynamic arrow polygon that needs compact bottom-right anchoring;
+- `0x00464035` and `0x00464257` are already in live HUD space and were being double-transformed.
+
+Current code transforms only:
+- `0x00463D19`
+
+and leaves:
+- `0x00464035`
+- `0x00464257`
+
+on retail live-space behavior.
+
+Current telemetry:
+`gameplay_ui_alignment source=compass_arrow_qpoly ... call=0x00463D19 ...`
+
+### Why the old in-level Display Options approach is forbidden
+
+Calling retail `PCSHELL_DoDisplayOptions @ 0x0050D9B0` from gameplay crashed in `Shell_DrawBackground @ 0x0048DA90` because the frontend background object at `0x006A7780` is null during gameplay.
+
+Do not reintroduce that architecture.
+
+### Why graphical sliders are forbidden in the gameplay pause menu
+
+Calling retail slider draw `0x00498060` while paused crashed because frontend slider animation resources are not loaded:
+- `Spool_FindAnim` returned null;
+- retail advanced that to a bogus `0x18` frame pointer;
+- `Panel_DrawTexturedPoly_1 @ 0x00462B30` faulted at `0x00462B3B` reading `0x1C`.
+
+The custom pause Options submenu must stay resource-free unless gameplay-safe art is explicitly implemented later.
+
+## Current edge-case simulation already performed
+
+The submenu state machine was statically/simulated through:
+- normal open -> adjust -> Apply -> Back;
+- Back without Apply;
+- 50% lower bound;
+- 200% upper bound;
+- Apply with no changes;
+- pause menu pointer change during submenu;
+- same-object retail menu rebuild during submenu;
+- 40-row capacity guard;
+- Apply, then further edits, then Back;
+- CMenu layout drift guarded by compile-time size check.
+
+Do not claim runtime validation until the user's current test returns.
+
+## Exact next action for the next chat
+
+**First response after ingesting this handoff:**
+- fetch live `dev`;
+- read `docs/CURRENT_STATUS.md`;
+- inspect whether anything advanced past `bfdaf30`;
+- then wait for / process the user's in-progress runtime result.
+
+When the user returns with a result:
+- pull the single newest `spidey-decomp.log` from the connected Drive `Logs` folder unless they attached it directly;
+- correlate any screenshot with the same session revision;
+- check:
+  - `pause_options_entry`
+  - `pause_options_state action=enter`
+  - `pause_options_adjust`
+  - `pause_options_confirm action=apply`
+  - `pause_ui_apply`
+  - `ui_text_scale reason=pause_options_apply`
+  - `pause_options_state action=restore`
+  - `compass_arrow_qpoly`
+  - any `[CRASH]` lines.
+
+If the test passes, checkpoint it immediately in `CURRENT_STATUS.md` and commit before moving to new work.
+
+## Mandatory live-update / disconnect-safe protocol
+
+This is a user requirement.
+
+During substantial work:
+1. fetch live `dev` before editing;
+2. read `CURRENT_STATUS.md` before reconstructing anything;
+3. live-update `docs/CURRENT_STATUS.md` throughout the work;
+4. commit small grounded milestones to `dev`;
+5. document rejected hypotheses and failed call paths;
+6. do not hold important RE only in chat;
+7. prefer fewer, larger runtime tests;
+8. keep the single-log policy;
+9. on stream/input interruption:
+   - fetch live `dev`;
+   - inspect newest commits;
+   - read status docs;
+   - identify exactly what survived;
+   - reconstruct only the missing tail;
+   - checkpoint immediately;
+   - continue from repo, not memory.
+
+## Single-log policy
+
+Routine runtime evidence is one file:
+- `spidey-decomp.log`
+
+Do not ask for the historical collection of separate compat/draw/present/texture/input/etc. logs.
+
+---
+
 # GAMEPLAY / PAUSE UI SCALING FRONTIER — READ FIRST (2026-10-01)
 
 Latest Drive session tested revision:
