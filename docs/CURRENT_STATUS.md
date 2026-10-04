@@ -1,5 +1,91 @@
 # CURRENT STATUS
 
+## HIGH-FPS IMPLEMENTATION CHECKPOINT — MYSTERIO LIVENESS FIX + 60-HZ SIMULATION POLICY (2026-10-04)
+
+**Status: implemented/committed; NOT runtime-tested yet.**
+
+Authoritative source:
+- `6cfcd74aaecc72a2e1ac37885a03dc4aad0f52ae` — `timing: make Mysterio laser liveness elapsed-time based`
+- prior hot-path logging cleanup remains:
+  - `98d52ec80b5876db8e347460be307555b905de4b`
+  - `31f80818ab5ee73cacae4b3d952205add448fc86`
+
+### Mysterio laser repair
+
+Retail RE is now sufficiently exact to patch the known phase-2 high-FPS failure without touching global pacing:
+
+- `CMysterioLaser` constructor at `0x0045B3E0` installs vtable `0x0053BB34`.
+- vtable slot 0 is expected deleting destructor `0x0045B300`.
+- vtable slot 1 is expected virtual liveness/Move routine `0x0045BAC0`.
+- `CMysterioLaser::SetPos @ 0x0045B5E0` writes byte `this+0x44 = 1` after refreshing beam geometry.
+- retail `0x0045BAC0` kills the bit if that marker is zero, then clears it every consumer update.
+
+This is a producer/consumer **one-update handshake**, so consumer cadence can invalidate a still-live beam.
+
+The new wrapper patches only vtable slot 1 and is runtime guarded:
+- install only when slot 0 is exactly `0x0045B300` and slot 1 is exactly `0x0045BAC0`;
+- otherwise leave retail untouched and log the mismatch.
+
+Object layout remains unchanged. The existing marker byte is reused:
+- `0` = stale/unrefreshed;
+- `1` = fresh marker written by retail SetPos;
+- `2..255` = encoded `gTimerRelated` timestamp modulo 254.
+
+On Move:
+- fresh `1` becomes a timestamp;
+- an already timestamped laser remains alive while elapsed canonical time is <= 3 ticks;
+- 3 ticks at the engine's 60-unit/sec clock = 50 ms, which permits the documented 20-Hz authored producer cadence;
+- if no new SetPos refresh occurs by the fourth tick, retail `CBit::Die @ 0x00408930` is invoked.
+
+No sidecar allocation, destructor hook, global delta multiplier, or scheduler change is involved.
+
+Expected startup telemetry:
+- `high_fps_compat mysterio_laser=1 ... move_found=0x0045BAC0 clock=gTimerRelated_60hz grace_ticks=3 ...`
+
+### Refined high-FPS architecture
+
+The static audit now supports a stronger policy than simply forcing a 30-Hz gameplay loop.
+
+At the retail full-release loop:
+- `PlayAway` waits until at least one canonical timer tick has elapsed before the next Logic+Display iteration;
+- therefore retail Logic normally cannot run twice with the same `gTimerRelated` value.
+
+At 60 Logic calls/sec:
+- `CBody::EveryFrame` naturally produces `field_80=1`;
+- movement/camera/boss code that multiplies or loops by `field_80` therefore advances one canonical 1/60-second tick;
+- `CSuper::UpdateFrame` advances by `field_80 * mAnimSpeed / 2`, so `field_80=1` already gives a half-sized 60-Hz animation step equivalent in real time to the nominal 30-Hz `field_80=2` step.
+
+The real incompatibilities are the systems that bypass canonical elapsed ticks:
+- `CAIProc::Wait` decrements by exactly one per Execute call;
+- several effect/bit movers increment `mAge`, decrement lifetime, integrate velocity/gravity, or advance animation exactly once per Move;
+- individual player/boss/cutscene counters also contain raw per-call `++/--`;
+- frame-to-frame producer/consumer handshakes such as Mysterio laser assume a specific relative call cadence.
+
+**Current target architecture:**
+1. keep `Vblanks/gTimerRelated` as the canonical 60-unit real-time clock;
+2. make 60-Hz Logic fully correct by converting raw per-call gameplay timers/state/lifetimes to elapsed-tick semantics where needed;
+3. preserve the validated 60-Hz camera/input path rather than dropping whole Logic to 30 Hz;
+4. once Logic is safe, prevent simulation from running above the canonical 60-Hz tick rate;
+5. decouple `Display`/presentation from Logic for 120/144/240+ Hz output;
+6. interpolate render transforms between 60-Hz simulation states where visible smoothness requires it;
+7. convert known authored 20-Hz sequences individually (Mysterio laser is the first concrete example) instead of applying a global 20/30-FPS compatibility cap.
+
+This avoids the unsafe `CSuper::UpdateFrame` zero-tick fallback (`field_80==0 -> 2`) that would occur if Logic were simply allowed to run >60 Hz.
+
+### Next RE / implementation targets
+
+Continue before asking for a general runtime test:
+- audit `Ob_AI @ 0x00460FC0` / bit-list update ordering to identify which raw Move systems execute once per Logic call;
+- classify active gameplay `++/--` counters into:
+  - intentionally event/count based;
+  - should use `field_80`;
+  - should use absolute `gTimerRelated`;
+- inspect the Venom-chase authored sequence for the known 20-FPS path/cutscene failure;
+- compare the Kellogg demo's native 30-FPS pacing mechanism if a clean executable/dump becomes available;
+- keep all fixes isolated and runtime guarded rather than globally multiplying velocities by a floating delta.
+
+Do not resume real-shadow work until this timing phase is complete enough for a dedicated runtime test.
+
 ## RUNTIME CHECKPOINT — MANUAL AIM VALIDATED; HITCH SOURCES RESOLVED; HIGH-FPS TIMING FRONTIER (2026-10-04)
 
 Tested runtime:
