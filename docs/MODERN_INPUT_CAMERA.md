@@ -812,3 +812,26 @@ Next implementation must:
 4. keep hip-fire camera-ray acquisition debugging separate from manual-reticle input.
 
 Do not restart from the old assumption that camera mode alone controls the reticle. The reticle is an independent world-space point at field_DC0.
+
+
+---
+
+## Manual aim third pass — remove retail lookaround controller (2026-10-04)
+
+Runtime on `7a6af671...` proved CheckForwards can receive full movement axes and return success while aim is held, yet the player remains visually twisted/stationary. The same run confirmed WASD still moves the old aiming cursor.
+
+This identifies `SetupLookaroundCamera` as an unwanted second controller during modern aim, not merely a camera helper.
+
+Third-pass policy:
+- mode-3 modern camera owns aim direction;
+- WASD / left stick own movement;
+- retail SetupLookaroundCamera does not run while `field_8EA` is active in modern mode 3;
+- field_8EA remains set for compatibility with enter/exit/fire state;
+- field_DC0 is supplied from the modern camera ray;
+- field_DE4 keeps reticle rendering active;
+- the legacy reticle projection path needs X/Y reflection while preserving forward Z.
+
+Hip-fire scan correction:
+- canonical SelectTargetBaddy walks the body list at `0x0056E990`;
+- the previous direct scan incorrectly walked G_MECHLIST at `0x006A9038`;
+- the modern scan now uses the retail list and reports list-node / eligible / in-cone counts.
