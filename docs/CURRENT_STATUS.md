@@ -58,6 +58,67 @@ Exact next RE:
 - distinguish whole-simulation dispatch from per-subsystem logic before adding a fixed-step gate;
 - remove/quiet synchronous timing diagnostics once the required evidence is safely documented.
 
+### Exact retail timing / loop RE completed
+
+Original-function binary dumps and `tools/names.json` now prove:
+
+- `0x00455400 = Logic`.
+  - It is the whole gameplay update dispatcher, not a small helper.
+  - It increments frame/call counters at `0x005FCCF4` and `0x0060CFA8` once per Logic call.
+  - It runs `Pad_Update`, calls `Ob_AI` repeatedly for the player and global object lists, and runs additional gameplay/camera/trigger systems.
+- `0x004555A0 = Display`.
+- `0x004559D0 = PlayAway`.
+  - At `0x00455A66` it snapshots `Vblanks`.
+  - At `0x00455A8B` it calls `Logic`.
+  - It later calls `Display`.
+  - At `0x00455B4E` it compares current `Vblanks` with the snapshot; if unchanged, `0x00455B59` calls `Pause(1)`.
+  - Therefore the retail full-release loop deliberately waits for at least one nominal 60-Hz timer tick before starting another Logic+Display iteration.
+- `0x00511130 = TimerCallback`.
+  - It derives `gTimerMsInterval = configured_ms * 60 / 1000`.
+  - It accumulates this into `gTimerVblankRelated`.
+  - It repeatedly calls `MyVSync` until integer timer time catches `Vblanks`.
+- `0x004E5CF0 = MyVSync`.
+  - increments `Vblanks @ 0x006B4CA0`;
+  - conditionally increments `gTimerRelated @ 0x006B4CA8`;
+  - thus `gTimerRelated` is a canonical real-time 60-unit/sec engine clock, not a render-frame counter.
+- `CBody::EveryFrame @ 0x00460ED0` computes object elapsed time as `gTimerRelated - field_7C`, clamps it to 6, and seeds first update with `field_80=2`.
+- `CSuper::UpdateFrame @ 0x00460DA0` advances animation using `field_80 * mAnimSpeed / 2`, but if `field_80 == 0` it forcibly substitutes `2`.
+
+Consequences:
+- blindly removing `PlayAway`'s wait and calling `Logic` faster than 60 Hz is unsafe: repeated Logic calls can observe zero elapsed timer ticks, while `CSuper::UpdateFrame` converts zero to two ticks and advances animation as if 1/30 second elapsed;
+- blindly multiplying movement/physics by a new floating-point delta is also wrong because a significant part of the engine already consumes `field_80`;
+- the port is a mixed timing model: elapsed-tick-aware physics/animation/camera code coexists with raw per-Logic-call counters and state machines.
+
+External corroboration:
+- PCGamingWiki documents that the full release is capped at 60 but was designed around 30 and breaks above it;
+- the Kellogg's demo reportedly contains a native 30-FPS cap absent from the full release;
+- specific authored sequences require 20 FPS, including Chase Venom and Mysterio phase 2.
+
+### Mysterio laser high-FPS RE
+
+The known Mysterio >30-FPS failure has a concrete frame-coupled mechanism in retail machine code:
+
+- `CMysterioLaser::SetPos` is the large routine beginning at `0x0045B5E0`.
+- Near its end it sets byte `this+0x44 = 1`, marking the laser as refreshed/alive for the current producer update.
+- The tiny virtual routine at `0x0045BAC0`:
+  - tests `this+0x44`;
+  - if zero, calls `CBit::Die @ 0x00408930`;
+  - then always clears `this+0x44 = 0`.
+- This is a one-update producer/consumer liveness handshake, not elapsed-time logic.
+- If laser positioning and bit movement run at different effective cadences, an extra consumer update can kill/recreate or otherwise destabilize the beam even though essentially no real time elapsed.
+- This is exactly the class of bug that requires cadence-independent state/timers, not a global velocity multiplier.
+
+High-FPS modernization policy now:
+1. preserve `Vblanks/gTimerRelated` as the canonical 60-unit real-time clock;
+2. preserve the now-good high-rate camera/input path;
+3. convert raw per-call lifetime/wait/state counters to elapsed-tick or fixed-point time semantics subsystem by subsystem;
+4. repair frame-to-frame handshakes such as Mysterio laser liveness using real elapsed ticks / grace windows;
+5. once gameplay state no longer assumes one Logic call == one authored frame, decouple `Display` from `Logic` and allow refresh-rate/uncapped presentation;
+6. add transform interpolation for render rates above simulation cadence where needed;
+7. keep temporary compatibility handling for authored 20-FPS sequences until those paths are individually converted.
+
+Do not patch `Pause(1)` out yet. Render uncapping without a corresponding Logic scheduler/interpolator would either speed up frame-coupled systems or only repeat identical simulation states.
+
 ## CHAT-LIMIT HANDOFF CHECKPOINT — RETICLE NO-DRAG + HITCH PHASE TEST READY (2026-10-04)
 
 The chat reached its maximum length immediately after the reticle-lag/hitch investigation.
