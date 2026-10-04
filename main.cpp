@@ -13401,6 +13401,13 @@ static unsigned long gSpideyTimingLastDrawProbeUs = 0;
 static unsigned long gSpideyTimingLastPresentShadowUs = 0;
 static unsigned long gSpideyTimingLastOtherPresentUs = 0;
 
+// Accumulate gameplay-logic work that occurs between presenter entries so a
+// slow inter-present interval can distinguish retail logic from diagnostic
+// logging and from the rest of the game/update/render path.
+static unsigned long gSpideyTimingOutsideLogicRetailUs = 0;
+static unsigned long gSpideyTimingOutsideLogicTelemetryUs = 0;
+static unsigned long gSpideyTimingOutsideLogicCalls = 0;
+
 static unsigned long SpideyTimingElapsedUs(
 		const LARGE_INTEGER* start,
 		const LARGE_INTEGER* end)
@@ -13443,6 +13450,10 @@ struct SpideyTimingSlowEvent
 	unsigned long drawProbeUs;
 	unsigned long presentShadowUs;
 	unsigned long otherPresentUs;
+	unsigned long logicRetailUs;
+	unsigned long logicTelemetryUs;
+	unsigned long logicCalls;
+	unsigned long outsideNonLogicUs;
 };
 
 static SpideyTimingSlowEvent
@@ -13524,7 +13535,7 @@ static void SpideyLogTimingWindow(
 					gSpideyTimingSlowEvents[i];
 				fprintf(
 					f,
-					" frame=%lu interval_us=%lu web_calls=%lu check_web_shot_calls=%lu fire_web_calls=%lu last_fire_frame=%lu present_work_us=%lu outside_present_us=%lu record_timing_us=%lu transient_us=%lu shadow_end_us=%lu draw_probe_us=%lu present_shadow_us=%lu other_present_us=%lu",
+					" frame=%lu interval_us=%lu web_calls=%lu check_web_shot_calls=%lu fire_web_calls=%lu last_fire_frame=%lu present_work_us=%lu outside_present_us=%lu record_timing_us=%lu transient_us=%lu shadow_end_us=%lu draw_probe_us=%lu present_shadow_us=%lu other_present_us=%lu logic_retail_us=%lu logic_telemetry_us=%lu logic_calls=%lu outside_nonlogic_us=%lu",
 					event.frame,
 					event.intervalUs,
 					event.webTargetCalls,
@@ -13538,7 +13549,11 @@ static void SpideyLogTimingWindow(
 					event.shadowEndUs,
 					event.drawProbeUs,
 					event.presentShadowUs,
-					event.otherPresentUs);
+					event.otherPresentUs,
+					event.logicRetailUs,
+					event.logicTelemetryUs,
+					event.logicCalls,
+					event.outsideNonLogicUs);
 			}
 
 			fputc(
@@ -13571,7 +13586,19 @@ static void __cdecl SpideyCompatLogicTiming()
 	SpideyRetailLogicFn retail =
 		(SpideyRetailLogicFn)0x00455400;
 
+	LARGE_INTEGER retailStart;
+	LARGE_INTEGER retailEnd;
+	QueryPerformanceCounter(
+		&retailStart);
 	retail();
+	QueryPerformanceCounter(
+		&retailEnd);
+
+	gSpideyTimingOutsideLogicRetailUs +=
+		SpideyTimingElapsedUs(
+			&retailStart,
+			&retailEnd);
+	++gSpideyTimingOutsideLogicCalls;
 
 	const unsigned long now =
 		(unsigned long)GetTickCount();
@@ -13592,10 +13619,21 @@ static void __cdecl SpideyCompatLogicTiming()
 
 	if (elapsed >= 1000)
 	{
+		LARGE_INTEGER telemetryStart;
+		LARGE_INTEGER telemetryEnd;
+		QueryPerformanceCounter(
+			&telemetryStart);
 		SpideyLogTimingWindow(
 			"logic",
 			elapsed,
 			gSpideyTimingLogicTicks);
+		QueryPerformanceCounter(
+			&telemetryEnd);
+		gSpideyTimingOutsideLogicTelemetryUs +=
+			SpideyTimingElapsedUs(
+				&telemetryStart,
+				&telemetryEnd);
+
 		gSpideyTimingLogicWindowStart =
 			now;
 		gSpideyTimingLogicTicks =
@@ -13605,6 +13643,21 @@ static void __cdecl SpideyCompatLogicTiming()
 
 static void SpideyRecordPresentTiming()
 {
+	// These accumulators cover exactly the work since the previous presenter
+	// entry. Snapshot/reset them before doing any current presenter work.
+	const unsigned long outsideLogicRetailUs =
+		gSpideyTimingOutsideLogicRetailUs;
+	const unsigned long outsideLogicTelemetryUs =
+		gSpideyTimingOutsideLogicTelemetryUs;
+	const unsigned long outsideLogicCalls =
+		gSpideyTimingOutsideLogicCalls;
+	gSpideyTimingOutsideLogicRetailUs =
+		0;
+	gSpideyTimingOutsideLogicTelemetryUs =
+		0;
+	gSpideyTimingOutsideLogicCalls =
+		0;
+
 	SpideyModernAimValidateLocomotionMaskAtFrameEnd();
 
 	SpideyTryRebindBinkAudio(
@@ -13682,6 +13735,21 @@ static void SpideyRecordPresentTiming()
 							gSpideyTimingLastPresentShadowUs;
 						event.otherPresentUs =
 							gSpideyTimingLastOtherPresentUs;
+						event.logicRetailUs =
+							outsideLogicRetailUs;
+						event.logicTelemetryUs =
+							outsideLogicTelemetryUs;
+						event.logicCalls =
+							outsideLogicCalls;
+						const unsigned long logicAccountedUs =
+							outsideLogicRetailUs +
+							outsideLogicTelemetryUs;
+						event.outsideNonLogicUs =
+							event.outsidePresentUs >
+								logicAccountedUs ?
+								event.outsidePresentUs -
+									logicAccountedUs :
+								0;
 					}
 				}
 				if (deltaUs > 30000)
