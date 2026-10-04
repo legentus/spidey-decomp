@@ -4583,6 +4583,46 @@ static int __fastcall SpideyModernAimCheckForwards(
 	return result;
 }
 
+// Manual aim TPS framing. World +Y points downward in this game, so a
+// negative Y offset places the camera/reticle focus above Spider-Man.
+// 96 world units is intentionally modest: enough to put the reticle over the
+// character instead of through his body without introducing a shoulder bias.
+static const int kSpideyManualAimFocusHeightUnits = 96;
+static const int kSpideyManualAimFocusHeight =
+	kSpideyManualAimFocusHeightUnits *
+	4096;
+
+static CVector SpideyModernAimFramedFocus(
+		CPlayer* player,
+		CCamera* camera)
+{
+	CVector focus;
+
+	if (player)
+	{
+		focus =
+			player->mPos;
+		focus.vy -=
+			kSpideyManualAimFocusHeight;
+	}
+	else if (camera)
+	{
+		focus =
+			camera->field_144;
+	}
+	else
+	{
+		focus.vx =
+			0;
+		focus.vy =
+			0;
+		focus.vz =
+			0;
+	}
+
+	return focus;
+}
+
 static int SpideyModernAimApplyCameraPoint(
 		CPlayer* player,
 		CCamera* camera)
@@ -4597,18 +4637,21 @@ static int SpideyModernAimApplyCameraPoint(
 		return 0;
 	}
 
-	// field_144 is the live retail mode-3 camera focus point. In unified TPS
-	// manual aim, mouse/right-stick now rotates the actual mode-3 orbit first.
-	// Extending camera->focus therefore produces the same camera-relative ray
-	// used by the view, instead of a second independently moving cursor camera.
+	// Use the same framed target as the final camera orientation: a point
+	// slightly above Spider-Man. This makes the projected reticle live above
+	// the character while mouse/right-stick still rotate the real orbit camera.
+	const CVector framedFocus =
+		SpideyModernAimFramedFocus(
+			player,
+			camera);
 	const int dx =
-		camera->field_144.vx -
+		framedFocus.vx -
 		camera->mPos.vx;
 	const int dy =
-		camera->field_144.vy -
+		framedFocus.vy -
 		camera->mPos.vy;
 	const int dz =
-		camera->field_144.vz -
+		framedFocus.vz -
 		camera->mPos.vz;
 
 	if (!dx &&
@@ -4729,7 +4772,7 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
+				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d framed_focus=%d,%d,%d framing_up_units=%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimLookaroundCalls,
 				applied,
 				(unsigned long)camera,
@@ -4745,6 +4788,10 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 				camera->field_144.vx,
 				camera->field_144.vy,
 				camera->field_144.vz,
+				framedFocus.vx,
+				framedFocus.vy,
+				framedFocus.vz,
+				kSpideyManualAimFocusHeightUnits,
 				player->mPos.vx,
 				player->mPos.vy,
 				player->mPos.vz,
@@ -4847,7 +4894,7 @@ static void SpideyInstallModernManualAimCompat()
 	{
 		fprintf(
 			f,
-				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 enter_reentry_calls=%d enter_target=0x004C3580 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=mode3_camera_center_ray locomotion_mask=field_8EA_while_aim_plus_move effective_aim_sidecar=1 frame_end_release_guard=1\n",
+				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 enter_reentry_calls=%d enter_target=0x004C3580 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=framed_tps_camera_ray locomotion_mask=field_8EA_while_aim_plus_move effective_aim_sidecar=1 frame_end_release_guard=1\n",
 				cameraInstalled,
 				movementAimGateInstalled,
 				movementControlInstalled,
@@ -10004,6 +10051,96 @@ static void __fastcall SpideyModernAimLoadIntoMikeCamera(
 	}
 }
 
+typedef void (__fastcall *SpideyRetailCameraPostprocessFn)(
+		CCamera*,
+		void*);
+
+static unsigned long gSpideyManualAimFramingCalls = 0;
+
+static void __fastcall SpideyModernAimCameraPostprocess(
+		CCamera* camera,
+		void*)
+{
+	SpideyRetailCameraPostprocessFn retail =
+		(SpideyRetailCameraPostprocessFn)0x00416B10;
+
+	if (!camera)
+	{
+		retail(
+			camera,
+			0);
+		return;
+	}
+
+	CPlayer* player =
+		0;
+	__try
+	{
+		player =
+			*(CPlayer**)0x006A9038;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		player =
+			0;
+	}
+
+	const int manualAim =
+		player &&
+		camera->mCameraMode ==
+			CAMERAMODE_DEMO &&
+		SpideyModernAimIsEffectivelyActive(
+			player);
+
+	if (manualAim)
+	{
+		// CM_Normal has already chosen the actual orbit position and completed
+		// its mode-specific work. Move only the look target upward before the
+		// shared retail post-process computes collision/orientation. Leaving
+		// this framed focus in field_144 also keeps the reticle/web ray in the
+		// same camera space for the rest of the frame.
+		camera->field_144 =
+			SpideyModernAimFramedFocus(
+				player,
+				camera);
+	}
+
+	retail(
+		camera,
+		0);
+
+	if (manualAim)
+	{
+		++gSpideyManualAimFramingCalls;
+
+		if (gSpideyManualAimFramingCalls <= 6 ||
+			(gSpideyManualAimFramingCalls % 60) == 0)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"CAMERA");
+			if (f)
+			{
+				fprintf(
+					f,
+					"modern_manual_camera event=framing call=%lu camera=0x%08lX focus=%d,%d,%d body=%d,%d,%d framing_up_units=%d heading=%d transform_heading=%d\n",
+					gSpideyManualAimFramingCalls,
+					(unsigned long)camera,
+					camera->field_144.vx,
+					camera->field_144.vy,
+					camera->field_144.vz,
+					player->mPos.vx,
+					player->mPos.vy,
+					player->mPos.vz,
+					kSpideyManualAimFocusHeightUnits,
+					(int)camera->field_236,
+					(int)camera->field_23A);
+				fclose(f);
+			}
+		}
+	}
+}
+
 static void SpideyInstallModernCameraCompat()
 {
 	const int installed =
@@ -10012,6 +10149,12 @@ static void SpideyInstallModernCameraCompat()
 			0x00418E00,
 			(void*)&SpideyModernMode3Camera,
 			"modern_camera_mode3");
+	const int manualFramingInstalled =
+		SpideyPatchDirectCall(
+			0x00418458,
+			0x00416B10,
+			(void*)&SpideyModernAimCameraPostprocess,
+			"modern_manual_camera_framing");
 	// Unified TPS manual aim no longer needs a second final-orientation shim.
 	// Leave the retail LoadIntoMikeCamera call untouched so the same mode-3
 	// orbit camera that moved above is exactly what rendering receives.
@@ -10025,7 +10168,7 @@ static void SpideyInstallModernCameraCompat()
 	{
 		fprintf(
 			f,
-			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=0 manual_tps_unified=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=retail_mode3_camera_ray manual_publish=%d manual_publish_call=retail_untouched_0x0041865F retail_publish=0x00416A20\n",
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=0 manual_tps_unified=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=framed_above_body manual_framing=%d manual_framing_call=0x00418458 framing_up_units=%d manual_publish=%d manual_publish_call=retail_untouched_0x0041865F retail_publish=0x00416A20\n",
 			installed,
 			gSpideyCameraSensitivityPercent,
 			kSpideyCameraSensitivityMinPercent,
@@ -10034,6 +10177,8 @@ static void SpideyInstallModernCameraCompat()
 			kSpideyModernCameraMaxYDistance,
 			kSpideyManualAimMaxYawOffset,
 			kSpideyManualAimMaxPitchOffset,
+			manualFramingInstalled,
+			kSpideyManualAimFocusHeightUnits,
 			manualPublishInstalled);
 		fclose(f);
 	}
