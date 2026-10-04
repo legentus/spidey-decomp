@@ -2955,8 +2955,6 @@ static int SpideyPauseEnterOptions(
 
 	const int parentY =
 		menu->mY;
-	const int parentLineSep =
-		menu->mLineSep;
 
 	// Reuse the same live CMenu object. The expanding-box pointer at +4 is
 	// deliberately left untouched; only menu data from +8 onward changes.
