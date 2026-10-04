@@ -777,3 +777,18 @@ The earlier wrapper replaced the retail scoring rotation but not its origin. Can
 
 The refined path uses the render camera position and rotation for centeredness selection, restores the real player transform immediately, then validates the shot from Spider-Man with the untouched retail LOS function. The previous orientation-only selector remains a fallback.
 
+
+
+---
+
+## Manual aim input decoupling — second pass (2026-10-04)
+
+Runtime proved that keeping camera mode 3 is necessary but not sufficient. The retail reticle is a world-space point (`CPlayer::field_DC0`) projected by `RenderLookaroundReticle`; it is not inherently tied to camera heading.
+
+The second pass therefore separates the channels explicitly:
+- ordinary keyboard/analogue E2D/E2E remains movement;
+- the held lookaround control byte is hidden only during `CheckForwards` evaluation so locomotion can run;
+- retail SetupLookaroundCamera remains active for game state compatibility;
+- after it runs, field_DC0 is overwritten by the active mode-3 camera center ray, so mouse/right-stick camera control is also the visible manual-aim direction.
+
+Hip-fire selection likewise no longer depends primarily on transplanting camera transforms into retail player-space scoring. A mode-3 camera-ray scan applies targettable/zombie/range/LOS eligibility and ranks by camera centeredness, with retail selection retained as a compatibility fallback.
