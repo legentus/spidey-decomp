@@ -4172,6 +4172,252 @@ static int SpideyPatchBytes(
 	return 1;
 }
 
+static unsigned long gSpideyModernAimMovementCalls = 0;
+static unsigned long gSpideyModernAimLookaroundCalls = 0;
+
+typedef int (__fastcall *SpideyRetailCheckForwardsFn)(
+		CPlayer*,
+		void*,
+		int);
+typedef void (__fastcall *SpideyRetailSetupLookaroundCameraFn)(
+		CPlayer*,
+		void*);
+
+static int __fastcall SpideyModernAimCheckForwards(
+		CPlayer* player,
+		void*,
+		int allowTurn)
+{
+	SpideyRetailCheckForwardsFn retail =
+		(SpideyRetailCheckForwardsFn)0x004BF8A0;
+
+	if (!player ||
+		!player->field_8EA)
+	{
+		return retail(
+			player,
+			0,
+			allowTurn);
+	}
+
+	unsigned char* input =
+		(unsigned char*)player->field_E0C;
+	unsigned char savedAimControl =
+		0;
+	int patchedAimControl =
+		0;
+
+	if (input)
+	{
+		__try
+		{
+			// The canonical CheckForwards has an earlier gate than the
+			// field_8EA test:
+			//   if (input[0x40] && (field_E1C & 1)) return 0;
+			//
+			// input[0x40] is held for the manual-aim control in this path.
+			// Hide it only while forward locomotion is evaluated, then restore
+			// it immediately so lookaround remains held for the rest of the
+			// frame. WASD/analogue axes at E2D/E2E are left untouched.
+			savedAimControl =
+				input[0x40];
+			input[0x40] =
+				0;
+			patchedAimControl =
+				1;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			patchedAimControl =
+				0;
+		}
+	}
+
+	int result =
+		0;
+
+	__try
+	{
+		result =
+			retail(
+				player,
+				0,
+				allowTurn);
+	}
+	__finally
+	{
+		if (patchedAimControl)
+		{
+			input[0x40] =
+				savedAimControl;
+		}
+	}
+
+	++gSpideyModernAimMovementCalls;
+	if (gSpideyModernAimMovementCalls <= 6 ||
+		result)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d\n",
+				gSpideyModernAimMovementCalls,
+				(unsigned int)savedAimControl,
+				(int)player->field_E2D,
+				(int)player->field_E2E,
+				(unsigned long)player->field_E1C,
+				result,
+				allowTurn);
+			fclose(f);
+		}
+	}
+
+	return result;
+}
+
+static int SpideyModernAimApplyCameraPoint(
+		CPlayer* player,
+		CCamera* camera)
+{
+	if (!player ||
+		!camera ||
+		!player->field_8EA ||
+		camera->mCameraMode !=
+			CAMERAMODE_DEMO)
+	{
+		return 0;
+	}
+
+	// field_144 is the live mode-3 camera focus point. Extending the
+	// camera->focus vector gives a stable center-screen world point which
+	// follows the same mouse/right-stick orbit that the player actually sees.
+	const int dx =
+		camera->field_144.vx -
+		camera->mPos.vx;
+	const int dy =
+		camera->field_144.vy -
+		camera->mPos.vy;
+	const int dz =
+		camera->field_144.vz -
+		camera->mPos.vz;
+
+	if (!dx &&
+		!dy &&
+		!dz)
+	{
+		return 0;
+	}
+
+	const int rayScale =
+		8;
+
+	player->field_DC0.vx =
+		camera->mPos.vx +
+		dx * rayScale;
+	player->field_DC0.vy =
+		camera->mPos.vy +
+		dy * rayScale;
+	player->field_DC0.vz =
+		camera->mPos.vz +
+		dz * rayScale;
+	player->field_DE4 =
+		1;
+
+	return 1;
+}
+
+static void __fastcall SpideyModernAimSetupLookaroundCamera(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailSetupLookaroundCameraFn retail =
+		(SpideyRetailSetupLookaroundCameraFn)0x004C38A0;
+
+	if (!player)
+	{
+		retail(
+			player,
+			0);
+		return;
+	}
+
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+	const int modernAim =
+		player->field_8EA &&
+		camera &&
+		camera->mCameraMode ==
+			CAMERAMODE_DEMO;
+
+	// Seed the frame with the modern camera ray. More importantly, reapply it
+	// after retail SetupLookaroundCamera has consumed the legacy WASD-driven
+	// lookaround axes. Fire/attack state processing on the following frame
+	// therefore sees the same world aim point that RenderLookaroundReticle
+	// projects for the player.
+	if (modernAim)
+	{
+		SpideyModernAimApplyCameraPoint(
+			player,
+			camera);
+	}
+
+	retail(
+		player,
+		0);
+
+	int applied =
+		0;
+	if (modernAim &&
+		player->field_8EA)
+	{
+		applied =
+			SpideyModernAimApplyCameraPoint(
+				player,
+				camera);
+	}
+
+	if (modernAim)
+	{
+		++gSpideyModernAimLookaroundCalls;
+		if (gSpideyModernAimLookaroundCalls <= 6 ||
+			(gSpideyModernAimLookaroundCalls %
+			 120) == 0)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"CAMERA");
+			if (f)
+			{
+				fprintf(
+					f,
+					"modern_manual_aim event=reticle call=%lu applied=%d camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d\n",
+					gSpideyModernAimLookaroundCalls,
+					applied,
+					(unsigned long)camera,
+					camera ?
+						(int)camera->mCameraMode :
+						-1,
+					(int)player->field_E2D,
+					(int)player->field_E2E,
+					player->field_DC0.vx,
+					player->field_DC0.vy,
+					player->field_DC0.vz,
+					camera ? camera->mPos.vx : 0,
+					camera ? camera->mPos.vy : 0,
+					camera ? camera->mPos.vz : 0,
+					camera ? camera->field_144.vx : 0,
+					camera ? camera->field_144.vy : 0,
+					camera ? camera->field_144.vz : 0);
+				fclose(f);
+			}
+		}
+	}
+}
+
 static void SpideyInstallModernManualAimCompat()
 {
 	static const unsigned char enterExpected[2] =
@@ -4188,9 +4434,6 @@ static void SpideyInstallModernManualAimCompat()
 	// CPlayer::CheckForwards:
 	//   cmp byte ptr [esi+0x8EA], 0
 	//   jne 0x004BFA0A
-	//
-	// The JNE is the narrow locomotion lock applied solely because manual
-	// lookaround/aim is active. Keep all other aim-state checks untouched.
 	static const unsigned char forwardsExpected[6] =
 	{
 		0x0F,
@@ -4217,13 +4460,25 @@ static void SpideyInstallModernManualAimCompat()
 			enterReplacement,
 			sizeof(enterExpected),
 			"modern_manual_aim_camera_mode");
-	const int movementInstalled =
+	const int movementAimGateInstalled =
 		SpideyPatchBytes(
 			0x004BF8C5,
 			forwardsExpected,
 			forwardsReplacement,
 			sizeof(forwardsExpected),
 			"modern_manual_aim_check_forwards");
+	const int movementControlInstalled =
+		SpideyPatchDirectCall(
+			0x004B231A,
+			0x004BF8A0,
+			(void*)&SpideyModernAimCheckForwards,
+			"modern_manual_aim_movement_control");
+	const int reticleInstalled =
+		SpideyPatchDirectCall(
+			0x004B8673,
+			0x004C38A0,
+			(void*)&SpideyModernAimSetupLookaroundCamera,
+			"modern_manual_aim_reticle");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -4232,13 +4487,14 @@ static void SpideyInstallModernManualAimCompat()
 	{
 		fprintf(
 			f,
-				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement=%d check_forwards_jne=0x004BF8C5 reticle_state=retail_field_8EA camera_input=mouse_and_input11_right_stick movement_scope=check_forwards_only\n",
+				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=mode3_camera_center_ray\n",
 				cameraInstalled,
-				movementInstalled);
+				movementAimGateInstalled,
+				movementControlInstalled,
+				reticleInstalled);
 		fclose(f);
 	}
 }
-
 
 static char gSpideyAudioOutputMenuLabel[160];
 
