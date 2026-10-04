@@ -428,9 +428,9 @@ void CPlayer::DoCrawlingPhysics(void)
 			sideInfo.StartCoords.vx = hookPos.vx;
 			sideInfo.StartCoords.vy = hookPos.vy;
 			sideInfo.StartCoords.vz = hookPos.vz;
-			sideInfo.EndCoords.vx = (hookPos + this->field_C78 * 16).vx;
-			sideInfo.EndCoords.vy = (hookPos + this->field_C78 * 16).vy;
-			sideInfo.EndCoords.vz = (hookPos + this->field_C78 * 16).vz;
+			sideInfo.EndCoords.vx = hookPos.vx + this->field_C78 * 16;
+			sideInfo.EndCoords.vy = hookPos.vy + this->field_C7C * 16;
+			sideInfo.EndCoords.vz = hookPos.vz + this->field_C80 * 16;
 
 			M3dColij_InitLineInfo(&sideInfo);
 			M3dZone_LineToItem(&sideInfo, 1);
@@ -446,9 +446,9 @@ void CPlayer::DoCrawlingPhysics(void)
 			}
 			else
 			{
-				sideInfo.EndCoords.vx = (hookPos - this->field_C78 * 16).vx;
-				sideInfo.EndCoords.vy = (hookPos - this->field_C78 * 16).vy;
-				sideInfo.EndCoords.vz = (hookPos - this->field_C78 * 16).vz;
+				sideInfo.EndCoords.vx = hookPos.vx - this->field_C78 * 16;
+				sideInfo.EndCoords.vy = hookPos.vy - this->field_C7C * 16;
+				sideInfo.EndCoords.vz = hookPos.vz - this->field_C80 * 16;
 
 				M3dColij_InitLineInfo(&sideInfo);
 				M3dZone_LineToItem(&sideInfo, 1);
