@@ -9086,3 +9086,38 @@ Interpretation after that run:
 - large freeze gone + cadence telemetry clean but residual hitch visible => profile renderer/producer CPU overhead next;
 - web target wrong => use `camera_web_target` evidence before changing matrix axes/signs;
 - no source RE from the completed camera/targeting batch should be redone.
+
+
+## Batch-file cleanup (2026-10-04)
+
+The repository BAT surface was reduced to the workflows that still serve a current purpose.
+
+Removed as obsolete/superseded:
+- BUILD_AND_INSTALL.bat
+- BUILD_DEV.bat
+- INSTALL_DEV_BUILD.bat
+- SETUP_FIRST_TIME.bat
+- SPIDEY_DEV_MENU.bat
+- UPDATE_AND_TEST_LATEST_BUILD.bat
+- UPDATE_PROJECT.bat
+- scripts/update_project_worker.bat
+
+Remaining BATs:
+- FAST_UPDATE_AND_TEST_LATEST_BUILD.bat — authoritative update/build/install/test launcher
+- TEST_LATEST_BUILD.bat — non-fast full test/recovery launcher
+- UPDATE_SPIDEY_PROJECT.bat — standalone updater/recovery entry point
+- GET_SPIDEY_PROJECT.bat — first-machine bootstrap launcher
+- RUN_GAME.bat — launch the currently installed build with no update/download/rebuild
+- RESTORE_STOCK_GAME.bat — restore preserved retail Bink DLL
+- build.bat — low-level matching proxy build used by the PowerShell test workflow
+- clean.bat — low-level matching build cleanup helper
+
+RUN_GAME.bat was refreshed to be self-contained:
+- it never downloads, updates, rebuilds, or replaces DLLs;
+- it uses spidey_local_config.bat when present;
+- otherwise it tries the normal Spider-Man install path and prompts once if needed;
+- it saves the resolved game path for later launches.
+
+Post-cleanup audit:
+- exactly 8 BAT files remain;
+- no remaining BAT references any deleted BAT.
