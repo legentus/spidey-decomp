@@ -18394,7 +18394,10 @@ void game_patches(void)
 	patch_CItem();
 	patch_CBody();
 	patch_ai();
-	patch_physics();
+	// Keep the reconstructed player-physics source available for RE, but do
+	// not install it globally yet. Retail DoPhysics/crawling/swinging owns the
+	// live runtime until the native-60 corrections are reduced to narrow,
+	// retail-preserving hooks.
 
 	patch_spool();
 	patch_trig();
