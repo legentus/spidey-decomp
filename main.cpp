@@ -4225,6 +4225,147 @@ static int SpideyPatchBytes(
 	return 1;
 }
 
+// High-FPS compatibility: retail Mysterio laser liveness is a one-update
+// handshake. CMysterioLaser::SetPos writes byte +0x44 = 1, while virtual Move
+// at 0x0045BAC0 kills the bit if that byte was not refreshed since the
+// immediately previous Move and then clears it. That makes the beam depend on
+// producer/consumer call cadence instead of elapsed time.
+//
+// Reuse the same byte without changing the retail object layout:
+//   0   = never/refreshed too long ago
+//   1   = fresh marker written by retail SetPos
+//   2..255 = encoded gTimerRelated tick modulo 254
+// A fresh marker is converted to a timestamp on the next Move. The beam may
+// then survive for three canonical 60-Hz ticks (50 ms), matching the minimum
+// 20-Hz authored cadence documented for the problematic Mysterio sequence.
+// If SetPos stops refreshing it, the fourth elapsed tick kills it normally.
+static const unsigned long kSpideyMysterioLaserTickModulo = 254;
+static const unsigned long kSpideyMysterioLaserGraceTicks = 3;
+
+typedef void (__fastcall *SpideyRetailCBitDieFn)(
+		void*,
+		void*);
+
+static void __fastcall SpideyMysterioLaserMoveHighFps(
+		void* laser,
+		void*)
+{
+	if (!laser)
+		return;
+
+	unsigned char* refresh =
+		(unsigned char*)laser +
+			0x44;
+	const unsigned long now =
+		(unsigned long)*(volatile long*)0x006B4CA8;
+
+	if (*refresh == 1)
+	{
+		*refresh =
+			(unsigned char)(
+				(now %
+					kSpideyMysterioLaserTickModulo) +
+				2);
+		return;
+	}
+
+	if (*refresh >= 2)
+	{
+		const unsigned long stored =
+			(unsigned long)(*refresh - 2);
+		const unsigned long current =
+			now %
+				kSpideyMysterioLaserTickModulo;
+		const unsigned long elapsed =
+			(current +
+				kSpideyMysterioLaserTickModulo -
+				stored) %
+			kSpideyMysterioLaserTickModulo;
+
+		if (elapsed <=
+			kSpideyMysterioLaserGraceTicks)
+		{
+			return;
+		}
+	}
+
+	*refresh =
+		0;
+
+	SpideyRetailCBitDieFn die =
+		(SpideyRetailCBitDieFn)0x00408930;
+	die(
+		laser,
+		0);
+}
+
+static void SpideyInstallHighFpsTimingCompat()
+{
+	void** mysterioLaserVtable =
+		(void**)0x0053BB34;
+	const unsigned long expectedDestructor =
+		0x0045B300;
+	const unsigned long expectedMove =
+		0x0045BAC0;
+
+	int mysterioLaserInstalled =
+		0;
+	const unsigned long foundDestructor =
+		(unsigned long)mysterioLaserVtable[0];
+	const unsigned long foundMove =
+		(unsigned long)mysterioLaserVtable[1];
+
+	if (foundDestructor ==
+			expectedDestructor &&
+		foundMove ==
+			expectedMove)
+	{
+		DWORD oldProtect =
+			0;
+		if (VirtualProtect(
+				&mysterioLaserVtable[1],
+				sizeof(void*),
+				PAGE_EXECUTE_READWRITE,
+				&oldProtect))
+		{
+			mysterioLaserVtable[1] =
+				(void*)&SpideyMysterioLaserMoveHighFps;
+
+			DWORD ignoredProtect =
+				0;
+			VirtualProtect(
+				&mysterioLaserVtable[1],
+				sizeof(void*),
+				oldProtect,
+				&ignoredProtect);
+			FlushInstructionCache(
+				GetCurrentProcess(),
+				&mysterioLaserVtable[1],
+				sizeof(void*));
+
+			mysterioLaserInstalled =
+				1;
+		}
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"high_fps_compat mysterio_laser=%d vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness\n",
+			mysterioLaserInstalled,
+			expectedDestructor,
+			foundDestructor,
+			expectedMove,
+			foundMove,
+			kSpideyMysterioLaserGraceTicks);
+		fclose(f);
+	}
+}
+
 static unsigned long gSpideyModernAimMovementCalls = 0;
 static unsigned long gSpideyModernAimLookaroundCalls = 0;
 static int gSpideyModernAimLastAxisX = 0x7FFFFFFF;
@@ -18131,6 +18272,7 @@ void game_patches(void)
 	SpideyInstallDisplayOptionsCompat();
 	SpideyInstallHorPlusCullCompat();
 	SpideyInstall2DPolyProvenanceCompat();
+	SpideyInstallHighFpsTimingCompat();
 	SpideyInstallTimingTelemetry();
 	SpideyInstallPresentProbe();
 	SpideyInstallMovieFrameCompat();
