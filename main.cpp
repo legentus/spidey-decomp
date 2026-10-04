@@ -6056,8 +6056,8 @@ static void __cdecl SpideyCompatCompassQPoly2D(
 		{
 			fprintf(
 				log,
-				"gameplay_ui_alignment source=compass_qpoly seq=%lu policy=bottom_right_compact logical=%lux%lu density=%.6f,%.6f before=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f after=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
-				gSpideyCompassQPolyProbeSamples % 3,
+				"gameplay_ui_alignment source=compass_arrow_qpoly sample=%lu call=0x00463D19 policy=bottom_right_compact logical=%lux%lu density=%.6f,%.6f before=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f after=%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+				gSpideyCompassQPolyProbeSamples,
 				gSpideyModernLogicalWidth,
 				gSpideyModernLogicalHeight,
 				(double)densityX,
@@ -6802,28 +6802,12 @@ static void SpideyInstallGameplayUiScaleCompat()
 			(void*)&SpideyCompatCartridgeCountText,
 			"cartridge_count_text");
 
-	const unsigned long compassQPolySites[] =
-	{
-		0x00463D19,
-		0x00464035,
-		0x00464257
-	};
-	int compassQPolyCalls =
-		0;
-	int compassQPolyIndex;
-	for (compassQPolyIndex = 0;
-		 compassQPolyIndex <
-			(int)(sizeof(compassQPolySites) /
-			 sizeof(compassQPolySites[0]));
-		 ++compassQPolyIndex)
-	{
-		compassQPolyCalls +=
-			SpideyPatchDirectCall(
-				compassQPolySites[compassQPolyIndex],
-				0x00507910,
-				(void*)&SpideyCompatCompassQPoly2D,
-				"compass_qpoly");
-	}
+	const int compassArrowQPolyInstalled =
+		SpideyPatchDirectCall(
+			0x00463D19,
+			0x00507910,
+			(void*)&SpideyCompatCompassQPoly2D,
+			"compass_arrow_qpoly");
 
 	const int healthQPolyOne =
 		SpideyPatchDirectCall(
@@ -6926,11 +6910,11 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d cartridge_text=%d compass_qpoly=%d health_qpoly=%d,%d,%d health_flat=%d,%d panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
 			frameCalls,
 			textureCalls,
 			cartridgeTextInstalled,
-			compassQPolyCalls,
+			compassArrowQPolyInstalled,
 			healthQPolyOne,
 			healthQPolyTwo,
 			healthQPolyThree,
