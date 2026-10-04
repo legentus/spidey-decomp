@@ -161,6 +161,76 @@ static void SpideyPhysicsIntegrateVelocity60(
 	velocity->KillSmall();
 }
 
+// Retail DoPhysics and DoCrawlingPhysics both perform:
+//
+//     mVel += mAcc;
+//     mVel %= mFric;
+//     mVel.KillSmall();
+//
+// at their first integration seam. Keep the retail functions themselves in
+// charge of collision, grounding, scripted placement and platform handling,
+// and replace only the friction call. By the time this wrapper runs the
+// retail += has already happened, so subtract mAcc to recover the velocity at
+// the start of the tick, then apply the exact native-60 half-step derived
+// above. Retail KillSmall runs immediately after we return.
+#ifdef _WIN32
+typedef CVector* (__fastcall *SpideyRetailVectorFrictionFn)(
+		CVector* velocity,
+		void*,
+		const CFriction& friction);
+
+CVector* __fastcall SpideyPhysicsFriction60(
+		CVector* velocity,
+		void*,
+		const CFriction& friction)
+{
+	if (!velocity)
+		return 0;
+
+	CPlayer* player =
+		reinterpret_cast<CPlayer*>(
+			reinterpret_cast<char*>(velocity) -
+			0x60);
+
+	if (player->field_80 == 1 &&
+		velocity == &player->mVel &&
+		&friction == &player->mFric)
+	{
+		const i32 oldVx =
+			(i32)((u32)velocity->vx - (u32)player->mAcc.vx);
+		const i32 oldVy =
+			(i32)((u32)velocity->vy - (u32)player->mAcc.vy);
+		const i32 oldVz =
+			(i32)((u32)velocity->vz - (u32)player->mAcc.vz);
+
+		velocity->vx =
+			SpideyPhysicsHalfStepAxis(
+				oldVx,
+				player->mAcc.vx,
+				friction.vx);
+		velocity->vy =
+			SpideyPhysicsHalfStepAxis(
+				oldVy,
+				player->mAcc.vy,
+				friction.vy);
+		velocity->vz =
+			SpideyPhysicsHalfStepAxis(
+				oldVz,
+				player->mAcc.vz,
+				friction.vz);
+
+		return velocity;
+	}
+
+	SpideyRetailVectorFrictionFn retail =
+		(SpideyRetailVectorFrictionFn)0x004E76B0;
+	return retail(
+		velocity,
+		0,
+		friction);
+}
+#endif
+
 // @Ok
 // Original 0x467D20. Runs while the player hangs on a web line: the swinger
 // object moves mPos along the swing arc, then three short rays look for a
