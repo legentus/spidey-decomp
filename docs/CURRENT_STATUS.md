@@ -8582,3 +8582,56 @@ Expected useful telemetry:
 - `pause_options_confirm action=apply ... source=confirm_action_0x1000`
 
 If this passes, close the pause-options/UI-scale milestone and move directly to the already-instrumented camera work. No additional UI test should be requested unless this specific interaction polish fails.
+
+
+## Pause Options Enter mask correction (2026-10-04)
+
+The runtime test on revision `b7acebd821d7bbefa95c7e69b2071be68045055e` confirmed:
+
+- parent row ordering fix works: telemetry reports `options_row=3 quit_row=4 previous_last=Quit`;
+- mouse click still opens Options and activates custom submenu actions;
+- Enter still does not open Options, Apply Settings, or Back;
+- no custom confirmation telemetry reported the prior synthetic `source=confirm_action_0x1000` path.
+
+Exact retail disassembly was recovered from the project copy of `SpideyPC.exe` and inspected:
+
+- `PCSHELL_CheckTriggers @ 0x0050C180`;
+- mask `0x00000010` takes the direct keyboard path and calls the key-state helper with DIK `0x1C` (Enter);
+- mask `0x00000100` takes the mouse-left-button path, matching the working runtime click behavior;
+- mask `0x00001000` is a different input path and was incorrectly identified as Enter in the previous patch.
+
+Implemented:
+
+- `85df9590dc42d03145756e05e67f59b44a69f45d` — **fix: use retail Enter mask for pause Options**
+  - custom pause confirmation fallback changed from `0x00001000` to the verified retail Enter mask `0x00000010`;
+  - source telemetry now reports `source=keyboard_enter_mask_0x10` when Enter activates Open/Apply;
+  - startup telemetry now records `pause_keyboard_enter_mask=0x10`;
+  - the working mouse mask `0x00000100` path remains unchanged;
+  - normal retail pause rows are still untouched by the custom fallback.
+
+Static source validation after the correction:
+
+- braces: 0;
+- parentheses: 0;
+- brackets: 0;
+- no negative delimiter depth;
+- stale `0x00001000` custom-confirm probe removed.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Verify:
+
+1. `Options` remains immediately above `Quit`.
+2. Highlight `Options` and press Enter.
+3. Highlight `Apply Settings` and press Enter.
+4. Highlight `Back` and press Enter.
+5. Mouse clicks still work.
+
+Expected telemetry on Enter:
+
+- `pause_options_confirm action=open ... source=keyboard_enter_mask_0x10`
+- `pause_options_confirm action=apply ... source=keyboard_enter_mask_0x10`
+
+If this passes, close the pause Options/UI milestone and proceed directly to camera implementation.
