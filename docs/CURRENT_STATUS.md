@@ -8997,3 +8997,15 @@ The uploaded camera test log gives a strong periodic-stall correlation:
 - the immediately following timing window falls to approximately 31-32 Hz.
 This further supports disabling both 120-frame blocking readbacks.
 
+
+
+## New-chat handoff package checkpoint — 2026-10-04
+
+A full new-chat handoff is being produced after an interrupted engineering turn.
+
+Verified source frontier before packaging:
+- dev: `0c0f22614ca9e6b835e2b524d896659e47f8aec5`
+- latest source/perf commit: `c71240e223884de59665e63c1b8984b606301845` — throttle validated camera telemetry
+- latest gameplay implementation before that: `954882bb63a86c39011bbc3996104f905b8559aa` — camera-forward web auto-targeting
+
+No source work from the interrupted turn is missing. The combined sensitivity / hitch / camera-web-target runtime remains the exact next step. Do not redo RE before that test.
