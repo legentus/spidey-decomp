@@ -46,6 +46,90 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## RUNTIME CHECKPOINT — VERTICAL AIM FRAMING GOOD; RETICLE HAS ONE-FRAME DRAG; WEB FIRE NOT HITCH CAUSE (2026-10-04)
+
+Tested revision:
+- `2ec405d96253df7332d5fe6609729fb4f310b720`
+
+Runtime log:
+- `spidey-decomp(20261004-200625).log`
+
+### User-visible result
+
+Manual aim is now substantially better:
+- 96-unit vertical framing is accepted as much better;
+- aimed movement remains working;
+- actual camera orbit remains working;
+- remaining manual-aim issue is **cursor/reticle drag when looking quickly**.
+
+User wants the reticle to remain snappy and have no perceptible lag/drag behind camera motion.
+
+### Reticle lag root cause
+
+Current frame order proves the reticle point is generated too early.
+
+Observed ordering:
+1. `SpideyAI0` calls modern SetupLookaroundCamera wrapper;
+2. `modern_manual_aim event=reticle` computes `field_DC0` from the camera position/focus currently stored;
+3. later in the frame `CCamera::AI` runs CM_Normal and changes the actual orbit position/yaw;
+4. `modern_manual_camera event=framing` then applies the 96-unit elevated focus;
+5. rendering uses the updated current-frame camera with a `field_DC0` that was derived from the earlier camera state.
+
+This is effectively a one-frame stale aim ray. At slow movement it is hard to notice; on a fast flick it looks like the cursor trails/has drag.
+
+Do not change camera sensitivity or the 96-unit framing to solve this.
+
+### Exact reticle fix target
+
+Keep the early SetupLookaroundCamera wrapper as a compatibility fallback, but make the post-camera framing seam authoritative.
+
+At `0x00418458 -> 0x00416B10` wrapper:
+- apply elevated framed focus;
+- call untouched retail postprocess;
+- **after retail returns, recompute `player->field_DC0` from the final current-frame camera position -> framed focus**;
+- set `field_DE4=1`;
+- this overwrites the stale pre-camera ray before RenderLookaroundReticle consumes it.
+
+Expected result:
+- reticle direction and current rendered camera are from the same frame;
+- no one-frame chase/drag on fast mouse movement;
+- movement/framing/web logic unchanged.
+
+### Hitch correlation — FireWeb follows the stalls
+
+Direct FireWeb timestamps finally make the user test meaningful.
+
+Representative late-run examples:
+- stall frame `3170`: ~316 ms; next FireWeb frame `3182`;
+- stall frame `3290`: ~600 ms; next FireWeb frame `3299`;
+- stall frame `3961`: ~484 ms; next FireWeb frame `3970`;
+- stall frame `4093`: ~513 ms; next FireWeb frame `4125`;
+- stall frame `4484`: ~361 ms; next FireWeb frame `4499`;
+- final gameplay stall frame `4704`: ~541 ms; no later gameplay shot before frontend transition.
+
+Therefore:
+- FireWeb is **not the trigger** for these hitches;
+- user is successfully firing in reaction to them.
+
+The regular 60 Hz cadence is otherwise healthy between stalls.
+
+### Next hitch diagnostic
+
+Current `slow_present_events` measures time between calls into the DXPOLY flip wrapper. It proves a frame was late but cannot locate where the time was spent.
+
+Add in-memory phase telemetry only:
+- total time inside `SpideyDiagDXPOLYFlip`;
+- transient surface processing;
+- DX11 shadow replay/end-frame;
+- retail draw-probe flush;
+- DX11 PresentShadow;
+- implied outside-present/game time = interval between wrapper entries minus prior wrapper duration.
+
+Store phase data alongside existing slow events and only flush on the once-per-second timing line.
+
+Do not add per-frame file writes.
+
+
 ## RUNTIME CHECKPOINT — TPS CAMERA MOVES; RETICLE/CAMERA FRAMING STILL THROUGH SPIDER-MAN (2026-10-04)
 
 Tested revision:
