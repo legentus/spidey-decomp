@@ -8414,3 +8414,11 @@ Static PowerShell delimiter audit after creation:
 - updated test workflow: braces=0, parentheses=0, brackets=0, terminal_state=code.
 
 The first user-side execution remains the authoritative Windows/PowerShell + VC6 runtime validation.
+
+
+Fast-launcher bootstrap hardening:
+
+- `f5bf78d8184ed03c042b5a49c1ab862275ee10dd` — preserve the pre-bootstrap local revision before the old updater fetches the fast helper;
+- `27cc5a7f63b332cf1ffc29a8e427170731db2d3c` — consume that preserved revision in the fast PowerShell workflow.
+
+This prevents the first use of the new BAT from incorrectly treating an old built DLL as current after the bootstrap updater advances `LOCAL_DEV_REVISION.txt`.
