@@ -1,5 +1,84 @@
 # CURRENT STATUS
 
+## LIVE FRONTIER — MANUAL AIM THIRD PASS IMPLEMENTED; RETAIL TARGET LIST FIXED (2026-10-04)
+
+Latest tested runtime remains:
+- `7a6af671ec671d7f61a1003b296f59d655b39dcd`
+- log `spidey-decomp(20261004-093356).log`
+
+That log proves:
+- the movement wrapper receives full WASD axes (`±127`);
+- `CheckForwards` can return `1` while manual aim is held;
+- state repeatedly becomes `0x10` / sometimes `0x00400000`, matching the user's visible “tries to move / twists but stays stuck” behavior;
+- retail SetupLookaroundCamera was still running every frame and the user confirmed WASD still moved the old reticle;
+- the user confirmed the reticle response was reversed on both X and Y.
+
+Hip-fire diagnostic breakthrough:
+- the direct modern camera scan never produced `source=modern_camera_scan` in the tested log;
+- canonical `SelectTargetBaddy @ 0x004C8410` starts from the body-list head at `0x0056E990`;
+- the modern scan incorrectly used `G_MECHLIST`, which is the player/mech list at `0x006A9038`;
+- therefore the modern scan was walking the wrong candidate universe.
+
+Implemented commit:
+- `b074592eb6bd8d5b0b6f323165de71e8d97eb248` — `gameplay: isolate modern aim from legacy lookaround`
+
+### Manual aim third pass
+
+1. **Retail SetupLookaroundCamera is bypassed entirely while modern manual aim is active in mode 3.**
+   - The wrapper still calls retail outside modern manual aim.
+   - During modern aim, `field_8EA` remains set so enter/exit/fire code still sees aim mode.
+   - `field_DC0` and `field_DE4` are supplied directly.
+   - This removes the second legacy controller that was still consuming lookaround state and steering the pose/joints while normal locomotion was simultaneously trying to run.
+   - Goal: WASD belongs only to movement; mouse/right-stick/camera owns aim.
+
+2. **Reticle X/Y sign convention corrected.**
+   - Z remains on the actual forward camera ray so the point stays in front of the camera.
+   - X and Y are reflected around camera origin before being stored in `field_DC0`.
+   - Desired runtime behavior: left=left, right=right, up=up, down=down.
+
+3. **Movement diagnostics expanded.**
+   - reticle telemetry now includes body position, velocity, state and animation;
+   - if Spider-Man remains stuck, the next log will show whether velocity/root translation is being generated after the legacy lookaround controller is removed.
+
+### Hip-fire third pass
+
+`SpideyCameraSelectModernTarget` now:
+- starts from `*(CBody**)0x0056E990`, the exact retail SelectTargetBaddy list head;
+- advances through `mNextItem` (+0x20), matching retail;
+- retains targettable / non-zombie / valid-radius / range / retail-player-LOS filters;
+- ranks by visible camera-ray centeredness;
+- logs:
+  - `camera_scan_nodes`
+  - `camera_scan_eligible`
+  - `camera_scan_candidates`
+  - `camera_scan_score`
+- emits periodic scan diagnostics even when the selected target does not change.
+
+The old retail camera-origin/orientation selectors remain fallback-only.
+
+### Exact next runtime
+
+Update to `b074592e...` or newer and test:
+
+1. Enter manual aim.
+2. Hold WASD in all four directions:
+   - Spider-Man should actually translate;
+   - WASD should NOT move the reticle independently.
+3. Move mouse:
+   - reticle should track naturally: left=left, right=right, up=up, down=down.
+4. Aim + move simultaneously and fire.
+5. Hip-fire at close and medium enemies while Spider-Man faces elsewhere.
+6. Sweep camera across multiple enemies.
+7. Return consolidated log and subjective targeting behavior.
+
+Expected new markers:
+- `modern_manual_aim event=reticle ... retail_setup=0 ... body_pos=... body_vel=... state=... anim=...`
+- `camera_web_target ... camera_scan_nodes=... camera_scan_eligible=... camera_scan_candidates=...`
+- successful direct acquisition should finally show `source=modern_camera_scan`.
+
+Do not resume real-shadow implementation until this test is evaluated. Shadow caster probing remains PASSED.
+
+
 ## CHECKPOINT — MANUAL AIM THIRD-PASS FRONTIER (2026-10-04)
 
 Latest tested runtime revision:
