@@ -1,5 +1,48 @@
 # CURRENT STATUS
 
+## RUNTIME RESULT — CRASH FIXED, BUT FULL RECOMPILED PLAYER PHYSICS BREAKS SCRIPTED SPAWN (2026-10-04)
+
+Latest tested runtime:
+- revision `15969b7ab692189c416fa3d6919b6b387e55e903`;
+- the previous pre-render -> live-cutscene access violation is fixed;
+- process exits normally (`exit_code=0`);
+- however Spider-Man falls through the intended live-cutscene spawn into the yellow void, triggers the normal falling/death sequence, and reaches Retry/Quit.
+
+Exact A/B evidence against the full `CPlayer::DoPhysics` replacement:
+
+Shared live-cutscene handoff:
+- current reconstructed-physics build, frame 675:
+  - camera pos `-100413440,-5496832,-28516352`;
+  - focus `-78921728,19869696,-166903808`.
+- previous retail-physics runtime `21ced52bc9c8e5903fe66cc939e4114804c248fb`, frame 723:
+  - the **same** camera pos and focus values.
+
+Frame-900 player comparison:
+- retail-physics runtime:
+  - body `-78729216,15695872,-155586560`;
+  - shadow `-78729216,16089088,-155586560`;
+  - shadow normal `0,-4096,0`;
+  - player remains correctly grounded and gameplay proceeds.
+- reconstructed-physics runtime:
+  - body `-79482342,25915794,-164378260`;
+  - shadow position remains near the expected ground band at Y `15817598`;
+  - body has fallen roughly 10.2 million fixed-point Y units below the known-good grounded height before death.
+
+Conclusion:
+- scripted camera/spawn data is correct;
+- the level/floor still exists and the shadow path can still find its vicinity;
+- the regression is specifically the globally installed reconstructed `CPlayer::DoPhysics`/player-physics runtime ownership;
+- two separate live-transition failures (uninitialized local crash, then incorrect grounding after that fix) show the full reconstructed function is not faithful enough to replace retail globally yet.
+
+Strategy change:
+- keep the reconstructed physics source and retail byte capture as RE/reference;
+- **stop installing `patch_physics()` at runtime**;
+- restore retail player physics/collision/spawn behavior immediately;
+- keep independently grounded native-60 work such as RotY and Mysterio active;
+- reintroduce player 60-Hz corrections later as narrow hooks around proven integration primitives inside retail physics instead of replacing the complete collision/grounding function.
+
+This is not a retreat to a 30-Hz final architecture. It is an isolation step that restores correctness while we move the 60-Hz conversion to smaller retail-preserving seams.
+
 ## FIX IMPLEMENTED — ZERO-MOVE LIVE-CUTSCENE COLLISION STATE (2026-10-04)
 
 Source fix:
