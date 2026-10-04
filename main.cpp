@@ -8670,6 +8670,88 @@ static void SpideyInstallModernCameraCompat()
 }
 
 
+typedef void (__cdecl *SpideyRetailDisplayQuadBitListFn)(
+		void**);
+typedef void (__cdecl *SpideyRetailSetRotMatrixFn)(
+		MATRIX*);
+
+// Retail DisplayQuadBitList subtracts gMikeCamera[0].Position from each
+// world-space quad corner, then feeds the result through gte_rtps. It assumes
+// the global GTE rotation matrix still contains the active camera transform,
+// but model rendering can leave a model-local rotation there instead. Restore
+// the active render camera matrix immediately before the untouched retail
+// QuadBit renderer so floor blobs and other world-space quads remain anchored
+// to their world positions when the camera rotates.
+static void __cdecl SpideyDisplayQuadBitListCameraAnchored(
+		void** list)
+{
+	SpideyRetailSetRotMatrixFn setRotMatrix =
+		(SpideyRetailSetRotMatrixFn)0x0046D7B0;
+	SpideyRetailDisplayQuadBitListFn retail =
+		(SpideyRetailDisplayQuadBitListFn)0x004097E0;
+
+	MATRIX* activeCameraTransform =
+		(MATRIX*)0x0056F1E4;
+
+	setRotMatrix(
+		activeCameraTransform);
+	retail(
+		list);
+}
+
+static void SpideyInstallQuadBitCameraAnchorCompat()
+{
+	unsigned char* pushOpcode =
+		(unsigned char*)0x004081D4;
+	unsigned long* displayPointer =
+		(unsigned long*)0x004081D5;
+	const unsigned long expectedRetail =
+		0x004097E0;
+	int installed =
+		0;
+	const char* reason =
+		"ok";
+
+	if (*pushOpcode != 0x68)
+	{
+		reason =
+			"opcode";
+	}
+	else if (*displayPointer !=
+			expectedRetail)
+	{
+		reason =
+			"target";
+	}
+	else
+	{
+		*displayPointer =
+			(unsigned long)&SpideyDisplayQuadBitListCameraAnchored;
+
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			pushOpcode,
+			5);
+		installed =
+			1;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"DRAW");
+	if (f)
+	{
+		fprintf(
+			f,
+			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 reason=%s\n",
+			installed,
+			(unsigned long)&SpideyDisplayQuadBitListCameraAnchored,
+			reason);
+		fclose(f);
+	}
+}
+
+
 typedef CBody* (__fastcall *SpideyRetailSelectTargetBaddyFn)(
 		CPlayer*,
 		void*,
@@ -14843,6 +14925,7 @@ void game_patches(void)
 	SpideyInstallRetailInputCompat();
 	SpideyInstallModernCameraCompat();
 	SpideyInstallCameraWebTargetingCompat();
+	SpideyInstallQuadBitCameraAnchorCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();
 	SpideyInstallGameplayUiScaleCompat();
