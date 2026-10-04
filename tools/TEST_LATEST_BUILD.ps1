@@ -1,6 +1,7 @@
 param(
     [switch]$PostUpdate,
-    [switch]$Elevated
+    [switch]$Elevated,
+    [switch]$Fast
 )
 
 $ErrorActionPreference = "Stop"
@@ -139,6 +140,9 @@ function Write-PeFingerprint([string]$Path, [string]$OutputPath) {
 function Relaunch-Elevated {
     $psExe = (Get-Process -Id $PID).Path
     $argLine = '-NoProfile -ExecutionPolicy Bypass -File "' + $PSCommandPath + '" -PostUpdate -Elevated'
+    if ($Fast) {
+        $argLine += ' -Fast'
+    }
 
     Write-Host ""
     Write-Host "[INFO] The Spider-Man game folder requires Administrator access."
@@ -244,7 +248,11 @@ if (-not $PostUpdate) {
         Write-Host "[..] Restarting with the newly updated test workflow..."
 
         $psExe = (Get-Process -Id $PID).Path
-        & $psExe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -PostUpdate
+        if ($Fast) {
+            & $psExe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -PostUpdate -Fast
+        } else {
+            & $psExe -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -PostUpdate
+        }
         exit $LASTEXITCODE
     }
 } else {
@@ -293,11 +301,18 @@ try {
     Set-Content -Path $runtimeHeader -Value ('#define RUNTIME_VERSION "' + $revision + '"') -Encoding ASCII
 
     $env:SPIDEY_MSVC_ROOT = $toolchainRoot
-    $env:SPIDEY_FORCE_CLEAN = "1"
     $buildStartedUtc = [DateTime]::UtcNow
 
-    Write-Host ""
-    Write-Host "[..] Building matching proxy (forced clean build)..."
+    if ($Fast -and $env:SPIDEY_FAST_FORCE_CLEAN -ne "1") {
+        Remove-Item Env:SPIDEY_FORCE_CLEAN -ErrorAction SilentlyContinue
+        Write-Host ""
+        Write-Host "[FAST] Building matching proxy incrementally..."
+    } else {
+        $env:SPIDEY_FORCE_CLEAN = "1"
+        Write-Host ""
+        Write-Host "[..] Building matching proxy (forced clean build)..."
+    }
+
     & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
     if ($LASTEXITCODE -ne 0) {
         Stop-WithPause "Matching build failed." $LASTEXITCODE
@@ -310,43 +325,68 @@ try {
     }
 }
 
-Write-Host ""
-Write-Host "[..] Building Direct3D 11 renderer bridge..."
-try {
-    & (Join-Path $RepoRoot "scripts\build_renderer11.ps1")
-    if ($LASTEXITCODE -ne 0) {
-        Stop-WithPause "Direct3D 11 renderer build failed." $LASTEXITCODE
-    }
-} catch {
-    Stop-WithPause ("Direct3D 11 renderer build failed: " + $_.Exception.Message)
+$renderer11Dll = Join-Path $RepoRoot "out\renderer11\spidey_renderer11.dll"
+$rebuildRenderer11 = $true
+if ($Fast -and
+    $env:SPIDEY_FAST_REBUILD_RENDERER11 -eq "0" -and
+    (Test-Path $renderer11Dll)) {
+    $rebuildRenderer11 = $false
 }
 
-$renderer11Dll = Join-Path $RepoRoot "out\renderer11\spidey_renderer11.dll"
+if ($rebuildRenderer11) {
+    Write-Host ""
+    Write-Host "[..] Building Direct3D 11 renderer bridge..."
+    try {
+        & (Join-Path $RepoRoot "scripts\build_renderer11.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithPause "Direct3D 11 renderer build failed." $LASTEXITCODE
+        }
+    } catch {
+        Stop-WithPause ("Direct3D 11 renderer build failed: " + $_.Exception.Message)
+    }
+} else {
+    Write-Host ""
+    Write-Host "[FAST] Renderer11 sources unchanged; reusing existing bridge."
+}
+
 if (-not (Test-Path $renderer11Dll)) {
     Stop-WithPause "Direct3D 11 renderer build completed but spidey_renderer11.dll was not produced."
 }
 $renderer11Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $renderer11Dll).Hash
 Write-Host "[OK] Renderer11 SHA-256: $renderer11Hash"
 
-Write-Host ""
-Write-Host "[..] Building modern input bridge..."
-try {
-    & (Join-Path $RepoRoot "scripts\build_input11.ps1")
-    if ($LASTEXITCODE -ne 0) {
-        Stop-WithPause "Modern input build failed." $LASTEXITCODE
-    }
-} catch {
-    Stop-WithPause ("Modern input build failed: " + $_.Exception.Message)
+$input11Dll = Join-Path $RepoRoot "out\input11\spidey_input11.dll"
+$input11Probe = Join-Path $RepoRoot "out\input11\spidey_input11_probe.exe"
+$rebuildInput11 = $true
+if ($Fast -and
+    $env:SPIDEY_FAST_REBUILD_INPUT11 -eq "0" -and
+    (Test-Path $input11Dll) -and
+    (Test-Path $input11Probe)) {
+    $rebuildInput11 = $false
 }
 
-$input11Dll = Join-Path $RepoRoot "out\input11\spidey_input11.dll"
+if ($rebuildInput11) {
+    Write-Host ""
+    Write-Host "[..] Building modern input bridge..."
+    try {
+        & (Join-Path $RepoRoot "scripts\build_input11.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            Stop-WithPause "Modern input build failed." $LASTEXITCODE
+        }
+    } catch {
+        Stop-WithPause ("Modern input build failed: " + $_.Exception.Message)
+    }
+} else {
+    Write-Host ""
+    Write-Host "[FAST] Input11 sources unchanged; reusing existing bridge."
+}
+
 if (-not (Test-Path $input11Dll)) {
     Stop-WithPause "Modern input build completed but spidey_input11.dll was not produced."
 }
 $input11Hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $input11Dll).Hash
 Write-Host "[OK] Input11 SHA-256: $input11Hash"
 
-$input11Probe = Join-Path $RepoRoot "out\input11\spidey_input11_probe.exe"
 if (-not (Test-Path $input11Probe)) {
     Stop-WithPause "Modern input probe executable was not produced."
 }
@@ -371,12 +411,23 @@ if (-not (Test-Path $builtDll)) {
 }
 
 $builtInfo = Get-Item -LiteralPath $builtDll
-if ($builtInfo.LastWriteTimeUtc -lt $buildStartedUtc.AddSeconds(-2)) {
+$allowExistingProxy =
+    $Fast -and
+    $env:SPIDEY_FAST_ALLOW_EXISTING_PROXY -eq "1"
+
+if (-not $allowExistingProxy -and
+    $builtInfo.LastWriteTimeUtc -lt $buildStartedUtc.AddSeconds(-2)) {
     Stop-WithPause ("Build returned success, but Release\spider.dll was not freshly regenerated. " +
         "DLL timestamp: " + $builtInfo.LastWriteTimeUtc.ToString("o") +
         "; build started: " + $buildStartedUtc.ToString("o"))
 }
-Write-Host ("[OK] Fresh DLL timestamp: " + $builtInfo.LastWriteTimeUtc.ToString("o"))
+
+if ($allowExistingProxy -and
+    $builtInfo.LastWriteTimeUtc -lt $buildStartedUtc.AddSeconds(-2)) {
+    Write-Host ("[FAST] No proxy source changes; reusing DLL timestamp " + $builtInfo.LastWriteTimeUtc.ToString("o"))
+} else {
+    Write-Host ("[OK] Fresh DLL timestamp: " + $builtInfo.LastWriteTimeUtc.ToString("o"))
+}
 
 $outDir = Join-Path $RepoRoot "out\matching"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
