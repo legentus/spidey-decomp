@@ -9009,3 +9009,80 @@ Verified source frontier before packaging:
 - latest gameplay implementation before that: `954882bb63a86c39011bbc3996104f905b8559aa` — camera-forward web auto-targeting
 
 No source work from the interrupted turn is missing. The combined sensitivity / hitch / camera-web-target runtime remains the exact next step. Do not redo RE before that test.
+
+
+## Residual frame-pacing audit + low-overhead cadence telemetry (2026-10-04)
+
+Continuation after the full camera/hitch/web-target handoff verified that live `dev` exactly matched handoff HEAD `df1adf4f2664a5183146efd639dac2a65ae5ecf9` before new work began.
+
+### Static renderer audit
+
+The prior runtime log confirms normal gameplay presentation is the authoritative DX11 shadow path:
+- `dx11_shadow=1`;
+- `dx11_hdc=0`;
+- `direct_hwnd=0`.
+
+Therefore the Renderer11 `Flush + GetDC` HDC fallback is not the normal gameplay presentation path and is not a primary residual-stutter suspect.
+
+For sampled gameplay frames from frame 600 onward, the old log shows approximately:
+- mean queued DX11 shadow commands: 5,357 per sampled frame;
+- mean vertices: 16,299;
+- mean vertices per command: ~3.04;
+- observed queued range: 3,842..9,120 commands.
+
+This is a real steady CPU-efficiency concern: thousands of tiny Draw calls plus repeated state/hash lookups are being issued every frame. However the sampled low-Hz windows do not show a positive correlation with command count, so do not mislabel raw command volume as the cause of the old intermittent stalls. Treat state-call reduction / safe batching as a later optimization after frame pacing is classified.
+
+The proxy also still performs diagnostic per-vertex screen-range accounting on main-scene D3D7 producer draws. That work is not render-critical and is another lower-risk cleanup candidate, but it is not being changed before the combined baseline runtime.
+
+### Retail multimedia-timer cadence is a strong micro-stutter hypothesis
+
+`PCTimer.cpp` documents the retail timer model:
+- `PCTIMER_Init` requests a 16 ms multimedia timer;
+- `field_4 = 16`;
+- `gTimerMsInterval = field_4 * 60 / 1000 = 0.96`;
+- each timer callback accumulates that fractional 60-Hz value and advances `Vblanks` while the accumulated integer is ahead.
+
+If retail `MyVSync` advances `Vblanks` as expected, a simple simulation of that exact 0.96-per-16-ms accumulator produces mostly 16 ms advances with a 32 ms gap roughly every 25 timer ticks (~0.4 s). That is a plausible source for persistent small cadence hitching after the two blocking 120-frame readbacks are gone.
+
+Important confidence boundary:
+- `PCTIMER_Init` is documented as reconstructed retail behavior;
+- the current source body of `MyVSync` itself is still an incomplete decomp stub;
+- therefore this is a strong hypothesis to validate with runtime cadence evidence, not yet a timing replacement to ship blindly.
+
+### Telemetry-only continuation commits
+
+- `08e4acdafaa38b267fcb57862c8e2a5ed8539703` — perf: add low-overhead frame cadence telemetry
+- `f69abaf545193bb1441d3421661e3f752daf896d` — compat: keep cadence telemetry VC6-safe
+
+The new instrumentation does not alter renderer, camera, targeting, timer, or gameplay behavior.
+
+It adds only in-memory per-present aggregation:
+- QPC frame-interval count;
+- intervals over 20 / 25 / 30 / 50 ms;
+- maximum interval in microseconds;
+- per-present engine `Vblanks` delta counts: same / one / multi;
+- maximum observed vblank delta.
+
+Those aggregates are appended to the existing once-per-second `timing_present` line, so no additional per-frame file I/O was introduced.
+
+Static post-edit checks:
+- `main.cpp` braces balanced 899/899;
+- parentheses balanced 4457/4457;
+- brackets balanced 310/310;
+- no `1000000LL` suffix remains; multiplication uses an explicit `LONGLONG` cast for the proxy's compatibility constraints.
+
+### Exact next runtime remains one combined test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` and test:
+1. Camera Sensitivity at 50 percent, Apply, then optionally 150 percent; verify persistence.
+2. Play through several old major-freeze intervals; report whether the large repeating freeze is gone.
+3. Separately report whether the smaller constant/micro hitch remains.
+4. Face Spider-Man away from an enemy, center the enemy with the camera, fire enemy-targeting web and verify camera-forward selection.
+5. Brief movement/swing/camera regression pass.
+6. Upload only the single consolidated `spidey-decomp.log`.
+
+Interpretation after that run:
+- large freeze gone + `over25ms/over30ms` cadence repeating with characteristic `Vblanks` behavior => prioritize modernizing the retail timer/vblank pacing;
+- large freeze gone + cadence telemetry clean but residual hitch visible => profile renderer/producer CPU overhead next;
+- web target wrong => use `camera_web_target` evidence before changing matrix axes/signs;
+- no source RE from the completed camera/targeting batch should be redone.
