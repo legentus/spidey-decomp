@@ -8256,6 +8256,8 @@ static void SpideyModernCameraRelease(
 		0;
 	gSpideyModernCameraLastConsumedSequence =
 		0xFFFFFFFFUL;
+	gSpideyModernCameraLastLogSequence =
+		0;
 }
 
 typedef void (__fastcall *SpideyRetailMode3CameraFn)(
@@ -8341,6 +8343,8 @@ static void __fastcall SpideyModernMode3Camera(
 				*(int*)0x00548864);
 		gSpideyModernCameraActive =
 			1;
+		gSpideyModernCameraLastLogSequence =
+			0;
 
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -8529,13 +8533,22 @@ static void SpideyCameraPassivePoll(
 	++gSpideyModernCameraInputSequence;
 
 	// 0x0056F3B8 is the retail active-camera pointer used by
-	// CPlayer::PutCameraBehind. Read only; Phase 0 camera work must not
-	// mutate retail camera state.
+	// CPlayer::PutCameraBehind. This sampler remains read-only; active modern
+	// camera mutation happens only in the mode-3 wrapper above.
 	CCamera* camera =
 		*(CCamera**)0x0056F3B8;
 
 	if (!camera)
 	{
+		if (gSpideyModernCameraActive ||
+			gSpideyModernCameraOwner)
+		{
+			SpideyModernCameraRelease(
+				"camera_detached",
+				0,
+				-1);
+		}
+
 		if (gSpideyCameraTelemetryLastCamera)
 		{
 			FILE* f = SpideyOpenConsolidatedLog(
