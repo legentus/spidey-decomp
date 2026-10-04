@@ -10538,7 +10538,7 @@ static void SpideyRecordPresentTiming()
 					gSpideyTimingLastPresentCounter.QuadPart;
 				const unsigned long deltaUs =
 					(unsigned long)(
-						(deltaTicks * 1000000LL) /
+						(deltaTicks * (LONGLONG)1000000) /
 						gSpideyTimingPerfFrequency.QuadPart);
 
 				++gSpideyTimingPresentIntervals;
