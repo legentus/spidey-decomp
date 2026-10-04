@@ -4299,6 +4299,60 @@ static void __fastcall SpideyMysterioLaserMoveHighFps(
 		0);
 }
 
+static void SpideyLogHighFpsRetailBytes(
+		const char* label,
+		unsigned long address,
+		unsigned long size)
+{
+	if (!label ||
+		!address ||
+		!size)
+	{
+		return;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"high_fps_re_bytes label=%s address=0x%08lX size=%lu hex=",
+		label,
+		address,
+		size);
+
+	int valid =
+		1;
+	__try
+	{
+		const unsigned char* bytes =
+			(const unsigned char*)address;
+		for (unsigned long i = 0;
+			 i < size;
+			 ++i)
+		{
+			fprintf(
+				f,
+				"%02X",
+				(unsigned int)bytes[i]);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		valid =
+			0;
+	}
+
+	fprintf(
+		f,
+		" valid=%d\n",
+		valid);
+	fclose(f);
+}
+
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
@@ -4364,6 +4418,17 @@ static void SpideyInstallHighFpsTimingCompat()
 			kSpideyMysterioLaserGraceTicks);
 		fclose(f);
 	}
+
+	// The decompiled tree still lacks these retail routines. Capture them once
+	// at startup so the next normal test advances timing RE with no hot-path I/O.
+	SpideyLogHighFpsRetailBytes(
+		"Ob_AI",
+		0x00460FC0,
+		0x1A0);
+	SpideyLogHighFpsRetailBytes(
+		"CVenom_FollowDirections",
+		0x004EB530,
+		0x160);
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
