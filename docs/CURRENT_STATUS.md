@@ -8713,3 +8713,130 @@ Expected successful keyboard telemetry:
 - `pause_options_confirm action=back ... source=raw_directinput_enter_edge`.
 
 If activation still fails, the raw key-state telemetry is sufficient to distinguish “Enter never reaches DirectInput” from “custom routing logic failed” without another speculative mapping change.
+
+
+## Pause Options milestone closed; modern orbit camera Stage A implemented (2026-10-04)
+
+User runtime confirmation after the raw DirectInput Enter-latch fix:
+
+- Enter now opens the pause-menu Options submenu;
+- Enter activates Apply Settings;
+- Enter activates Back;
+- mouse interaction still works;
+- Options remains immediately above Quit.
+
+The pause/options/UI-scale milestone is therefore closed unless a regression is reported.
+
+### New user camera requirement
+
+User requested a modern 3D gameplay camera that can orbit around Spider-Man:
+
+- left/right rotation through a full 360-degree range where ordinary gameplay permits it;
+- up/down camera pitch with sensible limits;
+- mouse and right-stick control;
+- preserve scripted/special camera behavior where practical;
+- implement the best useful first version rather than waiting for a perfect full replacement.
+
+### Exact camera RE completed
+
+Canonical SpideyPC.exe disassembly established the mode-3 seam inside CCamera::AI @ 0x00417CB0.
+
+For ordinary mode 3:
+
+- dispatch entry 0x00418412;
+- call site 0x00418414;
+- retail mode-3 generator target 0x00418E00;
+- rejoins the shared retail path at 0x00418456.
+
+After the mode-specific call, retail still executes:
+
+- camera post-processing/collision/orientation at 0x00416B10;
+- later shake/orientation handling;
+- CCamera::LoadIntoMikeCamera @ 0x00416A20.
+
+Immediately before dispatch, mode 3 derives:
+
+- XZ distance at 0x00548860;
+- Y distance at 0x00548864;
+- radial distance at 0x0054885C;
+- vertical angle at 0x00548858 = ratan2(-Y, XZ).
+
+CM_Normal @ 0x00418E00 consumes those values plus CCamera angle fields around +0x234/+0x236/+0x238 and builds the desired position at +0x24C.
+
+### Stage-A implementation
+
+Commits:
+
+- e15892a8c76eef180a932b25d6bfb13e62795adb — feat: add mode-3 modern orbit camera prototype
+- d2d546551255be6d0b83919236d0aed7098dcbd3 — guard: reset modern camera ownership cleanly
+- 09f0cd9cb65a65868d97a70f1bce8910118d75ba — docs: document mode-3 orbit prototype
+
+Implementation boundary:
+
+- patches only direct call 0x00418414 -> 0x00418E00;
+- replacement wrapper is SpideyModernMode3Camera;
+- wrapper calls retail CM_Normal after injecting modern yaw/pitch inputs;
+- retail collision/orientation/final-publish stages remain intact;
+- all camera modes other than 3 remain retail-owned.
+
+Activation policy:
+
+- if the user never moves mouse/right stick, mode 3 remains functionally retail;
+- first camera intent seeds yaw from live camera->field_236 and vertical distance from live retail Y distance;
+- modern yaw then wraps through 0..4095 with no horizontal clamp;
+- modern pitch is represented through Y distance and the exact retail-derived vertical angle/radius inputs;
+- ownership drops on camera pointer change, mode != 3, or camera detach;
+- returning from a scripted/special camera requires new input intent and reseeds from the current retail camera.
+
+Initial controls/tuning:
+
+- relative DirectInput mouse X: yaw scale 3;
+- relative DirectInput mouse Y: pitch scale 2, mouse-up = look-up;
+- Input11 right stick X: 32 angle units/frame at full deflection;
+- Input11 right stick Y: 7 Y-distance units/frame at full deflection;
+- vertical Y-distance clamp: -480..+260;
+- retail XZ distance remains untouched;
+- one input snapshot is consumed at most once per completed frame.
+
+Telemetry:
+
+- modern_camera_install installed=1 call=0x00418414 retail_mode3=0x00418E00 ...
+- modern_camera event=acquire ...
+- modern_camera event=update ... yaw=... retail_yaw=... y_dist=... input ... retail_overrode_yaw=...
+- modern_camera event=release ...
+
+retail_overrode_yaw is specifically logged because CM_Normal can conditionally recompute field_236 when auxiliary orientation angles are active; this will tell us whether wall/ceiling/special mode-3 states fight the first free-look layer.
+
+### Static audit
+
+- direct call target is grounded by canonical retail disassembly;
+- ABI uses the same VC6-safe __fastcall thiscall shim pattern already used elsewhere in main.cpp;
+- braces/parentheses/brackets balance;
+- no C++11-only proxy syntax added;
+- modern input is consumed once per completed-frame snapshot;
+- camera ownership cleanup covers detach/pointer replacement/non-mode-3 transitions;
+- Renderer11/Input11 source did not need modification for this first camera prototype.
+
+### Next runtime test
+
+Run FAST_UPDATE_AND_TEST_LATEST_BUILD.bat.
+
+In ordinary gameplay:
+
+1. stand still and move mouse left/right;
+2. attempt a broad/full orbit around Spider-Man;
+3. move mouse up/down through the available pitch range;
+4. stop moving the mouse and verify the chosen view does not instantly snap behind Spider-Man;
+5. walk/run/jump and rotate while moving;
+6. swing briefly and rotate if stable;
+7. approach a wall/corner and observe whether retail collision still prevents catastrophic camera clipping;
+8. if a controller is connected, test the right stick in both axes;
+9. report whether horizontal/vertical directions or sensitivity feel reversed/too fast/too slow.
+
+If the camera behaves badly, do not immediately replace the whole system. Use modern_camera telemetry first:
+- no acquire => input seam problem;
+- yaw changes but view does not => CM_Normal/post-processing ownership problem;
+- retail_overrode_yaw=1 => auxiliary orientation logic is fighting yaw;
+- good floor orbit but bad wall/ceiling => classify those mode-3 sub-states before deciding whether to special-case them or advance to Stage B.
+
+User should provide the single consolidated spidey-decomp.log from the run.
