@@ -46,6 +46,162 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## RUNTIME CHECKPOINT — TPS CAMERA MOVES; RETICLE/CAMERA FRAMING STILL THROUGH SPIDER-MAN (2026-10-04)
+
+Tested revision:
+- `0ed86176ca66461e96693cba29a2a32c2fc8bde8`
+
+Runtime log:
+- `spidey-decomp(20261004-195535).log`
+
+### User-visible result
+
+The unified TPS camera now responds to manual-aim look input, but the reticle/cursor is again effectively stuck through Spider-Man / near screen center.
+
+User requirement is now precise:
+- Spider-Man should sit below the manual-aim reticle;
+- reticle should be slightly above Spider-Man;
+- mouse/right-stick should still rotate the actual camera freely;
+- aimed locomotion must remain working;
+- web direction must continue following the reticle/view.
+
+### Runtime proof that the unified orbit itself works
+
+During manual aim, `modern_manual_camera event=tps_orbit` and `modern_camera event=update` show the real orbit changing substantially.
+
+Representative manual-aim yaw sequence:
+- `3804 -> 17 -> 494 -> 724 -> 1380 -> 1828 -> 1427 -> 3106 ...`
+
+The corresponding camera positions change around Spider-Man as expected.
+
+Therefore:
+- do **not** revert the unified orbit-camera work;
+- the remaining problem is framing / aim anchor placement.
+
+Aimed locomotion remains successful in the same run:
+- movement mask engages;
+- `enter_suppressed` continues climbing;
+- body world position changes by large amounts;
+- no recurrence of the old stand/run vibration loop.
+
+Freeze locomotion.
+
+### Root cause of reticle overlap
+
+The unified-TPS source intentionally removed the separate manual free-view and made the reticle use the raw mode-3 camera center ray.
+
+Retail CM_Normal focuses the camera essentially on Spider-Man's body position.
+
+Therefore the reticle now projects through the same body-centered focus:
+- camera movement works;
+- aim ray changes with camera;
+- but Spider-Man occupies the same central screen region as the reticle.
+
+This is a framing issue, not an input or targeting failure.
+
+---
+
+## IMPLEMENTATION CHECKPOINT — VERTICAL TPS AIM FRAMING READY (2026-10-04)
+
+**Status: source implemented; NOT runtime-tested yet.**
+
+Source commits:
+- `e68c8de3021c20119c47b3d15bc0372bd907883f` — `gameplay: frame manual aim above Spider-Man`
+- `b37788fe417a26d39e00389ac87853e9cc9a08c2` — `compat: fix framed reticle telemetry scope`
+
+### New framing model
+
+Manual aim keeps the validated unified mode-3 orbit camera.
+
+A single framed focus is now defined as:
+- Spider-Man body position;
+- Y shifted **96 game units upward**;
+- world +Y is downward, so implementation subtracts `96 * 4096` from body Y.
+
+No horizontal shoulder bias is added yet.
+
+The new camera seam is:
+- `0x00418458 -> shared camera postprocess/orientation @ 0x00416B10`
+
+Order:
+1. untouched `CM_Normal` calculates the real orbit camera position/collision;
+2. manual-aim wrapper changes only `camera->field_144` to the framed point above Spider-Man;
+3. untouched retail shared postprocess builds the final camera orientation toward that framed target;
+4. untouched `LoadIntoMikeCamera` publishes it.
+
+This means:
+- actual camera remains freely movable;
+- Spider-Man should render below the camera-center reticle;
+- reticle should appear slightly above Spider-Man;
+- camera orientation and reticle/web ray use the **same framed target**.
+
+### Reticle/web ray
+
+`SpideyModernAimApplyCameraPoint` no longer extends the body-centered raw focus.
+
+It directly constructs the ray:
+- camera position -> framed focus above Spider-Man;
+- extends that ray x8 into `player->field_DC0`;
+- `RenderLookaroundReticle` therefore projects the same direction the visible camera is looking.
+
+This avoids both previous bad designs:
+- independent free cursor with mostly fixed camera;
+- unified camera with reticle directly through Spider-Man.
+
+### Expected telemetry
+
+Startup:
+- `modern_manual_camera_framing installed=1 address=0x00418458 retail=0x00416B10 ...`
+- `modern_camera_install ... manual_focus=framed_above_body manual_framing=1 ... framing_up_units=96 ...`
+- manual aim install should report `reticle_source=framed_tps_camera_ray`.
+
+Runtime:
+- `modern_manual_camera event=framing ... focus=... body=... framing_up_units=96 ...`
+- reticle lines now include:
+  - `camera_focus=...`
+  - `framed_focus=...`
+  - `framing_up_units=96`
+
+Expected relation:
+- framed-focus Y should equal body Y minus `393216`;
+- camera orbit yaw/position must continue changing during aim;
+- body position must continue changing during aimed locomotion.
+
+### Static audit
+
+After `b37788fe...`:
+- braces: 1090 / 1090;
+- parentheses: 5077 / 5077;
+- brackets: 363 / 363;
+- one framed-focus helper;
+- one manual camera postprocess wrapper;
+- target call site `0x00418458` is patched through the existing target-validated direct-call helper;
+- final `0x0041865F -> LoadIntoMikeCamera` remains untouched;
+- no `nullptr`, lambdas, or C++11 `auto` introduced;
+- no GitHub CI status is attached yet.
+
+### Exact next runtime
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`b37788fe...` or newer**.
+
+Test:
+1. hold manual aim and verify Spider-Man now sits visibly below the reticle;
+2. move mouse left/right/up/down and make sure the actual camera still orbits/tilts;
+3. judge whether the 96-unit vertical framing is:
+   - too low,
+   - about right,
+   - too high;
+4. aim at several world points and fire webs;
+5. move W/A/S/D + diagonals while aiming and rotating camera;
+6. release aim and verify normal camera returns cleanly;
+7. quick hip-fire sanity.
+
+If framing is correct but Spider-Man still obscures the ray horizontally, next refinement is a small camera-right shoulder offset. Do not reintroduce independent manual free-view.
+
+
 ## IMPLEMENTATION CHECKPOINT — UNIFIED TPS MANUAL-AIM CAMERA READY (2026-10-04)
 
 **Status: implemented and committed; NOT runtime-tested yet.**
