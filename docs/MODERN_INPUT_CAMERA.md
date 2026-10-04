@@ -792,3 +792,23 @@ The second pass therefore separates the channels explicitly:
 - after it runs, field_DC0 is overwritten by the active mode-3 camera center ray, so mouse/right-stick camera control is also the visible manual-aim direction.
 
 Hip-fire selection likewise no longer depends primarily on transplanting camera transforms into retail player-space scoring. A mode-3 camera-ray scan applies targettable/zombie/range/LOS eligibility and ranks by camera centeredness, with retail selection retained as a compatibility fallback.
+
+
+---
+
+## Checkpoint: manual aim still has three remaining issues (2026-10-04)
+
+Tested runtime: `7a6af671ec671d7f61a1003b296f59d655b39dcd`.
+
+Observed:
+- movement intent reaches Spider-Man (visible twisting/attempted locomotion) but world translation remains blocked;
+- WASD still moves the legacy reticle because SetupLookaroundCamera continues consuming E2D/E2E;
+- mouse-driven reticle mapping is inverted horizontally and vertically.
+
+Next implementation must:
+1. identify the movement/state gate after CheckForwards that blocks translation during field_8EA aim state;
+2. prevent SetupLookaroundCamera from consuming movement axes for legacy cursor motion while preserving its non-axis aim/web state;
+3. correct the field_DC0 camera-ray sign convention on both axes;
+4. keep hip-fire camera-ray acquisition debugging separate from manual-reticle input.
+
+Do not restart from the old assumption that camera mode alone controls the reticle. The reticle is an independent world-space point at field_DC0.
