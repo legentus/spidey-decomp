@@ -46,6 +46,102 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## IMPLEMENTATION CHECKPOINT — UNIFIED TPS MANUAL-AIM CAMERA READY (2026-10-04)
+
+**Status: implemented and committed; NOT runtime-tested yet.**
+
+Source commit:
+- `44dbfec52838fdadbd5b82556b15ced208297220` — `gameplay: unify manual aim with TPS orbit camera`
+
+### What changed
+
+The previous manual-aim camera architecture has been removed from the active path.
+
+Old behavior:
+- mouse/right-stick changed `gSpideyManualAimViewYawOffset/PitchOffset`;
+- mode-3 orbit yaw stayed separate;
+- post-CM code rewrote `field_144`;
+- final `LoadIntoMikeCamera` call was wrapped to publish a second orientation.
+
+New behavior:
+- manual aim and ordinary gameplay share the same `gSpideyModernCameraYaw`;
+- mouse/right-stick updates the real mode-3 orbit yaw while manual aim is held;
+- vertical look updates the same `gSpideyModernCameraYDistance`;
+- untouched `CM_Normal` owns camera position, collision and focus;
+- the post-CM free-view `field_144` rewrite is removed;
+- the final `0x0041865F -> LoadIntoMikeCamera` call is left retail/untouched;
+- manual reticle/web code continues to use the resulting camera ray;
+- working manual-aim locomotion re-entry guard is unchanged.
+
+This is intentionally a first unified-TPS pass:
+- no shoulder offset yet;
+- no camera-side movement remapping yet;
+- no change to hip-fire targeting;
+- no change to web-fire behavior;
+- no change to locomotion mask.
+
+### New telemetry
+
+Startup should report:
+- `modern_camera_install ... manual_aim_free_view=0 manual_tps_unified=1 ... manual_publish=0 ...`
+
+During manual aim + camera input:
+- `modern_manual_camera event=tps_orbit input_seq=... yaw=... retail_yaw=... y_dist=... camera_pos=... camera_focus=... reticle_policy=camera_ray`
+- ordinary `modern_camera event=update` also includes `manual_tps_unified=1`.
+
+Success criterion:
+- while aim is held, mouse/right-stick visibly orbits the actual gameplay camera;
+- Spider-Man continues moving normally at the same time;
+- reticle remains coherent with the camera view;
+- webs still travel where the reticle/view aims.
+
+If camera movement works but reticle lands on/too close to Spider-Man, the next refinement is a proper over-the-shoulder camera/reticle offset. Do **not** reintroduce the old independent free-view accumulator.
+
+### Static source audit
+
+After `44dbfec...`:
+- braces balanced: 1078 / 1078;
+- parentheses balanced: 5048 / 5048;
+- brackets balanced: 363 / 363;
+- no C++11 `auto`, `nullptr`, or lambdas introduced;
+- no active post-CM manual free-view rewrite remains;
+- no direct patch of `0x0041865F` remains;
+- one explicit `event=tps_orbit` telemetry path is present;
+- GitHub combined status currently has no attached CI result; do not call this CI-green.
+
+### Timer result from tested 759e58dc runtime
+
+The elapsed-time 1 ms dispatcher materially fixed the previous timer drift.
+
+Observed in `spidey-decomp(20261004-194202).log`:
+- long settled gameplay windows repeatedly report `count=60 hz=60.000`;
+- `vblank_one=60`, `vblank_multi=0` in those windows;
+- `timer_callbacks` and `timer_virtual_ticks` remain matched;
+- `timer_source_callbacks` and `timer_source_ms` remain matched over long runs;
+- the previous persistent 58–59 Hz one-shot re-arm drift is gone.
+
+There are still isolated larger stalls/transitions. Do not continue timer surgery unless the user reports a persistent hitch after the next camera test.
+
+### Exact next runtime
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`44dbfec5...` or newer**.
+
+Test:
+1. hold manual aim and rotate mouse left/right/up/down;
+2. confirm the actual camera orbits/tilts like ordinary modern camera control;
+3. keep aim held and move W/A/S/D + diagonals while rotating camera;
+4. fire webs while aim + movement + camera rotation are simultaneous;
+5. check whether reticle stays useful or ends up centered on/obscured by Spider-Man;
+6. release aim and verify seamless return to normal camera;
+7. quick hip-fire sanity;
+8. report whether any periodic hitch is still perceptible.
+
+Return one consolidated log.
+
+
 ## RUNTIME CHECKPOINT — AIMED LOCOMOTION FIXED; MANUAL CAMERA STILL NOT TPS-STYLE (2026-10-04)
 
 Tested revision:
