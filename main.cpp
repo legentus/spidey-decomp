@@ -8602,7 +8602,7 @@ static void __fastcall SpideyModernMode3Camera(
 		hasIntent &&
 		(gSpideyModernCameraLastLogSequence == 0 ||
 		 gSpideyModernCameraInputSequence -
-			gSpideyModernCameraLastLogSequence >= 10);
+			gSpideyModernCameraLastLogSequence >= 60);
 
 	if (shouldLog ||
 		retailResultYaw !=
@@ -9011,7 +9011,7 @@ static void SpideyCameraPassivePoll(
 	const int intentSample =
 		(mouseIntent ||
 		 stickIntent) &&
-		(frame - gSpideyCameraTelemetryLastIntentFrame >= 15);
+		(frame - gSpideyCameraTelemetryLastIntentFrame >= 60);
 	const int periodic =
 		frame <= 5 ||
 		(frame % (modernController ? 60 : 300)) == 0;
