@@ -9238,3 +9238,37 @@ Static post-edit structure check:
 Runtime validation can be folded into the already-pending web-target + blob-shadow test:
 - open Pause -> Options and confirm the purple container encloses all six rows through Back;
 - press Back and verify the parent pause container still encloses Options and Quit.
+
+
+## Runtime report recovery — uploaded log was pre-fix build (2026-10-04)
+
+User reported:
+- crash when pausing during gameplay in a level;
+- camera-based web targeting felt better but remained inconsistent, especially against enemies that had aggroed;
+- Spider-Man/NPC floor blob shadows still slid with camera movement.
+
+Uploaded consolidated log:
+- `spidey-decomp(20261004-071556).log`
+- session revision: `ef78ea5ff959f4518a96567aed340bd935c251e5`
+
+Important interpretation:
+- this is an older installed build, from before the current web-axis, QuadBit camera-anchor, and dynamic pause-box commits;
+- the log contains the older `camera_web_target_install` hook;
+- it does **not** contain `quadbit_camera_anchor` or `pause_menu_box_refresh`, confirming the newer fixes were not present in that run;
+- the log ends with `[SESSION] exit_code=0`, so this specific consolidated log does not capture an actual crash termination.
+
+Therefore:
+- do not regress or rewrite the current web/shadow/pause fixes based on this stale runtime;
+- first validate current dev `414617b67870d9bf1880fdd66c919f81cd22bba4` using `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+- the separate `PLAY_CURRENT_BUILD.bat` intentionally launches whatever is already installed and can therefore run an older revision if the update/install BAT has not been run first.
+
+Expected current-build startup evidence:
+- session revision at or after `414617b67870d9bf1880fdd66c919f81cd22bba4`;
+- `camera_web_target_install ... forward_axis=negative_local_z`;
+- `quadbit_camera_anchor installed=1 ... reason=ok`;
+- `pause_menu_box_refresh ... refreshed=1` after opening/injecting pause Options.
+
+If the latest build still crashes on pause:
+- preserve/upload the new consolidated log;
+- also upload any `spidey-decomp-crash*.log` if generated;
+- do not diagnose the old ef78 run as a crash reproduction because its session closed normally.
