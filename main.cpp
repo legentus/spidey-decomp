@@ -13390,6 +13390,40 @@ static unsigned long gSpideyTimingPresentVblankOne = 0;
 static unsigned long gSpideyTimingPresentVblankMulti = 0;
 static unsigned long gSpideyTimingPresentVblankMaxDelta = 0;
 
+// Previous completed DXPOLY flip-wrapper phase timings. SpideyRecordPresentTiming
+// runs at the *next* wrapper entry, so a slow inter-present interval can be
+// decomposed into prior presenter work vs time spent elsewhere in the frame.
+static unsigned long gSpideyTimingLastPresentWorkUs = 0;
+static unsigned long gSpideyTimingLastRecordTimingUs = 0;
+static unsigned long gSpideyTimingLastTransientUs = 0;
+static unsigned long gSpideyTimingLastShadowEndUs = 0;
+static unsigned long gSpideyTimingLastDrawProbeUs = 0;
+static unsigned long gSpideyTimingLastPresentShadowUs = 0;
+static unsigned long gSpideyTimingLastOtherPresentUs = 0;
+
+static unsigned long SpideyTimingElapsedUs(
+		const LARGE_INTEGER* start,
+		const LARGE_INTEGER* end)
+{
+	if (!start ||
+		!end ||
+		!gSpideyTimingPerfFrequency.QuadPart)
+	{
+		return 0;
+	}
+
+	const LONGLONG ticks =
+		end->QuadPart -
+		start->QuadPart;
+	if (ticks <= 0)
+		return 0;
+
+	return
+		(unsigned long)(
+			(ticks * (LONGLONG)1000000) /
+			gSpideyTimingPerfFrequency.QuadPart);
+}
+
 #define SPIDEY_TIMING_SLOW_EVENT_CAPACITY 16
 #define SPIDEY_TIMING_SLOW_EVENT_THRESHOLD_US 18000
 
@@ -13401,6 +13435,14 @@ struct SpideyTimingSlowEvent
 	unsigned long checkWebShotCalls;
 	unsigned long fireWebCalls;
 	unsigned long lastFireWebFrame;
+	unsigned long presentWorkUs;
+	unsigned long outsidePresentUs;
+	unsigned long recordTimingUs;
+	unsigned long transientUs;
+	unsigned long shadowEndUs;
+	unsigned long drawProbeUs;
+	unsigned long presentShadowUs;
+	unsigned long otherPresentUs;
 };
 
 static SpideyTimingSlowEvent
@@ -13482,13 +13524,21 @@ static void SpideyLogTimingWindow(
 					gSpideyTimingSlowEvents[i];
 				fprintf(
 					f,
-					" frame=%lu interval_us=%lu web_calls=%lu check_web_shot_calls=%lu fire_web_calls=%lu last_fire_frame=%lu",
+					" frame=%lu interval_us=%lu web_calls=%lu check_web_shot_calls=%lu fire_web_calls=%lu last_fire_frame=%lu present_work_us=%lu outside_present_us=%lu record_timing_us=%lu transient_us=%lu shadow_end_us=%lu draw_probe_us=%lu present_shadow_us=%lu other_present_us=%lu",
 					event.frame,
 					event.intervalUs,
 					event.webTargetCalls,
 					event.checkWebShotCalls,
 					event.fireWebCalls,
-					event.lastFireWebFrame);
+					event.lastFireWebFrame,
+					event.presentWorkUs,
+					event.outsidePresentUs,
+					event.recordTimingUs,
+					event.transientUs,
+					event.shadowEndUs,
+					event.drawProbeUs,
+					event.presentShadowUs,
+					event.otherPresentUs);
 			}
 
 			fputc(
@@ -13612,6 +13662,26 @@ static void SpideyRecordPresentTiming()
 							gSpideyFireWebCalls;
 						event.lastFireWebFrame =
 							gSpideyLastFireWebFrame;
+						event.presentWorkUs =
+							gSpideyTimingLastPresentWorkUs;
+						event.outsidePresentUs =
+							deltaUs >
+								gSpideyTimingLastPresentWorkUs ?
+								deltaUs -
+									gSpideyTimingLastPresentWorkUs :
+								0;
+						event.recordTimingUs =
+							gSpideyTimingLastRecordTimingUs;
+						event.transientUs =
+							gSpideyTimingLastTransientUs;
+						event.shadowEndUs =
+							gSpideyTimingLastShadowEndUs;
+						event.drawProbeUs =
+							gSpideyTimingLastDrawProbeUs;
+						event.presentShadowUs =
+							gSpideyTimingLastPresentShadowUs;
+						event.otherPresentUs =
+							gSpideyTimingLastOtherPresentUs;
 					}
 				}
 				if (deltaUs > 30000)
@@ -16587,9 +16657,36 @@ typedef void (__cdecl *SpideyRetailFlipFn)(void);
 
 static void __cdecl SpideyDiagDXPOLYFlip(void)
 {
+	LARGE_INTEGER presentWorkStart;
+	LARGE_INTEGER presentWorkEnd;
+	LARGE_INTEGER phaseStart;
+	LARGE_INTEGER phaseEnd;
+	QueryPerformanceCounter(
+		&presentWorkStart);
+
+	unsigned long recordTimingUs =
+		0;
+	unsigned long transientUs =
+		0;
+	unsigned long shadowEndUs =
+		0;
+	unsigned long drawProbeUs =
+		0;
+	unsigned long presentShadowUs =
+		0;
+
 	const unsigned long frame =
 		++gSpideyPresentFrame;
+
+	QueryPerformanceCounter(
+		&phaseStart);
 	SpideyRecordPresentTiming();
+	QueryPerformanceCounter(
+		&phaseEnd);
+	recordTimingUs =
+		SpideyTimingElapsedUs(
+			&phaseStart,
+			&phaseEnd);
 
 	// Modern input Phase 0 is observation-only. Poll once per completed game
 	// frame so connection/axis telemetry is available without changing retail
@@ -16637,7 +16734,15 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	// no longer actively bound for drawing here, so this is the safe point
 	// to lock/mirror them and then replay the queued retail primitive stream
 	// into the completely offscreen DX11 shadow target.
+	QueryPerformanceCounter(
+		&phaseStart);
 	SpideyProcessPendingTransientSurfaces();
+	QueryPerformanceCounter(
+		&phaseEnd);
+	transientUs =
+		SpideyTimingElapsedUs(
+			&phaseStart,
+			&phaseEnd);
 
 	unsigned long shadowWidth =
 		(unsigned long)*(DWORD*)0x006B78E4;
@@ -16684,11 +16789,19 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	if (shadowWidth &&
 		shadowHeight)
 	{
+		QueryPerformanceCounter(
+			&phaseStart);
 		shadowFrameResult =
 			SpideyRenderer11ShadowEndFrame(
 				frame,
 				shadowWidth,
 				shadowHeight);
+		QueryPerformanceCounter(
+			&phaseEnd);
+		shadowEndUs =
+			SpideyTimingElapsedUs(
+				&phaseStart,
+				&phaseEnd);
 	}
 
 	if (shadowReferenceDelay)
@@ -16774,9 +16887,17 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	// Retail D3D7 remains the compatibility/reference producer, while the
 	// default visible path replays the same completed primitive stream in DX11.
 	// These counters describe the just-completed retail source frame.
+	QueryPerformanceCounter(
+		&phaseStart);
 	SpideyFlushRetailD3D7DrawProbeFrame(
 		frame);
 	SpideyInstallRetailD3D7DrawProbe();
+	QueryPerformanceCounter(
+		&phaseEnd);
+	drawProbeUs =
+		SpideyTimingElapsedUs(
+			&phaseStart,
+			&phaseEnd);
 
 	HWND hwnd =
 		*(HWND*)0x006B58D0;
@@ -16874,12 +16995,27 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 	const int dx11Authoritative =
 		SpideyDx11AuthoritativeActive();
 
-	if (((gSpideyShadowPreviewEnabled &&
-		  gSpideyShadowPreviewReady) ||
-		 shadowReferenceDelay) &&
-		SpideyRenderer11PresentShadow(
-			1,
-			0))
+	int shadowPresentResult =
+		0;
+	if ((gSpideyShadowPreviewEnabled &&
+		 gSpideyShadowPreviewReady) ||
+		shadowReferenceDelay)
+	{
+		QueryPerformanceCounter(
+			&phaseStart);
+		shadowPresentResult =
+			SpideyRenderer11PresentShadow(
+				1,
+				0);
+		QueryPerformanceCounter(
+			&phaseEnd);
+		presentShadowUs =
+			SpideyTimingElapsedUs(
+				&phaseStart,
+				&phaseEnd);
+	}
+
+	if (shadowPresentResult)
 	{
 		compatPresentPath =
 			4;
@@ -16961,6 +17097,38 @@ static void __cdecl SpideyDiagDXPOLYFlip(void)
 			fclose(f);
 		}
 	}
+
+	QueryPerformanceCounter(
+		&presentWorkEnd);
+	const unsigned long presentWorkUs =
+		SpideyTimingElapsedUs(
+			&presentWorkStart,
+			&presentWorkEnd);
+	const unsigned long measuredPhaseUs =
+		recordTimingUs +
+		transientUs +
+		shadowEndUs +
+		drawProbeUs +
+		presentShadowUs;
+
+	gSpideyTimingLastPresentWorkUs =
+		presentWorkUs;
+	gSpideyTimingLastRecordTimingUs =
+		recordTimingUs;
+	gSpideyTimingLastTransientUs =
+		transientUs;
+	gSpideyTimingLastShadowEndUs =
+		shadowEndUs;
+	gSpideyTimingLastDrawProbeUs =
+		drawProbeUs;
+	gSpideyTimingLastPresentShadowUs =
+		presentShadowUs;
+	gSpideyTimingLastOtherPresentUs =
+		presentWorkUs >
+			measuredPhaseUs ?
+			presentWorkUs -
+				measuredPhaseUs :
+			0;
 }
 
 
