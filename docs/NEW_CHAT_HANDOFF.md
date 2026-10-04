@@ -1,3 +1,113 @@
+# LIVE FRONTIER — FINAL MANUAL-CAMERA PUBLISH + AIM RE-ENTRY GUARD + ELAPSED 60 HZ TIMER READY (2026-10-04)
+
+## LATEST TESTED RUNTIME
+
+Revision:
+- `93d63347505da81a769c1d58ba62361c4650f4b5`
+
+Logs:
+- `spidey-decomp(20261004-190816).log`
+- `spidey-decomp(20261004-191012).log`
+
+User result:
+- manual aim cursor now moves and web direction is mostly accurate;
+- visible camera itself still did not rotate during manual aim;
+- movement while aiming still failed, with Spider-Man visibly vibrating/resetting;
+- user still saw a small hitch and attempted web-fire timestamps near the end.
+
+Decisive log evidence:
+- manual free-view yaw/pitch/focus changes correctly;
+- movement mask engages;
+- CheckForwards reaches run state;
+- raw `field_8EA` is then reasserted to 1 while the sidecar remains active;
+- body position remains unchanged;
+- old exact 24-frame 31–33 ms timer beat is gone in settled gameplay;
+- first phased timer source nevertheless settles around 58–59 Hz due one-shot re-arm drift.
+
+## NEW UNTESTED SOURCE
+
+- `71d6bf609bca7ba9cacc860aa008db03c302da74` — final manual-camera publish + redundant aim-entry guard
+- `b4d961a4a349bf397a45b5025aaeba353a3f479f` — periodic timer source + direct FireWeb timestamp
+- `26a03d05afe21e82517bee43400129c1190176b5` — anchor timer dispatch to absolute `timeGetTime` elapsed milliseconds
+- `879ee5ffbb3a4696312d9682c55ec56adcbdba1f` — CURRENT_STATUS checkpoint
+
+### Camera
+
+Canonical retained CCamera::AI call order:
+- `0x00418414 -> CM_Normal 0x00418E00`
+- `0x00418458 -> shared postprocess 0x00416B10`
+- `0x0041865F -> LoadIntoMikeCamera 0x00416A20`
+
+The previous build changed field_144 after CM_Normal, so reticle/web moved but visible quaternion did not.
+
+New code patches the final LoadIntoMikeCamera call. During effective manual aim only:
+- derive orientation from camera position -> manual focus;
+- build it with retail Utils_CalcAim / RotMatrixYXZ / MToQ;
+- temporarily publish through retail LoadIntoMikeCamera;
+- restore internal retail quaternion immediately afterward.
+
+Expected:
+- `modern_manual_camera event=publish ...`
+
+### Movement
+
+EnterLookaroundMode @ 0x004C3580 explicitly writes `field_8EA=1`.
+
+New code scans the player-AI range for exact direct calls to EnterLookaroundMode and routes them through a guard:
+- initial entry still calls retail;
+- redundant re-entry is suppressed while the modern locomotion sidecar is active;
+- reasserted raw field_8EA is cleared while movement owns the sidecar.
+
+Expected:
+- startup `enter_reentry_calls=<nonzero>`;
+- movement lines add `enter_retail`, `enter_suppressed`, `raw_reclear`;
+- successful runtime should keep `actual_aim_state=0` while mask is active and finally show nonzero body delta.
+
+### Timing
+
+Old chained one-shot 16/17 ms source removed the original 24-frame ~32 ms beat but accumulated re-arm latency.
+
+New source:
+- one real 1 ms periodic WinMM heartbeat;
+- absolute delivery deadlines use `floor(n*1000/60)+1`;
+- heartbeat phase uses actual `timeGetTime` elapsed milliseconds, not callback count;
+- untouched retail TimerCallback/MyVSync receives only the intended 16/17 ms deliveries.
+
+Expected:
+- source callbacks ~1000/sec;
+- dispatched timer callbacks / gameplay logic near 60/sec;
+- no old 24-frame double-frame cadence.
+
+### Hitch timestamps
+
+All direct main-EXE calls to FireWeb @ 0x004C5DD0 are wrapped only to record:
+- `fire_web_calls`
+- `last_fire_frame`
+
+Slow gameplay-event threshold is now 18 ms and records those fire timestamps in the existing buffered timing line.
+
+## EXACT NEXT ACTION
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`26a03d05...` or newer**.
+
+Test:
+1. manual aim + mouse/right-stick: actual visible camera should rotate and cursor/web should remain aligned;
+2. aim + W/A/S/D/diagonals: Spider-Man should translate rather than vibrate;
+3. aim + move + camera + fire together;
+4. release aim while moving; quick pause/unpause/camera-transition sanity;
+5. play long enough to observe several small hitches and fire near them when practical;
+6. quick hip-fire sanity;
+7. return one consolidated log.
+
+If compile fails under VC6, capture the compiler output before runtime testing.
+
+Do not resume shadow-map work until this test is evaluated.
+
+---
+
 # LIVE FRONTIER — VC6 COMPILE FAILURE RECOVERED; RETRY SAME RUNTIME TEST (2026-10-04)
 
 The user attempted the free-manual-aim / aimed-locomotion / phased-60-Hz-timer test from revision:
