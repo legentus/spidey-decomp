@@ -244,6 +244,38 @@ For 120/144/240+ output:
 
 This is the long-term uncapped/high-refresh design.
 
+## Runtime validation update — 2026-10-04
+
+Tested runtime:
+- `a4e1105d1f9568a24ca8817847573392a7f8324a`
+- log `spidey-decomp(20261004-213030).log`
+
+Validated:
+- user confirms the prior recurring hitches are gone after the hot-path logging cleanup;
+- hitch investigation is therefore closed unless a new independent stall appears;
+- all three startup retail captures from the first RE batch completed successfully;
+- Mysterio compatibility correctly refused to install because runtime slot 0 is `0x0045B540`, not the initial `0x0045B300` guard; slot 1 matched `0x0045BAC0`.
+
+Source follow-up:
+- `6cf830b974316134a8a7813ac1eda42279eacd60` corrects the Mysterio guard and retires the completed first RE capture;
+- `62f9500c4085a0841f5afbe9f85ee7d68b021e1f` adds startup-only capture for:
+  - `AIProcBlock @ 0x00401000`, size `0x1100`;
+  - `CPlayer_DoPhysics @ 0x004BFEC0`, size `0x1F0`.
+
+The runtime result also changes the priority:
+- 60 Hz is a mandatory native simulation baseline;
+- user reports gameplay still feels slightly sped up at 60;
+- the canonical timer itself is approximately 60 Hz, so the remaining acceleration is expected to come from per-Logic-call subsystems.
+
+Recovered `Ob_AI` proves there is no hidden 30-Hz throttle inside object dispatch:
+- active bodies receive `EveryFrame`;
+- supers receive `UpdateFrame`;
+- virtual `AI()` runs every dispatch.
+
+Therefore raw AI counters such as `CAIProc::Wait(field_C--)` are genuine 60-Hz call-count candidates, while `CAIProc_MoveTo`, `CBaddy::RunTimer`, camera, animation and many movement paths already consume elapsed `field_80` ticks.
+
+The next capture exists specifically to avoid changing `CAIProc::Wait` or player physics from reconstructed source guesses. Reconstruct the retail AI-proc constructors/Execute functions and retail player physics first, then convert only semantics proven to be frame-count based.
+
 ## Next steps
 
 1. Runtime-test current `dev` to:
