@@ -447,16 +447,16 @@ i32 CPlayer::CheckRunIntoWall(void)
 
 	if (this->mCollision & 1)
 	{
-		if ( this->field_B84.vy <= 3400
-				&& this->field_B74
-				&& this->field_B84.vy >= -2600
+		if ( this->mLineInfo.Normal.vy <= 3400
+				&& this->mLineInfo.pItem
+				&& this->mLineInfo.Normal.vy >= -2600
 				// @FIXME
-				&& !(this->field_B8C[3] & 0x40000))
+				&& !(this->mLineInfo.pFace[3] & 0x40000))
 		{
 
-			if (((this->field_C6C.vx - this->field_B84.vx) >> 12) +
-					((this->field_C6C.vy - this->field_B84.vy) >> 12) +
-					((this->field_C6C.vz - this->field_B84.vz) >> 12) > 3800)
+			if (((this->field_C6C.vx - this->mLineInfo.Normal.vx) >> 12) +
+					((this->field_C6C.vy - this->mLineInfo.Normal.vy) >> 12) +
+					((this->field_C6C.vz - this->mLineInfo.Normal.vz) >> 12) > 3800)
 			{
 				v3 = 0;
 				this->field_AD7 += this->field_80;
@@ -483,23 +483,23 @@ i32 CPlayer::CheckStickToCeiling(void)
 {
 	if ( this->mVel.vy > 0
 		|| !(this->mCollision & 0x100)
-		|| !this->field_C18
+		|| !this->mLineInfo2.pItem
 		|| !(reinterpret_cast<u8*>(this->field_E0C)[256])
-		|| this->field_C28.vy <= 3400
-		|| this->field_C30[3] & 0x40000)
+		|| this->mLineInfo2.Normal.vy <= 3400
+		|| this->mLineInfo2.pFace[3] & 0x40000)
 	{
 		return 0;
 	}
 
 	this->field_AD4 = 1;
-	this->field_A8 = this->field_C28;
+	this->field_A8 = this->mLineInfo2.Normal;
 	this->field_AC8 = this->field_C6C;
 	this->OrientToNormal(true, &this->field_AC8);
 
 	this->field_E88 = 0;
 	this->field_E84 = 0;
 
-	this->mPos = this->field_C1C;
+	this->mPos = this->mLineInfo2.Position;
 	this->mPos.vx += this->field_A8.vx * this->field_EA8;
 	this->mPos.vy += this->field_A8.vy * this->field_EA8;
 	this->mPos.vz += this->field_A8.vz * this->field_EA8;
@@ -741,7 +741,7 @@ u8 CPlayer::IfPlayerCeilingCheck(i32 a2, i32 a3)
 	{
 		if (this->mPos.vy >= a2 && this->mPos.vy <= a3)
 		{
-			if (this->field_8E9 || this->field_8E8 && this->field_B84.vy > 3400)
+			if (this->field_8E9 || this->field_8E8 && this->mLineInfo.Normal.vy > 3400)
 			{
 				return 1;
 			}
