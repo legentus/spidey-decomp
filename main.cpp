@@ -4597,9 +4597,10 @@ static int SpideyModernAimApplyCameraPoint(
 		return 0;
 	}
 
-	// field_144 is the live mode-3 camera focus point. Extending the
-	// camera->focus vector gives a stable center-screen world point which
-	// follows the same mouse/right-stick orbit that the player actually sees.
+	// field_144 is the live retail mode-3 camera focus point. In unified TPS
+	// manual aim, mouse/right-stick now rotates the actual mode-3 orbit first.
+	// Extending camera->focus therefore produces the same camera-relative ray
+	// used by the view, instead of a second independently moving cursor camera.
 	const int dx =
 		camera->field_144.vx -
 		camera->mPos.vx;
@@ -9641,21 +9642,14 @@ static void __fastcall SpideyModernMode3Camera(
 		SpideyModernAimIsEffectivelyActive(
 			manualAimPlayer);
 
-	if (manualAim)
-	{
-		if (!gSpideyManualAimViewActive ||
-			gSpideyManualAimViewPlayer !=
-				manualAimPlayer)
-		{
-			SpideyManualAimSeedView(
-				manualAimPlayer,
-				camera);
-		}
-	}
-	else if (gSpideyManualAimViewActive)
+	// Modern manual aim now shares the ordinary mode-3 orbit camera instead of
+	// accumulating an independent free-view yaw/pitch. A third-person shooter
+	// should have one view orientation: mouse/right-stick rotates the actual
+	// camera, and the reticle/web ray follows that camera.
+	if (gSpideyManualAimViewActive)
 	{
 		SpideyManualAimReleaseView(
-			"aim_inactive");
+			"unified_tps_camera");
 	}
 
 	const int newInputFrame =
@@ -9772,37 +9766,17 @@ static void __fastcall SpideyModernMode3Camera(
 				(float)sensitivity /
 				100.0f);
 
-		if (manualAim &&
-			gSpideyManualAimViewActive)
-		{
-			gSpideyManualAimViewYawOffset =
-				SpideyManualAimClamp(
-					gSpideyManualAimViewYawOffset +
-						yawDelta,
-					-kSpideyManualAimMaxYawOffset,
-					kSpideyManualAimMaxYawOffset);
-
-			// World +Y is downward in this game. The normal orbit pitch delta
-			// moves camera position in the opposite sense from a view ray, so
-			// invert it for free-look orientation.
-			gSpideyManualAimViewPitchOffset =
-				SpideyManualAimClamp(
-					gSpideyManualAimViewPitchOffset -
-						pitchDelta,
-					-kSpideyManualAimMaxPitchOffset,
-					kSpideyManualAimMaxPitchOffset);
-		}
-		else
-		{
-			gSpideyModernCameraYaw =
-				(gSpideyModernCameraYaw +
-				 yawDelta) &
-				0x0FFF;
-			gSpideyModernCameraYDistance =
-				SpideyClampModernCameraYDistance(
-					gSpideyModernCameraYDistance +
-						pitchDelta);
-		}
+		// Unified TPS policy: aim never diverts look input into a second cursor
+		// camera. Rotate the real mode-3 orbit in exactly the same way whether
+		// manual aim is held or not.
+		gSpideyModernCameraYaw =
+			(gSpideyModernCameraYaw +
+			 yawDelta) &
+			0x0FFF;
+		gSpideyModernCameraYDistance =
+			SpideyClampModernCameraYDistance(
+				gSpideyModernCameraYDistance +
+					pitchDelta);
 	}
 
 	const int xzDistance =
@@ -9846,124 +9820,44 @@ static void __fastcall SpideyModernMode3Camera(
 		(int)camera->field_236 &
 		0x0FFF;
 
-	if (manualAim &&
-		gSpideyManualAimViewActive)
-	{
-		const double oldDx =
-			(double)camera->field_144.vx -
-			(double)camera->mPos.vx;
-		const double oldDy =
-			(double)camera->field_144.vy -
-			(double)camera->mPos.vy;
-		const double oldDz =
-			(double)camera->field_144.vz -
-			(double)camera->mPos.vz;
-		double focusDistance =
-			sqrt(
-				oldDx * oldDx +
-				oldDy * oldDy +
-				oldDz * oldDz);
-
-		if (focusDistance <
-			4096.0)
-		{
-			focusDistance =
-				528.0 *
-				4096.0;
-		}
-
-		const int viewYaw =
-			(gSpideyManualAimViewBaseYaw +
-			 gSpideyManualAimViewYawOffset) &
-			0x0FFF;
-		const int viewPitch =
-			SpideyManualAimClamp(
-				gSpideyManualAimViewBasePitch +
-					gSpideyManualAimViewPitchOffset,
-				-900,
-				900);
-		const double yawRadians =
-			(double)viewYaw *
-			kSpideyRadiansPerAngleUnit;
-		const double pitchRadians =
-			(double)viewPitch *
-			kSpideyRadiansPerAngleUnit;
-		const double cosPitch =
-			cos(
-				pitchRadians);
-		const double forwardX =
-			-sin(
-				yawRadians) *
-			cosPitch;
-		const double forwardY =
-			sin(
-				pitchRadians);
-		const double forwardZ =
-			-cos(
-				yawRadians) *
-			cosPitch;
-
-		camera->field_144.vx =
-			camera->mPos.vx +
-			(int)(
-				forwardX *
-				focusDistance);
-		camera->field_144.vy =
-			camera->mPos.vy +
-			(int)(
-				forwardY *
-				focusDistance);
-		camera->field_144.vz =
-			camera->mPos.vz +
-			(int)(
-				forwardZ *
-				focusDistance);
-
-		const int manualLog =
-			hasIntent &&
-			(gSpideyManualAimViewLastLogSequence == 0 ||
-			 gSpideyModernCameraInputSequence -
-				gSpideyManualAimViewLastLogSequence >= 60);
-
-		if (manualLog)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"CAMERA");
-			if (f)
-			{
-				fprintf(
-					f,
-					"modern_manual_camera event=update input_seq=%lu view_yaw=%d view_pitch=%d offset=%d,%d camera_pos=%d,%d,%d focus=%d,%d,%d focus_distance=%.3f mouse=%d,%d stick=%.4f,%.4f\n",
-					gSpideyModernCameraInputSequence,
-					viewYaw,
-					viewPitch,
-					gSpideyManualAimViewYawOffset,
-					gSpideyManualAimViewPitchOffset,
-					camera->mPos.vx,
-					camera->mPos.vy,
-					camera->mPos.vz,
-					camera->field_144.vx,
-					camera->field_144.vy,
-					camera->field_144.vz,
-					focusDistance,
-					mouseX,
-					mouseY,
-					(double)stickX,
-					(double)stickY);
-				fclose(f);
-			}
-
-			gSpideyManualAimViewLastLogSequence =
-				gSpideyModernCameraInputSequence;
-		}
-	}
+	// Do not rewrite field_144 after CM_Normal in manual aim. Retail mode-3 now
+	// owns the actual orbit/focus, and the manual reticle/web path consumes that
+	// resulting camera ray. This keeps camera movement and aim in one space.
 
 	const int shouldLog =
 		hasIntent &&
 		(gSpideyModernCameraLastLogSequence == 0 ||
 		 gSpideyModernCameraInputSequence -
 			gSpideyModernCameraLastLogSequence >= 60);
+
+	if (manualAim &&
+		shouldLog)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"modern_manual_camera event=tps_orbit input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d mouse=%d,%d stick=%.4f,%.4f reticle_policy=camera_ray\n",
+				gSpideyModernCameraInputSequence,
+				requestedYaw,
+				retailResultYaw,
+				yDistance,
+				camera->mPos.vx,
+				camera->mPos.vy,
+				camera->mPos.vz,
+				camera->field_144.vx,
+				camera->field_144.vy,
+				camera->field_144.vz,
+				mouseX,
+				mouseY,
+				(double)stickX,
+				(double)stickY);
+			fclose(f);
+		}
+	}
 
 	if (shouldLog ||
 		retailResultYaw !=
@@ -9976,7 +9870,7 @@ static void __fastcall SpideyModernMode3Camera(
 		{
 			fprintf(
 				f,
-				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f sensitivity=%d retail_overrode_yaw=%d manual_aim=%d manual_view_active=%d manual_offset=%d,%d\n",
+				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f sensitivity=%d retail_overrode_yaw=%d manual_aim=%d manual_tps_unified=1 manual_view_active=%d manual_offset=%d,%d\n",
 				(unsigned long)camera,
 				gSpideyModernCameraInputSequence,
 				requestedYaw,
@@ -10118,12 +10012,11 @@ static void SpideyInstallModernCameraCompat()
 			0x00418E00,
 			(void*)&SpideyModernMode3Camera,
 			"modern_camera_mode3");
+	// Unified TPS manual aim no longer needs a second final-orientation shim.
+	// Leave the retail LoadIntoMikeCamera call untouched so the same mode-3
+	// orbit camera that moved above is exactly what rendering receives.
 	const int manualPublishInstalled =
-		SpideyPatchDirectCall(
-			0x0041865F,
-			0x00416A20,
-			(void*)&SpideyModernAimLoadIntoMikeCamera,
-			"modern_manual_camera_publish");
+		0;
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -10132,7 +10025,7 @@ static void SpideyInstallModernCameraCompat()
 	{
 		fprintf(
 			f,
-			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=post_retail_forward manual_publish=%d manual_publish_call=0x0041865F retail_publish=0x00416A20\n",
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=0 manual_tps_unified=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=retail_mode3_camera_ray manual_publish=%d manual_publish_call=retail_untouched_0x0041865F retail_publish=0x00416A20\n",
 			installed,
 			gSpideyCameraSensitivityPercent,
 			kSpideyCameraSensitivityMinPercent,
