@@ -3392,9 +3392,14 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			u32,
 			i32,
 			i32);
+	typedef i32 (__cdecl *RetailIsKeyPressedFn)(
+			u8,
+			i32);
 
 	RetailCheckTriggersFn retail =
 		(RetailCheckTriggersFn)0x0050C180;
+	RetailIsKeyPressedFn isKeyPressed =
+		(RetailIsKeyPressedFn)0x0050A650;
 	u8 triggered =
 		retail(
 			mask,
@@ -3416,11 +3421,13 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 	}
 
 	// The pause call patched at 0x00441606 services the mouse-oriented
-	// trigger path (runtime-observed mask 0x00000100). Retail
-	// PCSHELL_CheckTriggers maps mask bit 0x00000010 directly to
-	// DIK_RETURN (0x1C). Probe that native keyboard Enter path only while
-	// one of our custom rows owns the selection so normal pause commands
-	// remain untouched.
+	// trigger path (runtime-observed mask 0x00000100). Calling
+	// PCSHELL_CheckTriggers again for keyboard Enter is too late here:
+	// its mask-0x10 branch is gated by retail's global one-shot latch at
+	// 0x00AC1238, which may already be set earlier in the frame. Read the
+	// game's own DirectInput edge state instead. PCINPUT_IsKeyPressed at
+	// 0x0050A650 with a2=1 returns true only for the fresh 0xFF press edge,
+	// so this does not add a held-key repeat or a Win32 keyboard side path.
 	if (!triggered &&
 		selected &&
 		(gSpideyPauseOptionsActive ||
@@ -3428,13 +3435,15 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			 selected,
 			 gSpideyPauseOptionsLabel)))
 	{
-		triggered =
-			retail(
-				0x00000010,
-				option2,
-				option3);
 		keyboardEnterTriggered =
-			triggered ? 1 : 0;
+			isKeyPressed(
+				0x1C,
+				1) ? 1 : 0;
+		if (keyboardEnterTriggered)
+		{
+			triggered =
+				1;
+		}
 	}
 
 	if (!triggered)
@@ -3466,7 +3475,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				entered,
 				(unsigned long)mask,
 				keyboardEnterTriggered ?
-					"keyboard_enter_mask_0x10" :
+					"directinput_enter_edge" :
 					"retail_call_mask");
 			fclose(f);
 		}
@@ -3494,7 +3503,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
 				keyboardEnterTriggered ?
-					"keyboard_enter_mask_0x10" :
+					"directinput_enter_edge" :
 					"retail_call_mask",
 				gSpideyGameplayUiScalePercent,
 				gSpideyMenuTextScalePercent);
@@ -3507,6 +3516,23 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			selected,
 			gSpideyPauseBackLabel))
 	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_options_confirm action=back line=%u rows=%u mask=0x%08lX source=%s\n",
+				(unsigned int)menu->mLine,
+				(unsigned int)menu->mNumLines,
+				(unsigned long)mask,
+				keyboardEnterTriggered ?
+					"directinput_enter_edge" :
+					"retail_call_mask");
+			fclose(f);
+		}
+
 		SpideyPauseRestoreParent(
 			menu,
 			"back",
