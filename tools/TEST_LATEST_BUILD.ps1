@@ -318,7 +318,9 @@ try {
         Stop-WithPause "Matching build failed." $LASTEXITCODE
     }
 
-    if ($Fast -and $env:SPIDEY_FAST_FORCE_CLEAN -ne "1") {
+    if ($Fast -and
+        $env:SPIDEY_FAST_FORCE_CLEAN -ne "1" -and
+        $env:SPIDEY_FAST_ALLOW_EXISTING_PROXY -ne "1") {
         $fastBuiltDll = Join-Path $RepoRoot "Release\spider.dll"
         $needsRelinkPass = $true
 
