@@ -68,6 +68,7 @@
 #include "mess.h"
 #include "ai.h"
 #include <cstring>
+#include <math.h>
 #include "spool.h"
 #include "l1a3bomb.h"
 #include "chunk.h"
@@ -4181,6 +4182,92 @@ static int gSpideyModernAimLastMoveResult = -1;
 static CVector gSpideyModernAimLastBodyPos;
 static int gSpideyModernAimLastBodyPosValid = 0;
 
+// Manual aim has to remain logically active for reticle/web/camera behavior,
+// but runtime proves field_8EA also causes a later per-frame locomotion reset.
+// While movement is actually held, mask field_8EA across the ordinary player
+// locomotion state machine and keep an out-of-band "effective aim" state for
+// our modern wrappers. Restore as soon as movement or the aim control is
+// released.
+static CPlayer* gSpideyModernAimLocomotionMaskedPlayer = 0;
+static unsigned char gSpideyModernAimLocomotionSavedState = 0;
+static unsigned long gSpideyModernAimLocomotionMaskCount = 0;
+static unsigned long gSpideyModernAimLocomotionRestoreCount = 0;
+
+static int SpideyModernAimIsEffectivelyActive(
+		CPlayer* player)
+{
+	if (!player)
+		return 0;
+
+	if (player->field_8EA)
+		return 1;
+
+	return
+		gSpideyModernAimLocomotionMaskedPlayer ==
+			player &&
+		gSpideyModernAimLocomotionSavedState != 0;
+}
+
+static void SpideyModernAimRestoreLocomotionState()
+{
+	CPlayer* player =
+		gSpideyModernAimLocomotionMaskedPlayer;
+	if (!player)
+		return;
+
+	__try
+	{
+		player->field_8EA =
+			gSpideyModernAimLocomotionSavedState;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+
+	gSpideyModernAimLocomotionMaskedPlayer =
+		0;
+	gSpideyModernAimLocomotionSavedState =
+		0;
+	++gSpideyModernAimLocomotionRestoreCount;
+}
+
+static void SpideyModernAimValidateLocomotionMaskAtFrameEnd()
+{
+	CPlayer* player =
+		gSpideyModernAimLocomotionMaskedPlayer;
+	if (!player)
+		return;
+
+	int keepMasked =
+		0;
+
+	__try
+	{
+		unsigned char* input =
+			(unsigned char*)player->field_E0C;
+		const int aimHeld =
+			input &&
+			input[0x40] != 0;
+		const int movementHeld =
+			player->field_E2D != 0 ||
+			player->field_E2E != 0;
+
+		keepMasked =
+			aimHeld &&
+			movementHeld;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		keepMasked =
+			0;
+	}
+
+	if (!keepMasked)
+	{
+		SpideyModernAimRestoreLocomotionState();
+	}
+}
+
 typedef int (__fastcall *SpideyRetailCheckForwardsFn)(
 		CPlayer*,
 		void*,
@@ -4197,8 +4284,7 @@ static int __fastcall SpideyModernAimCheckForwards(
 	SpideyRetailCheckForwardsFn retail =
 		(SpideyRetailCheckForwardsFn)0x004BF8A0;
 
-	if (!player ||
-		!player->field_8EA)
+	if (!player)
 	{
 		return retail(
 			player,
@@ -4217,16 +4303,50 @@ static int __fastcall SpideyModernAimCheckForwards(
 	{
 		__try
 		{
-			// The canonical CheckForwards has an earlier gate than the
-			// field_8EA test:
-			//   if (input[0x40] && (field_E1C & 1)) return 0;
-			//
-			// input[0x40] is held for the manual-aim control in this path.
-			// Hide it only while forward locomotion is evaluated, then restore
-			// it immediately so lookaround remains held for the rest of the
-			// frame. WASD/analogue axes at E2D/E2E are left untouched.
 			savedAimControl =
 				input[0x40];
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			savedAimControl =
+				0;
+		}
+	}
+
+	const int effectiveAim =
+		SpideyModernAimIsEffectivelyActive(
+			player);
+
+	if (!effectiveAim)
+	{
+		return retail(
+			player,
+			0,
+			allowTurn);
+	}
+
+	const int movementHeld =
+		player->field_E2D != 0 ||
+		player->field_E2E != 0;
+
+	// If a prior movement mask is still active but either control was
+	// released, restore retail manual-aim state before continuing so the
+	// normal lookaround-exit path can observe it.
+	if (gSpideyModernAimLocomotionMaskedPlayer ==
+			player &&
+		(!savedAimControl ||
+		 !movementHeld))
+	{
+		SpideyModernAimRestoreLocomotionState();
+	}
+
+	// The canonical CheckForwards has an earlier held-aim-control gate:
+	//   if (input[0x40] && (field_E1C & 1)) return 0;
+	// Hide that button only while movement is evaluated.
+	if (input)
+	{
+		__try
+		{
 			input[0x40] =
 				0;
 			patchedAimControl =
@@ -4237,6 +4357,25 @@ static int __fastcall SpideyModernAimCheckForwards(
 			patchedAimControl =
 				0;
 		}
+	}
+
+	// Runtime shows CheckForwards can enter run state 0x10 successfully, but
+	// the following frame resets straight back to stand while field_8EA is
+	// still visible to the normal locomotion state machine. Keep the retail
+	// aim flag masked across frames only while aim + movement are held.
+	if (savedAimControl &&
+		movementHeld &&
+		!gSpideyModernAimLocomotionMaskedPlayer)
+	{
+		gSpideyModernAimLocomotionSavedState =
+			player->field_8EA ?
+				player->field_8EA :
+				1;
+		player->field_8EA =
+			0;
+		gSpideyModernAimLocomotionMaskedPlayer =
+			player;
+		++gSpideyModernAimLocomotionMaskCount;
 	}
 
 	int result =
@@ -4273,10 +4412,6 @@ static int __fastcall SpideyModernAimCheckForwards(
 		moveState != gSpideyModernAimLastMoveState ||
 		result != gSpideyModernAimLastMoveResult;
 
-	// Do not write one line per successful movement evaluation. The previous
-	// diagnostic did exactly that while WASD was held and could itself perturb
-	// frame pacing. Log the first few calls, state/input transitions, and one
-	// periodic sample instead.
 	if (gSpideyModernAimMovementCalls <= 6 ||
 		movementChanged ||
 		(gSpideyModernAimMovementCalls % 60) == 0)
@@ -4288,7 +4423,7 @@ static int __fastcall SpideyModernAimCheckForwards(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d body_pos=%d,%d,%d body_vel=%d,%d,%d anim=%u collision=0x%08lX aim_state=%u wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
+				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d body_pos=%d,%d,%d body_vel=%d,%d,%d anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d mask_count=%lu restore_count=%lu wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimMovementCalls,
 				(unsigned int)savedAimControl,
 				axisX,
@@ -4304,7 +4439,13 @@ static int __fastcall SpideyModernAimCheckForwards(
 				player->mVel.vz,
 				(unsigned int)player->mAnim,
 				(unsigned long)player->mCollision,
+				SpideyModernAimIsEffectivelyActive(
+					player),
 				(unsigned int)player->field_8EA,
+				gSpideyModernAimLocomotionMaskedPlayer ==
+					player ? 1 : 0,
+				gSpideyModernAimLocomotionMaskCount,
+				gSpideyModernAimLocomotionRestoreCount,
 				(unsigned int)player->field_8E8,
 				(unsigned int)player->field_8E9,
 				(int)player->field_E18,
@@ -4331,7 +4472,8 @@ static int SpideyModernAimApplyCameraPoint(
 {
 	if (!player ||
 		!camera ||
-		!player->field_8EA ||
+		!SpideyModernAimIsEffectivelyActive(
+			player) ||
 		camera->mCameraMode !=
 			CAMERAMODE_DEMO)
 	{
@@ -4398,7 +4540,8 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 	CCamera* camera =
 		*(CCamera**)0x0056F3B8;
 	const int modernAim =
-		player->field_8EA &&
+		SpideyModernAimIsEffectivelyActive(
+			player) &&
 		camera &&
 		camera->mCameraMode ==
 			CAMERAMODE_DEMO;
@@ -4468,7 +4611,7 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%u wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
+				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimLookaroundCalls,
 				applied,
 				(unsigned long)camera,
@@ -4496,7 +4639,11 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 				(unsigned long)player->field_E1C,
 				(unsigned int)player->mAnim,
 				(unsigned long)player->mCollision,
+				SpideyModernAimIsEffectivelyActive(
+					player),
 				(unsigned int)player->field_8EA,
+				gSpideyModernAimLocomotionMaskedPlayer ==
+					player ? 1 : 0,
 				(unsigned int)player->field_8E8,
 				(unsigned int)player->field_8E9,
 				(int)player->field_E18,
@@ -9018,6 +9165,172 @@ static unsigned long gSpideyModernCameraInputSequence = 0;
 static unsigned long gSpideyModernCameraLastConsumedSequence = 0xFFFFFFFFUL;
 static unsigned long gSpideyModernCameraLastLogSequence = 0;
 
+// During manual aim the ordinary mode-3 camera may still use Spider-Man as
+// its orbit pivot, but the final view target must be independent from that
+// pivot. Otherwise the center ray always passes through Spider-Man. Seed a
+// free view from the current retail camera direction and move that view with
+// mouse/right stick while keeping retail mode-3 position/collision generation.
+static int gSpideyManualAimViewActive = 0;
+static CPlayer* gSpideyManualAimViewPlayer = 0;
+static int gSpideyManualAimViewBaseYaw = 0;
+static int gSpideyManualAimViewBasePitch = 0;
+static int gSpideyManualAimViewYawOffset = 0;
+static int gSpideyManualAimViewPitchOffset = 0;
+static unsigned long gSpideyManualAimViewLastLogSequence = 0;
+
+static const int kSpideyManualAimMaxYawOffset = 768;
+static const int kSpideyManualAimMaxPitchOffset = 512;
+static const double kSpideyAngleUnitsPerRadian =
+	651.8986469044033;
+static const double kSpideyRadiansPerAngleUnit =
+	0.0015339807878856412;
+
+static int SpideyManualAimClamp(
+		int value,
+		int minimum,
+		int maximum)
+{
+	if (value < minimum)
+		return minimum;
+	if (value > maximum)
+		return maximum;
+	return value;
+}
+
+static int SpideyManualAimRadiansToUnits(
+		double radians)
+{
+	const double units =
+		radians *
+		kSpideyAngleUnitsPerRadian;
+
+	if (units >= 0.0)
+		return (int)(units + 0.5);
+
+	return (int)(units - 0.5);
+}
+
+static void SpideyManualAimSeedView(
+		CPlayer* player,
+		CCamera* camera)
+{
+	if (!player ||
+		!camera)
+	{
+		gSpideyManualAimViewActive =
+			0;
+		gSpideyManualAimViewPlayer =
+			0;
+		return;
+	}
+
+	const double dx =
+		(double)camera->field_144.vx -
+		(double)camera->mPos.vx;
+	const double dy =
+		(double)camera->field_144.vy -
+		(double)camera->mPos.vy;
+	const double dz =
+		(double)camera->field_144.vz -
+		(double)camera->mPos.vz;
+	const double horizontal =
+		sqrt(
+			dx * dx +
+			dz * dz);
+
+	if (horizontal < 1.0)
+	{
+		gSpideyManualAimViewBaseYaw =
+			(int)camera->field_236 &
+			0x0FFF;
+		gSpideyManualAimViewBasePitch =
+			0;
+	}
+	else
+	{
+		gSpideyManualAimViewBaseYaw =
+			SpideyManualAimRadiansToUnits(
+				atan2(
+					-dx,
+					-dz)) &
+			0x0FFF;
+		gSpideyManualAimViewBasePitch =
+			SpideyManualAimRadiansToUnits(
+				atan2(
+					dy,
+					horizontal));
+	}
+
+	gSpideyManualAimViewYawOffset =
+		0;
+	gSpideyManualAimViewPitchOffset =
+		0;
+	gSpideyManualAimViewActive =
+		1;
+	gSpideyManualAimViewPlayer =
+		player;
+	gSpideyManualAimViewLastLogSequence =
+		0;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"CAMERA");
+	if (f)
+	{
+		fprintf(
+			f,
+				"modern_manual_camera event=acquire player=0x%08lX camera=0x%08lX base_yaw=%d base_pitch=%d focus=%d,%d,%d camera_pos=%d,%d,%d max_offset=%d,%d\n",
+				(unsigned long)player,
+				(unsigned long)camera,
+				gSpideyManualAimViewBaseYaw,
+				gSpideyManualAimViewBasePitch,
+				camera->field_144.vx,
+				camera->field_144.vy,
+				camera->field_144.vz,
+				camera->mPos.vx,
+				camera->mPos.vy,
+				camera->mPos.vz,
+				kSpideyManualAimMaxYawOffset,
+				kSpideyManualAimMaxPitchOffset);
+		fclose(f);
+	}
+}
+
+static void SpideyManualAimReleaseView(
+		const char* reason)
+{
+	if (!gSpideyManualAimViewActive)
+		return;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"CAMERA");
+	if (f)
+	{
+		fprintf(
+			f,
+				"modern_manual_camera event=release reason=%s player=0x%08lX base_yaw=%d base_pitch=%d offset=%d,%d\n",
+				reason ? reason : "unknown",
+				(unsigned long)gSpideyManualAimViewPlayer,
+				gSpideyManualAimViewBaseYaw,
+				gSpideyManualAimViewBasePitch,
+				gSpideyManualAimViewYawOffset,
+				gSpideyManualAimViewPitchOffset);
+		fclose(f);
+	}
+
+	gSpideyManualAimViewActive =
+		0;
+	gSpideyManualAimViewPlayer =
+		0;
+	gSpideyManualAimViewYawOffset =
+		0;
+	gSpideyManualAimViewPitchOffset =
+		0;
+	gSpideyManualAimViewLastLogSequence =
+		0;
+}
+
 static const int kSpideyModernCameraMouseYawScale = 3;
 static const int kSpideyModernCameraMousePitchScale = 2;
 static const int kSpideyModernCameraStickYawPerFrame = 32;
@@ -9168,6 +9481,41 @@ static void __fastcall SpideyModernMode3Camera(
 	const SpideyInput11LegacyState* input =
 		SpideyInput11GetState();
 
+	CPlayer* manualAimPlayer =
+		0;
+	__try
+	{
+		manualAimPlayer =
+			*(CPlayer**)0x006A9038;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		manualAimPlayer =
+			0;
+	}
+
+	const int manualAim =
+		manualAimPlayer &&
+		SpideyModernAimIsEffectivelyActive(
+			manualAimPlayer);
+
+	if (manualAim)
+	{
+		if (!gSpideyManualAimViewActive ||
+			gSpideyManualAimViewPlayer !=
+				manualAimPlayer)
+		{
+			SpideyManualAimSeedView(
+				manualAimPlayer,
+				camera);
+		}
+	}
+	else if (gSpideyManualAimViewActive)
+	{
+		SpideyManualAimReleaseView(
+			"aim_inactive");
+	}
+
 	const int newInputFrame =
 		gSpideyModernCameraLastConsumedSequence !=
 			gSpideyModernCameraInputSequence;
@@ -9282,14 +9630,37 @@ static void __fastcall SpideyModernMode3Camera(
 				(float)sensitivity /
 				100.0f);
 
-		gSpideyModernCameraYaw =
-			(gSpideyModernCameraYaw +
-			 yawDelta) &
-			0x0FFF;
-		gSpideyModernCameraYDistance =
-			SpideyClampModernCameraYDistance(
-				gSpideyModernCameraYDistance +
-				pitchDelta);
+		if (manualAim &&
+			gSpideyManualAimViewActive)
+		{
+			gSpideyManualAimViewYawOffset =
+				SpideyManualAimClamp(
+					gSpideyManualAimViewYawOffset +
+						yawDelta,
+					-kSpideyManualAimMaxYawOffset,
+					kSpideyManualAimMaxYawOffset);
+
+			// World +Y is downward in this game. The normal orbit pitch delta
+			// moves camera position in the opposite sense from a view ray, so
+			// invert it for free-look orientation.
+			gSpideyManualAimViewPitchOffset =
+				SpideyManualAimClamp(
+					gSpideyManualAimViewPitchOffset -
+						pitchDelta,
+					-kSpideyManualAimMaxPitchOffset,
+					kSpideyManualAimMaxPitchOffset);
+		}
+		else
+		{
+			gSpideyModernCameraYaw =
+				(gSpideyModernCameraYaw +
+				 yawDelta) &
+				0x0FFF;
+			gSpideyModernCameraYDistance =
+				SpideyClampModernCameraYDistance(
+					gSpideyModernCameraYDistance +
+						pitchDelta);
+		}
 	}
 
 	const int xzDistance =
@@ -9333,6 +9704,119 @@ static void __fastcall SpideyModernMode3Camera(
 		(int)camera->field_236 &
 		0x0FFF;
 
+	if (manualAim &&
+		gSpideyManualAimViewActive)
+	{
+		const double oldDx =
+			(double)camera->field_144.vx -
+			(double)camera->mPos.vx;
+		const double oldDy =
+			(double)camera->field_144.vy -
+			(double)camera->mPos.vy;
+		const double oldDz =
+			(double)camera->field_144.vz -
+			(double)camera->mPos.vz;
+		double focusDistance =
+			sqrt(
+				oldDx * oldDx +
+				oldDy * oldDy +
+				oldDz * oldDz);
+
+		if (focusDistance <
+			4096.0)
+		{
+			focusDistance =
+				528.0 *
+				4096.0;
+		}
+
+		const int viewYaw =
+			(gSpideyManualAimViewBaseYaw +
+			 gSpideyManualAimViewYawOffset) &
+			0x0FFF;
+		const int viewPitch =
+			SpideyManualAimClamp(
+				gSpideyManualAimViewBasePitch +
+					gSpideyManualAimViewPitchOffset,
+				-900,
+				900);
+		const double yawRadians =
+			(double)viewYaw *
+			kSpideyRadiansPerAngleUnit;
+		const double pitchRadians =
+			(double)viewPitch *
+			kSpideyRadiansPerAngleUnit;
+		const double cosPitch =
+			cos(
+				pitchRadians);
+		const double forwardX =
+			-sin(
+				yawRadians) *
+			cosPitch;
+		const double forwardY =
+			sin(
+				pitchRadians);
+		const double forwardZ =
+			-cos(
+				yawRadians) *
+			cosPitch;
+
+		camera->field_144.vx =
+			camera->mPos.vx +
+			(int)(
+				forwardX *
+				focusDistance);
+		camera->field_144.vy =
+			camera->mPos.vy +
+			(int)(
+				forwardY *
+				focusDistance);
+		camera->field_144.vz =
+			camera->mPos.vz +
+			(int)(
+				forwardZ *
+				focusDistance);
+
+		const int manualLog =
+			hasIntent &&
+			(gSpideyManualAimViewLastLogSequence == 0 ||
+			 gSpideyModernCameraInputSequence -
+				gSpideyManualAimViewLastLogSequence >= 60);
+
+		if (manualLog)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"CAMERA");
+			if (f)
+			{
+				fprintf(
+					f,
+					"modern_manual_camera event=update input_seq=%lu view_yaw=%d view_pitch=%d offset=%d,%d camera_pos=%d,%d,%d focus=%d,%d,%d focus_distance=%.3f mouse=%d,%d stick=%.4f,%.4f\n",
+					gSpideyModernCameraInputSequence,
+					viewYaw,
+					viewPitch,
+					gSpideyManualAimViewYawOffset,
+					gSpideyManualAimViewPitchOffset,
+					camera->mPos.vx,
+					camera->mPos.vy,
+					camera->mPos.vz,
+					camera->field_144.vx,
+					camera->field_144.vy,
+					camera->field_144.vz,
+					focusDistance,
+					mouseX,
+					mouseY,
+					(double)stickX,
+					(double)stickY);
+				fclose(f);
+			}
+
+			gSpideyManualAimViewLastLogSequence =
+				gSpideyModernCameraInputSequence;
+		}
+	}
+
 	const int shouldLog =
 		hasIntent &&
 		(gSpideyModernCameraLastLogSequence == 0 ||
@@ -9350,7 +9834,7 @@ static void __fastcall SpideyModernMode3Camera(
 		{
 			fprintf(
 				f,
-				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f sensitivity=%d retail_overrode_yaw=%d\n",
+				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f sensitivity=%d retail_overrode_yaw=%d manual_aim=%d manual_view_active=%d manual_offset=%d,%d\n",
 				(unsigned long)camera,
 				gSpideyModernCameraInputSequence,
 				requestedYaw,
@@ -9365,7 +9849,11 @@ static void __fastcall SpideyModernMode3Camera(
 				(double)stickY,
 				gSpideyCameraSensitivityPercent,
 				retailResultYaw !=
-					requestedYaw ? 1 : 0);
+					requestedYaw ? 1 : 0,
+				manualAim,
+				gSpideyManualAimViewActive,
+				gSpideyManualAimViewYawOffset,
+				gSpideyManualAimViewPitchOffset);
 			fclose(f);
 		}
 
@@ -12723,6 +13211,8 @@ static void __cdecl SpideyCompatLogicTiming()
 
 static void SpideyRecordPresentTiming()
 {
+	SpideyModernAimValidateLocomotionMaskAtFrameEnd();
+
 	SpideyTryRebindBinkAudio(
 		"frame_safe_point");
 
