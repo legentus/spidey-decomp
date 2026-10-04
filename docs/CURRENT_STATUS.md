@@ -8974,3 +8974,26 @@ Run FAST_UPDATE_AND_TEST_LATEST_BUILD.bat and test all three items in one sessio
 
 Upload only the single consolidated spidey-decomp.log.
 
+
+
+### Camera telemetry logging overhead reduced
+
+After the first orbit-camera success, high-frequency input-intent telemetry is no longer necessary.
+
+Commit:
+- c71240e223884de59665e63c1b8984b606301845 — perf: throttle validated camera telemetry
+
+Changes:
+- modern_camera update sampling: once per 60 completed input snapshots while actively moving instead of once per 10;
+- passive input-intent camera_state sampling: once per 60 frames instead of once per 15;
+- mode changes, ownership transitions, web-target changes and periodic state still log.
+
+Reason:
+- the consolidated log uses synchronous file open/write/close operations;
+- reducing validated diagnostic traffic removes unnecessary I/O from the gameplay path while retaining enough evidence for sensitivity/web-target validation.
+
+The uploaded camera test log gives a strong periodic-stall correlation:
+- at frame 1200 the old shadow-target and DirectDraw pixel samples both execute;
+- the immediately following timing window falls to approximately 31-32 Hz.
+This further supports disabling both 120-frame blocking readbacks.
+
