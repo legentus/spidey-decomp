@@ -1,3 +1,41 @@
+# LIVE FRONTIER — VC6 COMPILE FAILURE RECOVERED; RETRY SAME RUNTIME TEST (2026-10-04)
+
+The user attempted the free-manual-aim / aimed-locomotion / phased-60-Hz-timer test from revision:
+- `9e3679f7b5dc79d78f3acb2b4f55fc8f6645c75d`
+
+It **did not compile under the project's matching VC6 toolchain**, so no new gameplay result exists.
+
+VC6 errors were isolated to the new timer IAT hook:
+- pointer-typed `IMAGE_THUNK_DATA::AddressOfData` broke RVA arithmetic;
+- pointer-typed `IMAGE_THUNK_DATA::Function` broke raw DWORD assignment;
+- VC6's `InterlockedExchange` prototype rejected `volatile LONG*`.
+
+Corrections:
+- `9b7e6b32767adc4f941c0ef1a31331ae2c4885ca` — raw thunk values now copied through VC6/header-neutral storage and first Interlocked cast fixed;
+- `54185f2192320881a3c37d59d1e2b39b8c4ec18c` — remaining two Interlocked casts fixed;
+- `0657180eff56795297cbeb8f35e26ddf2394a8fe` — CURRENT_STATUS build-failure checkpoint.
+
+No intended gameplay/timing behavior changed from the prior test frontier.
+
+## NEXT ACTION
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` again.
+
+Required source revision: **`54185f21...` or newer**.
+
+If it compiles and launches, perform the same test:
+1. manual aim camera can look away from Spider-Man;
+2. W/A/S/D + diagonals while aiming actually translate;
+3. aim + move + camera + fire;
+4. clean release of aim while moving, pause/unpause, camera transition;
+5. judge the regular ~0.4 s hitch;
+6. quick hip-fire sanity;
+7. upload the single consolidated log.
+
+If the compiler reports another error, capture the build output first; do not treat it as a gameplay result.
+
+---
+
 # LIVE FRONTIER — FREE MANUAL AIM + AIMED LOCOMOTION + 60 HZ TIMER PHASE BUILD READY (2026-10-04)
 
 ## READ THIS FIRST
