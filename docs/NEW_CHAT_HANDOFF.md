@@ -1,3 +1,21 @@
+# LATEST FRONTIER — RAW DIRECTINPUT ENTER LATCH UNDER TEST; CAMERA NEXT (2026-10-04)
+
+Runtime on `081479c4741962a808bb7e326c3edb3e67685d9a` still showed the custom pause Options UI working only by mouse for Open / Apply / Back. Options ordering remains correct immediately above Quit.
+
+Important correction: the previous `0x10` Enter code was in the tested source; stale startup telemetry made it look otherwise. Exact retail disassembly shows `PCSHELL_CheckTriggers` owns a separate Enter one-shot latch at `0x00AC1238`, so a late second query can be suppressed.
+
+Current `dev` implementation:
+
+- `c55f7dbc1a6bf38b76912d8ee44e17fb667e01a6` — reads the raw DirectInput state byte for DIK `0x1C` through retail `DXINPUT_GetKeyState @ 0x00501CB0`, treats both `0xFF` fresh press and `0x7F` held as physically down, and creates our own one-press latch for custom pause rows.
+- `8fd5f5309facc7faf88fd53c4d3c05abb7609dbc` — startup marker now says `pause_keyboard_source=raw_directinput_dik_0x1c`.
+- `5af38bd169f96962511f858d9ccb62ac704e7e7c` — live status checkpoint.
+
+Next test: run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`; verify startup marker first, then Enter on Options, Apply Settings, and Back. New diagnostics `pause_enter_state raw=...` will distinguish raw keyboard delivery from routing failure if anything remains wrong.
+
+If this passes, checkpoint immediately and move to camera work.
+
+---
+
 # LATEST FRONTIER — VERIFIED RETAIL ENTER MASK PATCH UNDER TEST; CAMERA NEXT (2026-10-04)
 
 The previous pause interaction patch correctly moved Options immediately above Quit, but Enter still did not activate Options, Apply Settings, or Back. Runtime on `b7acebd821d7bbefa95c7e69b2071be68045055e` showed only the mouse confirmation path firing.
