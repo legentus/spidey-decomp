@@ -18408,6 +18408,7 @@ void game_patches(void)
 
 	patch_CItem();
 	patch_CBody();
+	patch_physics();
 
 	patch_spool();
 	patch_trig();
