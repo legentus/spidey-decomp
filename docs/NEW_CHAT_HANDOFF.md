@@ -1,3 +1,88 @@
+# LIVE FRONTIER — HIP-FIRE VALIDATED; CAMERA-RAY MANUAL-AIM DIAGNOSTIC BUILD READY (2026-10-04)
+
+## READ THIS FIRST
+
+Latest user runtime log:
+- `spidey-decomp(20261004-175613).log`
+- runtime-reported revision: `b779d80f11cd94704c4acccb95cdd8ac1dcd70ec`
+
+Important recovery distinction:
+- the above `b779d80f...` runtime identity was not present on recoverable GitHub `dev`;
+- the user-visible result from that runtime is still authoritative test evidence;
+- current recoverable gameplay source is now committed on GitHub.
+
+Latest gameplay source:
+- `303232155bf7bc61235aa18a883d6a9b89f4cc7a` — `gameplay: align manual aim ray and add hitch diagnostics`
+- this source is **implemented but NOT runtime-tested yet**.
+
+Documentation checkpoints after the runtime result/source change:
+- `530f73b1031551ce04dfbd5530f17c5f3b4f18ab` — record third-pass runtime result;
+- `3d146a3f73b54fc512f45075efcdd9f92be64a47` — document the new camera-ray/hitch diagnostic implementation.
+
+## Latest proven runtime result
+
+**Hip-fire:** now effectively fixed according to the user.
+- Direct `source=modern_camera_scan` acquisitions appear in the runtime log.
+- The selector uses the unmodified visible ray `camera.field_144 - camera.mPos`.
+- Do not rewrite or retune hip-fire unless a future test shows a regression.
+
+**Manual aim:** still broken in the last runtime.
+- cursor direction remained inverted;
+- cursor could leave the screen while camera moved;
+- Spider-Man could not translate while aiming;
+- CheckForwards nevertheless received real WASD axes and returned success;
+- later samples still showed unchanged body position and zero body velocity.
+
+**Hitching:** the small periodic frametime blip returned.
+- the user intentionally attempted to fire a web at each observed hitch near the end of the session;
+- existing timing telemetry shows recurring ~31–33 ms present intervals during otherwise ~60 Hz gameplay;
+- avoid high-frequency disk logging while diagnosing this.
+
+## New untested source behavior at `30323215...`
+
+1. Manual aim no longer reflects X/Y around camera origin.
+   - `field_DC0` now lies on the exact same unmodified visible camera ray that already works for hip-fire.
+   - This fixes the geometrically invalid third-pass point where X/Y were reversed but Z remained forward.
+
+2. Manual movement telemetry is throttled.
+   - no longer opens/closes the log for every successful CheckForwards call;
+   - logs transitions + periodic samples;
+   - adds body position/velocity, animation, collision, aim/wall/ceiling flags, ignore-input and ground-grace state.
+
+3. Reticle telemetry adds `body_delta` so actual translation can be distinguished from pose/animation changes.
+
+4. Slow presents are buffered in memory.
+   - intervals >25 ms record frame, interval_us, web-target-call count, and `check_web_shot` count;
+   - records are printed only during the existing once-per-second timing flush;
+   - expected marker: `[TIMING] slow_present_events ...`.
+
+5. No locomotion bypass beyond the existing CheckForwards wrapper was guessed in this pass.
+   - movement remains intentionally diagnostic until the new state fields identify the post-CheckForwards blocker.
+
+## EXACT NEXT USER TEST
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` and confirm the session revision contains `30323215...` or newer.
+
+Then in one gameplay session:
+1. enter manual aim and sweep camera left/right/up/down;
+2. report whether reticle direction is natural, whether it stays on-screen, and whether it is actually centered on camera look direction;
+3. while still aiming, hold W/A/S/D individually for about two seconds and try a diagonal;
+4. try aim + move + camera rotation + fire;
+5. quick hip-fire regression only — do not spend time retesting already-good targeting;
+6. play long enough to catch several recurring frametime blips;
+7. if practical, keep firing a web on/near each observed hitch as a manual timestamp;
+8. return the single consolidated `spidey-decomp.log`.
+
+Expected diagnostic markers:
+- `modern_manual_aim event=movement ... collision=... aim_state=... wall=... ceiling=... ignore_input=... ground_grace=...`
+- `modern_manual_aim event=reticle ... body_delta=...`
+- `timing_present ... slow_event_count=... slow_event_stored=...`
+- `[TIMING] slow_present_events ... check_web_shot_calls=...`
+
+Do not resume real-shadow work before evaluating this test. The prior world-space caster probe already passed.
+
+---
+
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
 
