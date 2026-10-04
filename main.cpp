@@ -4299,6 +4299,89 @@ static void __fastcall SpideyMysterioLaserMoveHighFps(
 		0);
 }
 
+static void SpideyLogHighFpsRetailBytes(
+		const char* label,
+		unsigned long address,
+		unsigned long size)
+{
+	if (!label ||
+		!address ||
+		!size)
+	{
+		return;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	int valid =
+		1;
+	const unsigned long chunkSize =
+		128;
+
+	__try
+	{
+		const unsigned char* bytes =
+			(const unsigned char*)address;
+
+		for (unsigned long offset = 0;
+			 offset < size;
+			 offset += chunkSize)
+		{
+			unsigned long count =
+				size - offset;
+			if (count >
+				chunkSize)
+			{
+				count =
+					chunkSize;
+			}
+
+			fprintf(
+				f,
+				"high_fps_re_bytes label=%s address=0x%08lX size=%lu offset=0x%04lX count=%lu hex=",
+				label,
+				address,
+				size,
+				offset,
+				count);
+
+			for (unsigned long i = 0;
+				 i < count;
+				 ++i)
+			{
+				fprintf(
+					f,
+					"%02X",
+					(unsigned int)bytes[
+						offset +
+						i]);
+			}
+
+			fputc(
+				'\n',
+				f);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		valid =
+			0;
+	}
+
+	fprintf(
+		f,
+		"high_fps_re_bytes_done label=%s address=0x%08lX size=%lu valid=%d\n",
+		label,
+		address,
+		size,
+		valid);
+	fclose(f);
+}
+
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
@@ -4365,6 +4448,16 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
+	// Startup-only RE capture for the two remaining central timing seams.
+	// This is intentionally not in any gameplay/render hot path.
+	SpideyLogHighFpsRetailBytes(
+		"AIProcBlock",
+		0x00401000,
+		0x1100);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_DoPhysics",
+		0x004BFEC0,
+		0x1F0);
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
