@@ -9156,3 +9156,45 @@ Runtime validation still required:
 - repeat left/right and above/below if practical;
 - verify normal straight-ahead targeting still works;
 - upload the single consolidated spidey-decomp.log if anything is wrong.
+
+
+## Character blob-shadow camera anchoring (2026-10-04)
+
+User runtime screenshot showed standard character floor/blob shadows sliding away from their owning NPC as the camera rotated. This is the normal CBody/CQuadBit shadow path, not the Renderer11 whole-frame "shadow replay" terminology.
+
+Canonical RE:
+- CBody::UpdateShadow @ 0x004605A0 creates/updates a CQuadBit using mShadowPos and a fixed downward normal. Its world-space placement/orientation path itself is camera-independent.
+- CQuadBit::OrientUsing @ 0x00409400 builds the world-space quad corners from the supplied position/normal and does not consume camera state.
+- Bit_Init @ 0x00407FC0 registers QuadBitList with retail DisplayQuadBitList @ 0x004097E0.
+- The exact registration immediate is the PUSH at 0x004081D4, whose dword operand at 0x004081D5 is retail 0x004097E0.
+- DisplayQuadBitList subtracts gMikeCamera[0].Position (retail SCamera base 0x0056F1B0) from the quad's world-space vertices and then projects them via gte_rtps.
+- DisplayQuadBitList does not call gte_SetRotMatrix itself. It assumes the shared GTE rotation state still contains the active camera rotation.
+- M3d_RenderSetup @ 0x00472DC0 does call gte_SetRotMatrix @ 0x0046D7B0 with SCamera::Transform (offset 0x34), but later model rendering can overwrite the same shared GTE rotation state before registered bit lists are displayed.
+- Retail CCamera::LoadIntoMikeCamera publishes gMikeCamera[0].Transform at 0x0056F1E4.
+- patch_CBit() does not replace Bit_Init, so replacing the registered QuadBit display callback at the canonical Bit_Init registration site is live and does not conflict with the existing decomp patches.
+
+Implemented commit:
+- a24b4d27f586c97af175e5202bb9fb7db2268cbe — render: restore camera transform for world quad bits
+
+Implementation:
+- patch only the QuadBitList display function pointer immediate in retail Bit_Init;
+- validate opcode 0x68 at 0x004081D4 and expected target 0x004097E0 before writing;
+- register SpideyDisplayQuadBitListCameraAnchored instead;
+- immediately before calling untouched retail DisplayQuadBitList, call untouched retail gte_SetRotMatrix(0x0056F1E4);
+- leave the camera rotation active afterward, which is the semantically correct projection basis for subsequent world-space bit rendering;
+- do not modify mShadowPos, shadow collision/ground-height data, CQuadBit corner generation, or Renderer11 replay coordinates.
+
+Startup telemetry:
+- [DRAW] quadbit_camera_anchor installed=... registration_push=0x004081D4 retail_display=0x004097E0 ... camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 reason=...
+
+Static validation after source edit:
+- main.cpp braces 905/905
+- parentheses 4481/4481
+- brackets 323/323
+- patch_CBit verified not to replace Bit_Init.
+
+Runtime validation required:
+1. Find a thug/cop/NPC with the normal floor blob.
+2. Keep the NPC stationary and orbit the camera around them.
+3. The blob should remain under the NPC instead of sliding with camera angle.
+4. Also watch other world-space QuadBit effects briefly for regression because the correction restores the camera basis for the entire QuadBit list, which is what the retail projector expects.
