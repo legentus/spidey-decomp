@@ -4692,7 +4692,7 @@ static void SpideyInstallDisplayAspectCompat()
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_custom_options=1 pause_parent_rows_added=1 pause_parent_insert=before_last pause_submenu_rows=5 pause_retail_options_invoked=0 pause_update=%d pause_confirm=%d pause_keyboard_source=raw_directinput_dik_0x1c range=%d-%d step=%d defaults=%d,%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_custom_options=1 pause_parent_rows_added=1 pause_parent_insert=before_last pause_submenu_rows=6 pause_retail_options_invoked=0 pause_update=%d pause_confirm=%d pause_keyboard_source=raw_directinput_dik_0x1c range=%d-%d step=%d defaults=%d,%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
@@ -8523,18 +8523,29 @@ static void __fastcall SpideyModernMode3Camera(
 
 	if (newInputFrame)
 	{
+		const int sensitivity =
+			SpideyClampCameraSensitivityPercent(
+				gSpideyCameraSensitivityPercent);
 		const int yawDelta =
-			mouseX *
-				kSpideyModernCameraMouseYawScale +
+			(mouseX *
+			 kSpideyModernCameraMouseYawScale *
+			 sensitivity) /
+				100 +
 			(int)(
 				stickX *
-				(float)kSpideyModernCameraStickYawPerFrame);
+				(float)kSpideyModernCameraStickYawPerFrame *
+				(float)sensitivity /
+				100.0f);
 		const int pitchDelta =
-			(-mouseY) *
-				kSpideyModernCameraMousePitchScale +
+			((-mouseY) *
+			 kSpideyModernCameraMousePitchScale *
+			 sensitivity) /
+				100 +
 			(int)(
 				stickY *
-				(float)kSpideyModernCameraStickPitchPerFrame);
+				(float)kSpideyModernCameraStickPitchPerFrame *
+				(float)sensitivity /
+				100.0f);
 
 		gSpideyModernCameraYaw =
 			(gSpideyModernCameraYaw +
@@ -8604,7 +8615,7 @@ static void __fastcall SpideyModernMode3Camera(
 		{
 			fprintf(
 				f,
-				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f retail_overrode_yaw=%d\n",
+				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f sensitivity=%d retail_overrode_yaw=%d\n",
 				(unsigned long)camera,
 				gSpideyModernCameraInputSequence,
 				requestedYaw,
@@ -8617,6 +8628,7 @@ static void __fastcall SpideyModernMode3Camera(
 				mouseY,
 				(double)stickX,
 				(double)stickY,
+				gSpideyCameraSensitivityPercent,
 				retailResultYaw !=
 					requestedYaw ? 1 : 0);
 			fclose(f);
@@ -8646,8 +8658,11 @@ static void SpideyInstallModernCameraCompat()
 	{
 		fprintf(
 			f,
-			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right pitch_y_dist=%d..%d collision=retail_after_mode3\n",
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3\n",
 			installed,
+			gSpideyCameraSensitivityPercent,
+			kSpideyCameraSensitivityMinPercent,
+			kSpideyCameraSensitivityMaxPercent,
 			kSpideyModernCameraMinYDistance,
 			kSpideyModernCameraMaxYDistance);
 		fclose(f);
