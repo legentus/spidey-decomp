@@ -1,5 +1,47 @@
 # CURRENT STATUS
 
+## IMPLEMENTED — RETAIL PLAYER PHYSICS RESTORED; NATIVE-60 REWORK MOVES TO NARROW HOOKS (2026-10-04)
+
+Source:
+- `c109e2e869b06575ec942170d4bb89b568650b51` — stop installing `patch_physics()` globally.
+
+Runtime ownership now:
+- retail `CPlayer::DoPhysics @ 0x00466CE0` active;
+- retail `CPlayer::DoSwingingPhysics @ 0x00467D20` active;
+- retail `CPlayer::DoCrawlingPhysics @ 0x00467FD0` active;
+- reconstructed/native-60 physics source remains in `physics.cpp` as RE/reference but is not patched into the live executable;
+- native-60 `CAIProc_RotY` remains active;
+- Mysterio elapsed-time laser fix remains active.
+
+Why this is required:
+- previous retail-physics runtime `21ced52bc9c8e5903fe66cc939e4114804c248fb` handles the exact first live-cutscene spawn correctly;
+- reconstructed-physics runtime reaches the same scripted camera/focus handoff but loses player grounding and falls through the level;
+- at frame 900:
+  - retail body Y = `15695872`, valid ground shadow;
+  - reconstructed body Y = `25915794`, while shadow position remains near the expected ground band (~`15817598`);
+- therefore spawn/camera/level data is valid and the full-function physics replacement is the regression.
+
+Narrow retail-preserving 60-Hz seam identified for follow-up:
+- `SpideyAI0` directly calls retail `CPlayer::DoPhysics` at `0x004B1B18`;
+- retail normal-physics integration begins with:
+  - `0x00466D79` -> `CVector::operator+=(mAcc)`;
+  - `0x00466D84` -> `CVector::operator%=(mFric)`;
+  - `0x00466D8B` -> `CVector::KillSmall()`;
+- crawling has the same compact sequence around:
+  - `0x00468012`;
+  - `0x0046801D`;
+  - `0x00468024`.
+- This gives a path to implement native-60 force/damping/displacement corrections without replacing retail collision/grounding/cutscene behavior.
+
+Exact next validation:
+1. build newest `dev`;
+2. New Game -> difficulty -> first Doc Ock pre-render;
+3. verify the following in-game cutscene plays;
+4. verify Spider-Man remains at the scripted spawn and does **not** fall into the yellow void;
+5. if spawn is restored, continue briefly into gameplay and note whether pace is back to the pre-physics-patch behavior.
+
+Do not evaluate the removed full-function player-physics conversion as active; it is intentionally offline pending narrow-hook redesign.
+
 ## RUNTIME RESULT — CRASH FIXED, BUT FULL RECOMPILED PLAYER PHYSICS BREAKS SCRIPTED SPAWN (2026-10-04)
 
 Latest tested runtime:
