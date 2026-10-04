@@ -3400,7 +3400,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			mask,
 			option2,
 			option3);
-	int confirmActionTriggered =
+	int keyboardEnterTriggered =
 		0;
 
 	CMenu* menu =
@@ -3416,10 +3416,11 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 	}
 
 	// The pause call patched at 0x00441606 services the mouse-oriented
-	// trigger path (runtime-observed mask 0x00000100). Keyboard/controller
-	// confirm is retail action 0x00001000; the default keyboard mapping for
-	// that action is DIK_RETURN (0x1C). Only probe it while one of our custom
-	// rows owns the selection so normal retail pause commands are untouched.
+	// trigger path (runtime-observed mask 0x00000100). Retail
+	// PCSHELL_CheckTriggers maps mask bit 0x00000010 directly to
+	// DIK_RETURN (0x1C). Probe that native keyboard Enter path only while
+	// one of our custom rows owns the selection so normal pause commands
+	// remain untouched.
 	if (!triggered &&
 		selected &&
 		(gSpideyPauseOptionsActive ||
@@ -3429,10 +3430,10 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 	{
 		triggered =
 			retail(
-				0x00001000,
+				0x00000010,
 				option2,
 				option3);
-		confirmActionTriggered =
+		keyboardEnterTriggered =
 			triggered ? 1 : 0;
 	}
 
@@ -3464,8 +3465,8 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				"pause_options_confirm action=open entered=%d mask=0x%08lX source=%s\n",
 				entered,
 				(unsigned long)mask,
-				confirmActionTriggered ?
-					"confirm_action_0x1000" :
+				keyboardEnterTriggered ?
+					"keyboard_enter_mask_0x10" :
 					"retail_call_mask");
 			fclose(f);
 		}
@@ -3492,8 +3493,8 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 				(unsigned int)menu->mLine,
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
-				confirmActionTriggered ?
-					"confirm_action_0x1000" :
+				keyboardEnterTriggered ?
+					"keyboard_enter_mask_0x10" :
 					"retail_call_mask",
 				gSpideyGameplayUiScalePercent,
 				gSpideyMenuTextScalePercent);
