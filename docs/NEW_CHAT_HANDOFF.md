@@ -1,3 +1,37 @@
+# LIVE CONTINUATION — STALE PLAY-CURRENT TEST IDENTIFIED; FRESH CURRENT-BUILD LOGGING ADDED (2026-10-04)
+
+The latest user feedback was produced by an **older installed build**, not the current source frontier.
+
+Uploaded log identity:
+- revision `ef78ea5ff959f4518a96567aed340bd935c251e5`
+- clean `exit_code=0`
+
+That run predates all three fixes waiting for validation:
+- `5e3dd2e...` web-target forward-axis correction
+- `a24b4d27...` world QuadBit/blob-shadow camera-basis restoration
+- `dd35f977...` dynamic Pause Options expanding-box resize
+
+Therefore:
+- do not conclude those fixes failed from that log;
+- do not patch the separate aggro/CheckWebShot targeting path until the current axis-corrected build is tested;
+- the reported pause crash is not captured in the uploaded file.
+
+Workflow hardening now on dev:
+- `f892eaa163459fdca5e7504e6e0a83cfcdff6d9a` — runtime writes `runtime_revision=<RUNTIME_VERSION>` into direct-launch logs.
+- `5709bdef9269f6d6e9e02c2c0ced6a74f3fbaf56` — `RUN_GAME.bat` clears stale logs, launches the installed build only, waits for exit, records exit code, and leaves a fresh `spidey-decomp.log`.
+
+NEXT:
+1. Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` once to install current dev.
+2. Then use `RUN_GAME.bat` for no-update/no-build playtests.
+3. Re-test:
+   - pause during gameplay;
+   - camera web target vs non-aggro and aggro enemies;
+   - NPC + Spider-Man blob shadows while orbiting camera;
+   - Pause -> Options container sizing.
+4. If anything fails, upload the fresh `spidey-decomp.log`.
+
+---
+
 # LIVE CONTINUATION — LAST UPLOADED RUNTIME WAS OLD ef78 BUILD (2026-10-04)
 
 The user's latest reported runtime problems (pause crash, inconsistent web targeting especially after enemy aggro, blob shadows still camera-relative) came from `spidey-decomp(20261004-071556).log`, whose session revision is:
