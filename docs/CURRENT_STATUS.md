@@ -1,5 +1,40 @@
 # CURRENT STATUS
 
+## SOURCE ADVANCE — TRUE PLAYER PHYSICS ADDED TO NEXT NATIVE-60 CAPTURE (2026-10-04)
+
+Latest source:
+- `e4df3b156aeec6d81519697f7d9f158603dfc99e` — `timing: capture true player physics for 60hz patching`.
+
+Why this matters:
+- the earlier `0x004BFEC0` probe was not the complete authoritative player physics routine;
+- the symbol map / call-path audit identified the real lower-level player physics block at `0x00466CE0`;
+- crawling has a separate retail path at `CPlayer_DoCrawlingPhysics @ 0x00467FD0`.
+
+The next single startup capture therefore now gathers all unresolved high-value native-60 seams in one run:
+- `CAIProc_RotY_Block @ 0x00401060`, size `0x120`;
+- `CVenom_SynthesizeAnalogueInput_Block @ 0x004E9B00`, size `0x19A0`;
+- `CPlayer_DoPhysics_Real @ 0x00466CE0`, size `0x1040`;
+- `CPlayer_DoCrawlingPhysics @ 0x00467FD0`, size `0xD70`.
+
+This is still startup-only logging and does not reintroduce the hitch-causing hot-path diagnostics.
+
+The resulting batch should be sufficient to:
+1. prove shared AI rotation/wait frame-count semantics;
+2. inspect the known Venom automated-input path;
+3. determine whether the user-visible 60-FPS speed-up includes raw per-call player velocity/acceleration/friction integration;
+4. compare normal and crawling physics semantics before modifying either;
+5. implement a coherent first native-60 timing batch instead of requesting multiple small tests.
+
+Expected runtime revision:
+- `e4df3b156aeec6d81519697f7d9f158603dfc99e` or newer documentation-only descendant.
+
+Expected startup completion lines:
+- `high_fps_compat mysterio_laser=1 ...`;
+- `high_fps_re_bytes_done label=CAIProc_RotY_Block ... valid=1`;
+- `high_fps_re_bytes_done label=CVenom_SynthesizeAnalogueInput_Block ... valid=1`;
+- `high_fps_re_bytes_done label=CPlayer_DoPhysics_Real ... valid=1`;
+- `high_fps_re_bytes_done label=CPlayer_DoCrawlingPhysics ... valid=1`.
+
 ## NATIVE 60-HZ RE FRONTIER — PLAYER STATE MACHINE CLEARED; TWO TIMING SEAMS REMAIN (2026-10-04)
 
 Authoritative `dev` source before this documentation checkpoint:
