@@ -1,3 +1,23 @@
+# LATEST FRONTIER — PAUSE OPTIONS KEYBOARD + ORDER POLISH UNDER TEST; CAMERA NEXT (2026-10-03)
+
+Runtime on `e5ca5a25fc6b0d6ccdbb85b446b18b03c0a825c0` proved the custom pause Options submenu works end-to-end for visibility, UI Scale, Text Scale, Apply and persistence. Remaining user-reported polish:
+
+- Options could only be opened by mouse click, not Enter.
+- Apply Settings could only be activated by mouse click, not Enter.
+- Options was appended after Quit; user wants Options immediately above Quit so Quit stays last.
+
+Implemented on `dev`:
+
+- `9581ef731b21568da55a99cd49eb7de4cf593e7c` — native retail confirm action `0x1000` now services custom Options rows; parent Options insertion moves before the previous final retail row and preserves final-row selection.
+- `648b293e3590c1346decfab8028a6b64c2e4b479` — refreshed startup telemetry for five-row submenu, before-last insertion and confirm action.
+- `fbb660f865a324fdeee6d91f38818f35fa9d493c` — live status checkpoint.
+
+Next test is short and final for this milestone: run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`, verify Options is immediately above Quit, Enter opens Options, Enter applies settings, Enter activates Back, and mouse behavior still works. Expected confirmation telemetry includes `source=confirm_action_0x1000`.
+
+If this passes, checkpoint the pass and move directly to camera work. Do not reopen already-proven UI scale/compass/HUD work unless the user reports a regression.
+
+---
+
 # LATEST FRONTIER — UI SCALE ROW-0 FIX; CAMERA NEXT AFTER ONE SHORT TEST (2026-10-03)
 
 **THIS SECTION OVERRIDES THE OLDER PAUSE-OPTIONS TEST STATE BELOW.**
