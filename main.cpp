@@ -4174,6 +4174,12 @@ static int SpideyPatchBytes(
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
 static unsigned long gSpideyModernAimLookaroundCalls = 0;
+static int gSpideyModernAimLastAxisX = 0x7FFFFFFF;
+static int gSpideyModernAimLastAxisY = 0x7FFFFFFF;
+static unsigned long gSpideyModernAimLastMoveState = 0xFFFFFFFFUL;
+static int gSpideyModernAimLastMoveResult = -1;
+static CVector gSpideyModernAimLastBodyPos;
+static int gSpideyModernAimLastBodyPosValid = 0;
 
 typedef int (__fastcall *SpideyRetailCheckForwardsFn)(
 		CPlayer*,
@@ -4254,8 +4260,26 @@ static int __fastcall SpideyModernAimCheckForwards(
 	}
 
 	++gSpideyModernAimMovementCalls;
+
+	const int axisX =
+		(int)player->field_E2D;
+	const int axisY =
+		(int)player->field_E2E;
+	const unsigned long moveState =
+		(unsigned long)player->field_E1C;
+	const int movementChanged =
+		axisX != gSpideyModernAimLastAxisX ||
+		axisY != gSpideyModernAimLastAxisY ||
+		moveState != gSpideyModernAimLastMoveState ||
+		result != gSpideyModernAimLastMoveResult;
+
+	// Do not write one line per successful movement evaluation. The previous
+	// diagnostic did exactly that while WASD was held and could itself perturb
+	// frame pacing. Log the first few calls, state/input transitions, and one
+	// periodic sample instead.
 	if (gSpideyModernAimMovementCalls <= 6 ||
-		result)
+		movementChanged ||
+		(gSpideyModernAimMovementCalls % 60) == 0)
 	{
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -4264,17 +4288,39 @@ static int __fastcall SpideyModernAimCheckForwards(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d\n",
+				"modern_manual_aim event=movement call=%lu aim_control=%u axes=%d,%d state=0x%08lX result=%d allow_turn=%d body_pos=%d,%d,%d body_vel=%d,%d,%d anim=%u collision=0x%08lX aim_state=%u wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimMovementCalls,
 				(unsigned int)savedAimControl,
-				(int)player->field_E2D,
-				(int)player->field_E2E,
-				(unsigned long)player->field_E1C,
+				axisX,
+				axisY,
+				moveState,
 				result,
-				allowTurn);
+				allowTurn,
+				player->mPos.vx,
+				player->mPos.vy,
+				player->mPos.vz,
+				player->mVel.vx,
+				player->mVel.vy,
+				player->mVel.vz,
+				(unsigned int)player->mAnim,
+				(unsigned long)player->mCollision,
+				(unsigned int)player->field_8EA,
+				(unsigned int)player->field_8E8,
+				(unsigned int)player->field_8E9,
+				(int)player->field_E18,
+				(int)player->field_EA4);
 			fclose(f);
 		}
 	}
+
+	gSpideyModernAimLastAxisX =
+		axisX;
+	gSpideyModernAimLastAxisY =
+		axisY;
+	gSpideyModernAimLastMoveState =
+		moveState;
+	gSpideyModernAimLastMoveResult =
+		result;
 
 	return result;
 }
@@ -4315,17 +4361,15 @@ static int SpideyModernAimApplyCameraPoint(
 	const int rayScale =
 		8;
 
-	// RenderLookaroundReticle projects field_DC0 through the legacy GTE
-	// camera basis. With the modern mode-3 camera point fed directly into
-	// that path, its screen-plane convention is mirrored on both X and Y.
-	// Keep Z on the real camera-forward ray so the point remains in front of
-	// the camera, but flip X/Y around the camera origin so mouse/right-stick
-	// directions are natural on screen: left=left, right=right, up=up.
+	// Hip-fire is now runtime-validated using this exact unmodified visible
+	// camera ray. Keep manual aim on the same ray too. The previous third-pass
+	// X/Y reflection while leaving Z forward created a non-collinear point,
+	// which explains the inverted/off-screen reticle behavior seen at runtime.
 	player->field_DC0.vx =
-		camera->mPos.vx -
+		camera->mPos.vx +
 		dx * rayScale;
 	player->field_DC0.vy =
-		camera->mPos.vy -
+		camera->mPos.vy +
 		dy * rayScale;
 	player->field_DC0.vz =
 		camera->mPos.vz +
@@ -4384,9 +4428,38 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 			camera);
 
 	++gSpideyModernAimLookaroundCalls;
+
+	int bodyDeltaX =
+		0;
+	int bodyDeltaY =
+		0;
+	int bodyDeltaZ =
+		0;
+	if (gSpideyModernAimLastBodyPosValid)
+	{
+		bodyDeltaX =
+			player->mPos.vx -
+			gSpideyModernAimLastBodyPos.vx;
+		bodyDeltaY =
+			player->mPos.vy -
+			gSpideyModernAimLastBodyPos.vy;
+		bodyDeltaZ =
+			player->mPos.vz -
+			gSpideyModernAimLastBodyPos.vz;
+	}
+
+	gSpideyModernAimLastBodyPos =
+		player->mPos;
+	gSpideyModernAimLastBodyPosValid =
+		1;
+
+	const int movementHeld =
+		player->field_E2D ||
+		player->field_E2E;
 	if (gSpideyModernAimLookaroundCalls <= 12 ||
-		(gSpideyModernAimLookaroundCalls %
-		 60) == 0)
+		(gSpideyModernAimLookaroundCalls % 60) == 0 ||
+		(movementHeld &&
+		 (gSpideyModernAimLookaroundCalls % 30) == 0))
 	{
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -4395,7 +4468,7 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d body_pos=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u\n",
+				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%u wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimLookaroundCalls,
 				applied,
 				(unsigned long)camera,
@@ -4414,11 +4487,20 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 				player->mPos.vx,
 				player->mPos.vy,
 				player->mPos.vz,
+				bodyDeltaX,
+				bodyDeltaY,
+				bodyDeltaZ,
 				player->mVel.vx,
 				player->mVel.vy,
 				player->mVel.vz,
 				(unsigned long)player->field_E1C,
-				(unsigned int)player->mAnim);
+				(unsigned int)player->mAnim,
+				(unsigned long)player->mCollision,
+				(unsigned int)player->field_8EA,
+				(unsigned int)player->field_8E8,
+				(unsigned int)player->field_8E9,
+				(int)player->field_E18,
+				(int)player->field_EA4);
 			fclose(f);
 		}
 	}
@@ -9424,6 +9506,7 @@ typedef int (__cdecl *SpideyRetailLineOfSightFn)(
 static CBody* gSpideyCameraWebTargetLastTarget = 0;
 static unsigned long gSpideyCameraWebTargetCalls = 0;
 static unsigned long gSpideyCameraModernScanCalls = 0;
+static unsigned long gSpideyCameraCheckWebShotCalls = 0;
 
 // Retail SelectTargetBaddy scores each candidate after transforming the
 // player->candidate vector through player + 0x89C. For web auto-aim only,
@@ -9861,6 +9944,14 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 	}
 
 	++gSpideyCameraWebTargetCalls;
+
+	if (callSource &&
+		strcmp(
+			callSource,
+			"check_web_shot") == 0)
+	{
+		++gSpideyCameraCheckWebShotCalls;
+	}
 
 	++gSpideyCameraModernScanCalls;
 
@@ -11845,6 +11936,21 @@ static unsigned long gSpideyTimingPresentVblankOne = 0;
 static unsigned long gSpideyTimingPresentVblankMulti = 0;
 static unsigned long gSpideyTimingPresentVblankMaxDelta = 0;
 
+#define SPIDEY_TIMING_SLOW_EVENT_CAPACITY 16
+
+struct SpideyTimingSlowEvent
+{
+	unsigned long frame;
+	unsigned long intervalUs;
+	unsigned long webTargetCalls;
+	unsigned long checkWebShotCalls;
+};
+
+static SpideyTimingSlowEvent
+	gSpideyTimingSlowEvents[SPIDEY_TIMING_SLOW_EVENT_CAPACITY];
+static unsigned long gSpideyTimingSlowEventCount = 0;
+static unsigned long gSpideyTimingSlowEventStored = 0;
+
 static void SpideyLogTimingWindow(
 		const char* kind,
 		unsigned long elapsed,
@@ -11869,7 +11975,7 @@ static void SpideyLogTimingWindow(
 	{
 		fprintf(
 			f,
-			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu\n",
+			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu slow_event_count=%lu slow_event_stored=%lu\n",
 			kind,
 			elapsed,
 			count,
@@ -11890,7 +11996,35 @@ static void SpideyLogTimingWindow(
 			gSpideyTimingPresentVblankSame,
 			gSpideyTimingPresentVblankOne,
 			gSpideyTimingPresentVblankMulti,
-			gSpideyTimingPresentVblankMaxDelta);
+			gSpideyTimingPresentVblankMaxDelta,
+			gSpideyTimingSlowEventCount,
+			gSpideyTimingSlowEventStored);
+
+		if (gSpideyTimingSlowEventStored)
+		{
+			fprintf(
+				f,
+				"[TIMING] slow_present_events");
+
+			for (unsigned long i = 0;
+				 i < gSpideyTimingSlowEventStored;
+				 ++i)
+			{
+				const SpideyTimingSlowEvent& event =
+					gSpideyTimingSlowEvents[i];
+				fprintf(
+					f,
+					" frame=%lu interval_us=%lu web_calls=%lu check_web_shot_calls=%lu",
+					event.frame,
+					event.intervalUs,
+					event.webTargetCalls,
+					event.checkWebShotCalls);
+			}
+
+			fputc(
+				'\n',
+				f);
+		}
 	}
 	else
 	{
@@ -11980,7 +12114,26 @@ static void SpideyRecordPresentTiming()
 				if (deltaUs > 20000)
 					++gSpideyTimingPresentOver20Ms;
 				if (deltaUs > 25000)
+				{
 					++gSpideyTimingPresentOver25Ms;
+					++gSpideyTimingSlowEventCount;
+
+					if (gSpideyTimingSlowEventStored <
+						SPIDEY_TIMING_SLOW_EVENT_CAPACITY)
+					{
+						SpideyTimingSlowEvent& event =
+							gSpideyTimingSlowEvents[
+								gSpideyTimingSlowEventStored++];
+						event.frame =
+							gSpideyPresentFrame;
+						event.intervalUs =
+							deltaUs;
+						event.webTargetCalls =
+							gSpideyCameraWebTargetCalls;
+						event.checkWebShotCalls =
+							gSpideyCameraCheckWebShotCalls;
+					}
+				}
 				if (deltaUs > 30000)
 					++gSpideyTimingPresentOver30Ms;
 				if (deltaUs > 50000)
@@ -12079,6 +12232,10 @@ static void SpideyRecordPresentTiming()
 		gSpideyTimingPresentVblankMulti =
 			0;
 		gSpideyTimingPresentVblankMaxDelta =
+			0;
+		gSpideyTimingSlowEventCount =
+			0;
+		gSpideyTimingSlowEventStored =
 			0;
 	}
 }
