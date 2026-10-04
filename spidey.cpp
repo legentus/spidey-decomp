@@ -2131,6 +2131,8 @@ void validate_CPlayer(void)
 	VALIDATE(CPlayer, field_56C, 0x56C);
 
 	VALIDATE(CPlayer, field_570, 0x570);
+	VALIDATE(CPlayer, field_574, 0x574);
+	VALIDATE(CPlayer, field_578, 0x578);
 
 	VALIDATE(CPlayer, field_57C, 0x57C);
 
@@ -2175,25 +2177,25 @@ void validate_CPlayer(void)
 	VALIDATE(CPlayer, field_AC8, 0xAC8);
 
 	VALIDATE(CPlayer, field_AD4, 0xAD4);
-
+	VALIDATE(CPlayer, field_AD5, 0xAD5);
+	VALIDATE(CPlayer, field_AD6, 0xAD6);
 	VALIDATE(CPlayer, field_AD7, 0xAD7);
 
 	VALIDATE(CPlayer, field_AE4, 0xAE4);
 	VALIDATE(CPlayer, field_AE5, 0xAE5);
 	VALIDATE(CPlayer, field_AE6, 0xAE6);
 
-
-	VALIDATE(CPlayer, field_B74, 0xB74);
-	VALIDATE(CPlayer, field_B84, 0xB84);
-	VALIDATE(CPlayer, field_B8C, 0xB8C);
-
-	VALIDATE(CPlayer, field_C18, 0xC18);
-	VALIDATE(CPlayer, field_C1C, 0xC1C);
-	VALIDATE(CPlayer, field_C28, 0xC28);
-
-
-	VALIDATE(CPlayer, field_C30, 0xC30);
-
+	VALIDATE(CPlayer, field_B08, 0xB08);
+	VALIDATE(CPlayer, field_B09, 0xB09);
+	VALIDATE(CPlayer, mLineInfo, 0xB0C);
+	VALIDATE(CPlayer, mLineInfo2, 0xBB0);
+	VALIDATE(CPlayer, field_C54, 0xC54);
+	VALIDATE(CPlayer, field_C58, 0xC58);
+	VALIDATE(CPlayer, field_C5C, 0xC5C);
+	VALIDATE(CPlayer, field_C60, 0xC60);
+	VALIDATE(CPlayer, field_C64, 0xC64);
+	VALIDATE(CPlayer, field_C68, 0xC68);
+	VALIDATE(CPlayer, field_C69, 0xC69);
 
 	VALIDATE(CPlayer, field_C6C, 0xC6C);
 
@@ -2214,8 +2216,9 @@ void validate_CPlayer(void)
 	VALIDATE(CPlayer, field_D8C, 0xD8C);
 
 	VALIDATE(CPlayer, field_DA0, 0xDA0);
-
+	VALIDATE(CPlayer, field_DAC, 0xDAC);
 	VALIDATE(CPlayer, field_DB8, 0xDB8);
+	VALIDATE(CPlayer, field_DBC, 0xDBC);
 
 	VALIDATE(CPlayer, field_DC0, 0xDC0);
 	VALIDATE(CPlayer, field_DCC, 0xDCC);
@@ -2241,19 +2244,32 @@ void validate_CPlayer(void)
 
 	VALIDATE(CPlayer, field_E38, 0xE38);
 
+	VALIDATE(CPlayer, mHeldObject, 0xE48);
+	VALIDATE(CPlayer, field_E4C, 0xE4C);
+	VALIDATE(CPlayer, field_E54, 0xE54);
+	VALIDATE(CPlayer, field_E5C, 0xE5C);
+	VALIDATE(CPlayer, field_E64, 0xE64);
+	VALIDATE(CPlayer, field_E6C, 0xE6C);
 	VALIDATE(CPlayer, hLockTarget, 0xE70);
 
+	VALIDATE(CPlayer, field_E80, 0xE80);
 	VALIDATE(CPlayer, field_E84, 0xE84);
 	VALIDATE(CPlayer, field_E88, 0xE88);
 	VALIDATE(CPlayer, field_E8C, 0xE8C);
-
-	VALIDATE(CPlayer, mHeldObject, 0xE48);
-
+	VALIDATE(CPlayer, field_E8D, 0xE8D);
+	VALIDATE(CPlayer, field_E90, 0xE90);
+	VALIDATE(CPlayer, field_E94, 0xE94);
+	VALIDATE(CPlayer, field_EA0, 0xEA0);
+	VALIDATE(CPlayer, field_EA2, 0xEA2);
 	VALIDATE(CPlayer, field_EA4, 0xEA4);
-
+	VALIDATE(CPlayer, field_EA6, 0xEA6);
 	VALIDATE(CPlayer, field_EA8, 0xEA8);
+	VALIDATE(CPlayer, field_EAA, 0xEAA);
+	VALIDATE(CPlayer, field_EAC, 0xEAC);
 
 	VALIDATE(CPlayer, mMaxHealth, 0xEF0);
+	VALIDATE(CPlayer, field_EF4, 0xEF4);
+	VALIDATE(CPlayer, field_EF8, 0xEF8);
 }
 
 void validate_SIndicator(void)
