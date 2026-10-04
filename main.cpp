@@ -3012,7 +3012,7 @@ static int SpideyPauseRefreshMenuBox(
 		{
 			fprintf(
 				f,
-				"pause_menu_box_refresh reason=%s refreshed=0 zoom_type=%d rows=%u y=%d line_sep=%d\n",
+				"pause_menu_box_refresh reason=%s refreshed=0 mode=in_place reason_detail=zoom_type zoom_type=%d rows=%u y=%d line_sep=%d\n",
 				reason ? reason : "unknown",
 				zoomType,
 				(unsigned int)menu->mNumLines,
@@ -3023,12 +3023,140 @@ static int SpideyPauseRefreshMenuBox(
 		return 0;
 	}
 
-	SpideyRetailMenuZoomFn zoom =
-		(SpideyRetailMenuZoomFn)0x0043FC60;
-	zoom(
-		menu,
-		0,
-		zoomType);
+	CExpandingBox* box =
+		menu->ptr_to;
+	if (!box)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_menu_box_refresh reason=%s refreshed=0 mode=in_place reason_detail=no_box zoom_type=%d rows=%u y=%d line_sep=%d\n",
+				reason ? reason : "unknown",
+				zoomType,
+				(unsigned int)menu->mNumLines,
+				menu->mY,
+				menu->mLineSep);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	int targetX =
+		0;
+	int targetY =
+		0;
+	int targetWidth =
+		0;
+	int targetHeight =
+		0;
+	const int menuHeight =
+		menu->GetMenuHeight();
+
+	if (zoomType == 0)
+	{
+		targetX =
+			0;
+		targetY =
+			menu->mY - 18;
+		targetWidth =
+			512;
+		targetHeight =
+			menuHeight + 27;
+	}
+	else
+	{
+		int yInset =
+			12;
+		int heightInset =
+			17;
+
+		if (Utils_CompareStrings(
+				Mess_GetCurrentFont(),
+				"sp_fnt03.fnt"))
+		{
+			yInset =
+				10;
+			heightInset =
+				14;
+		}
+
+		targetX =
+			menu->mX - 5;
+		targetY =
+			menu->mY - yInset;
+		targetWidth =
+			(int)menu->menu_width + 12;
+		targetHeight =
+			menuHeight + heightInset;
+	}
+
+	int oldX =
+		0;
+	int oldY =
+		0;
+	int oldWidth =
+		0;
+	int oldHeight =
+		0;
+	int refreshed =
+		0;
+	int writeFault =
+		0;
+
+	// CMenu::Zoom kills and reallocates ptr_to. Doing that from the pause
+	// update/confirm call chain can invalidate a heap-owned box while retail
+	// code is still in the same menu frame. The box already stores both its
+	// current and target rectangle, so update the target in place instead.
+	// Clamp only shrinking current dimensions; growth can continue through
+	// the retail expanding-box animation on subsequent frames.
+	__try
+	{
+		oldX =
+			box->field_1C;
+		oldY =
+			box->field_20;
+		oldWidth =
+			box->field_C;
+		oldHeight =
+			box->field_10;
+
+		box->field_1C =
+			targetX;
+		box->field_20 =
+			targetY;
+		box->field_C =
+			targetWidth;
+		box->field_10 =
+			targetHeight;
+
+		if (box->field_4 >
+			targetWidth)
+		{
+			box->field_4 =
+				targetWidth;
+		}
+
+		if (box->field_8 >
+			targetHeight)
+		{
+			box->field_8 =
+				targetHeight;
+		}
+
+		refreshed =
+			1;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		writeFault =
+			1;
+		refreshed =
+			0;
+	}
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -3037,16 +3165,28 @@ static int SpideyPauseRefreshMenuBox(
 	{
 		fprintf(
 			f,
-			"pause_menu_box_refresh reason=%s refreshed=1 zoom_type=%d rows=%u y=%d line_sep=%d\n",
+			"pause_menu_box_refresh reason=%s refreshed=%d mode=in_place reason_detail=%s zoom_type=%d rows=%u y=%d line_sep=%d box=0x%08lX old_rect=%d,%d,%d,%d target_rect=%d,%d,%d,%d menu_height=%d\n",
 			reason ? reason : "unknown",
+			refreshed,
+			writeFault ? "write_fault" : "ok",
 			zoomType,
 			(unsigned int)menu->mNumLines,
 			menu->mY,
-			menu->mLineSep);
+			menu->mLineSep,
+			(unsigned long)box,
+			oldX,
+			oldY,
+			oldWidth,
+			oldHeight,
+			targetX,
+			targetY,
+			targetWidth,
+			targetHeight,
+			menuHeight);
 		fclose(f);
 	}
 
-	return 1;
+	return refreshed;
 }
 
 // @Ok
