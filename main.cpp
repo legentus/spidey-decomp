@@ -3253,7 +3253,61 @@ static void __fastcall SpideyPauseMenuUpdate(
 	}
 	else
 	{
-		retur// @Ok
+		return;
+	}
+
+	RetailCheckTriggersFn checkTriggers =
+		(RetailCheckTriggersFn)0x0050C180;
+
+	int delta =
+		0;
+	if (checkTriggers(
+			0x00008008,
+			1,
+			1))
+	{
+		delta =
+			1;
+	}
+	else if (checkTriggers(
+			0x00004004,
+			1,
+			1))
+	{
+		delta =
+			-1;
+	}
+
+	if (delta)
+	{
+		const int changed =
+			SpideyStepPendingUiScale(
+				(int)menu->mLine,
+				percent,
+				kind,
+				delta);
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_options_adjust kind=%s line=%u direction=%s changed=%d percent=%d pending_gameplay=%d pending_text=%d\n",
+				kind,
+				(unsigned int)menu->mLine,
+				delta > 0 ? "next" : "prev",
+				changed,
+				*percent,
+				gSpideyPendingGameplayUiScalePercent,
+				gSpideyPendingMenuTextScalePercent);
+			fclose(f);
+		}
+	}
+}
+
+// @Ok
 static u8 __cdecl SpideyPauseConfirmTrigger(
 		u32 mask,
 		i32 option2,
