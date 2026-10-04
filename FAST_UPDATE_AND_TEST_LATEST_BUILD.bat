@@ -28,6 +28,8 @@ if not exist "%~dp0tools\FAST_UPDATE_AND_TEST_LATEST_BUILD.ps1" (
     echo [INFO] Fast workflow is not installed locally yet.
     echo [..] Running the normal updater once to fetch it...
     echo.
+    set "SPIDEY_FAST_BOOTSTRAP_BEFORE_REV="
+    if exist "%~dp0LOCAL_DEV_REVISION.txt" set /p SPIDEY_FAST_BOOTSTRAP_BEFORE_REV=<"%~dp0LOCAL_DEV_REVISION.txt"
     call "%~dp0UPDATE_SPIDEY_PROJECT.bat"
     if errorlevel 1 (
         echo.
