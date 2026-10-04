@@ -1,5 +1,26 @@
 # CURRENT STATUS
 
+## FIX IMPLEMENTED — ZERO-MOVE LIVE-CUTSCENE COLLISION STATE (2026-10-04)
+
+Source fix:
+- `9d05114c1d401daac541023c8b3776bdc0d196fb` — initialize `CPlayer::DoPhysics` local `lineInfo.pItem` to zero before the movement sweep.
+
+Why:
+- the failing transition is from a pre-rendered movie into an in-engine cutscene;
+- crash occurs after successful movie-surface release, during retail collision/ground-height work;
+- reconstructed `DoPhysics` preserved a retail uninitialized-local defect that is unsafe after recompilation;
+- a stationary player/live-cutscene spawn can skip the sweep and branch on random stack data;
+- observed invalid read target `0xFB4BC000` is consistent with a bogus uninitialized object pointer.
+
+Next validation is intentionally narrow:
+1. New Game;
+2. select difficulty;
+3. let the first Doc Ock pre-render play;
+4. verify the following **in-game cutscene actually begins and proceeds**;
+5. only if that transition succeeds, continue into ordinary gameplay and resume native-60 pace/physics checks.
+
+If it still crashes at the same transition, preserve the new log; next step is symbolizing the proxy fault address against `Release/spider.map` and then testing the physics hook in isolation, not changing movie playback.
+
 ## RUNTIME REGRESSION — PRE-RENDER -> LIVE CUTSCENE HANDOFF CRASH (2026-10-04)
 
 Latest tested runtime:
