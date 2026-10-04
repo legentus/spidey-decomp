@@ -9242,6 +9242,26 @@ static void SpideyShadowWorldSpaceProbeActor(
 		0;
 	int poseTz =
 		0;
+	int bodyPosX =
+		0;
+	int bodyPosY =
+		0;
+	int bodyPosZ =
+		0;
+	int shadowPosX =
+		0;
+	int shadowPosY =
+		0;
+	int shadowPosZ =
+		0;
+	int shadowNormalX =
+		0;
+	int shadowNormalY =
+		0;
+	int shadowNormalZ =
+		0;
+	unsigned int shadowScale =
+		0;
 	unsigned long regionPtr =
 		0;
 	unsigned long modelPtr =
@@ -9260,6 +9280,27 @@ static void SpideyShadowWorldSpaceProbeActor(
 
 	__try
 	{
+		bodyPosX =
+			body->mPos.vx;
+		bodyPosY =
+			body->mPos.vy;
+		bodyPosZ =
+			body->mPos.vz;
+		shadowPosX =
+			body->mShadowPos.vx;
+		shadowPosY =
+			body->mShadowPos.vy;
+		shadowPosZ =
+			body->mShadowPos.vz;
+		shadowNormalX =
+			(int)body->mShadowNormal.vx;
+		shadowNormalY =
+			(int)body->mShadowNormal.vy;
+		shadowNormalZ =
+			(int)body->mShadowNormal.vz;
+		shadowScale =
+			(unsigned int)body->mShadowScale;
+
 		regionIndex =
 			(int)body->mRegion;
 		if (regionIndex < 0 ||
@@ -9401,16 +9442,16 @@ static void SpideyShadowWorldSpaceProbeActor(
 			poseTx,
 			poseTy,
 			poseTz,
-			body->mPos.vx,
-			body->mPos.vy,
-			body->mPos.vz,
-			body->mShadowPos.vx,
-			body->mShadowPos.vy,
-			body->mShadowPos.vz,
-			(int)body->mShadowNormal.vx,
-			(int)body->mShadowNormal.vy,
-			(int)body->mShadowNormal.vz,
-			(unsigned int)body->mShadowScale);
+			bodyPosX,
+			bodyPosY,
+			bodyPosZ,
+			shadowPosX,
+			shadowPosY,
+			shadowPosZ,
+			shadowNormalX,
+			shadowNormalY,
+			shadowNormalZ,
+			shadowScale);
 		fclose(f);
 	}
 }
