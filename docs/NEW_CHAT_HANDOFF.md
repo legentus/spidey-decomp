@@ -1,3 +1,30 @@
+# RETAIL PLAYER-PHYSICS RESTORATION UPDATE (2026-10-04)
+
+Latest runtime result:
+- live cutscene now plays after the Doc Ock pre-render;
+- full reconstructed player physics then causes Spider-Man to fall through the scripted spawn into the yellow void and die;
+- current log exits normally; this is a grounding/physics regression, not a crash.
+
+A/B:
+- old retail-physics runtime at frame 900: body Y `15695872`, valid ground shadow;
+- reconstructed-physics runtime at frame 900: body Y `25915794`, shadow still near the expected ground band;
+- same scripted camera/focus handoff in both.
+
+Fix:
+- `c109e2e869b06575ec942170d4bb89b568650b51` disables global `patch_physics()` installation;
+- retail DoPhysics/swinging/crawling own live runtime again;
+- reconstructed/native-60 physics remains in source for RE only;
+- RotY and Mysterio timing fixes remain active.
+
+Next test:
+- repeat New Game -> difficulty -> Doc Ock pre-render -> in-game cutscene;
+- verify Spidey stays at the intended spawn and does not fall/die;
+- if restored, proceed briefly into gameplay.
+
+Future native-60 player work must use narrow hooks inside/around retail physics, not a whole-function replacement. Known seams are documented in CURRENT_STATUS.
+
+---
+
 # LIVE-CUTSCENE CRASH FIX UPDATE (2026-10-04)
 
 The first runtime of the native-60 physics + RotY batch built successfully but crashed at:
