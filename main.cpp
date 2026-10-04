@@ -9409,6 +9409,11 @@ typedef CBody* (__fastcall *SpideyRetailSelectTargetBaddyFn)(
 typedef void (__cdecl *SpideyRetailQToMFn)(
 		CQuat*,
 		MATRIX*);
+typedef int (__cdecl *SpideyRetailLineOfSightFn)(
+		CVector*,
+		CVector*,
+		CVector*,
+		int);
 
 static CBody* gSpideyCameraWebTargetLastTarget = 0;
 static unsigned long gSpideyCameraWebTargetCalls = 0;
@@ -9418,6 +9423,216 @@ static unsigned long gSpideyCameraWebTargetCalls = 0;
 // temporarily provide the active render camera's rotation matrix there.
 // Candidate eligibility, range weighting, LOS and final target selection all
 // remain inside the untouched retail scorer.
+static CBody* SpideyCameraSelectModernTarget(
+		CPlayer* player,
+		CCamera* camera,
+		int rangeArg,
+		int coneArg,
+		SpideyRetailLineOfSightFn lineOfSight,
+		int* outCandidateCount,
+		double* outScore)
+{
+	if (outCandidateCount)
+		*outCandidateCount =
+			0;
+	if (outScore)
+		*outScore =
+			0.0;
+
+	if (!player ||
+		!camera ||
+		!lineOfSight)
+	{
+		return 0;
+	}
+
+	const double forwardX =
+		(double)camera->field_144.vx -
+		(double)camera->mPos.vx;
+	const double forwardY =
+		(double)camera->field_144.vy -
+		(double)camera->mPos.vy;
+	const double forwardZ =
+		(double)camera->field_144.vz -
+		(double)camera->mPos.vz;
+	const double forwardLengthSquared =
+		forwardX * forwardX +
+		forwardY * forwardY +
+		forwardZ * forwardZ;
+
+	if (forwardLengthSquared <=
+		1.0)
+	{
+		return 0;
+	}
+
+	int range =
+		rangeArg;
+	if (range <= 0)
+		range =
+			2048;
+
+	double cone =
+		(double)coneArg /
+		4096.0;
+	if (cone <= 0.0 ||
+		cone > 1.0)
+	{
+		cone =
+			2896.0 /
+			4096.0;
+	}
+	const double coneSquared =
+		cone * cone;
+	const double rangeSquared =
+		(double)range *
+		(double)range;
+
+	CBody* best =
+		0;
+	double bestScore =
+		-1.0;
+	double bestPlayerDistanceSquared =
+		0.0;
+	int candidates =
+		0;
+
+	__try
+	{
+		CBody* candidate =
+			G_MECHLIST;
+
+		// Fail closed on a corrupted list rather than walking forever.
+		for (int guard = 0;
+			 candidate &&
+			 guard < 1024;
+			 ++guard)
+		{
+			CBody* next =
+				(CBody*)candidate->mNextItem;
+
+			if (candidate != player &&
+				candidate->mRMinor != 0 &&
+				(candidate->mCBodyFlags &
+				 CBODY_TARGETTABLE) &&
+				!(candidate->mCBodyFlags &
+				  CBODY_ZOMBIE))
+			{
+				const double playerDx =
+					((double)candidate->mPos.vx -
+					 (double)player->mPos.vx) /
+					4096.0;
+				const double playerDy =
+					((double)candidate->mPos.vy -
+					 (double)player->mPos.vy) /
+					4096.0;
+				const double playerDz =
+					((double)candidate->mPos.vz -
+					 (double)player->mPos.vz) /
+					4096.0;
+				const double playerDistanceSquared =
+					playerDx * playerDx +
+					playerDy * playerDy +
+					playerDz * playerDz;
+
+				if (playerDistanceSquared <
+					rangeSquared)
+				{
+					const double cameraDx =
+						(double)candidate->mPos.vx -
+						(double)camera->mPos.vx;
+					const double cameraDy =
+						(double)candidate->mPos.vy -
+						(double)camera->mPos.vy;
+					const double cameraDz =
+						(double)candidate->mPos.vz -
+						(double)camera->mPos.vz;
+					const double cameraLengthSquared =
+						cameraDx * cameraDx +
+						cameraDy * cameraDy +
+						cameraDz * cameraDz;
+
+					if (cameraLengthSquared >
+						1.0)
+					{
+						const double dot =
+							forwardX * cameraDx +
+							forwardY * cameraDy +
+							forwardZ * cameraDz;
+
+						if (dot > 0.0)
+						{
+							const double score =
+								(dot * dot) /
+								(forwardLengthSquared *
+								 cameraLengthSquared);
+
+							if (score >=
+								coneSquared)
+							{
+								++candidates;
+
+								if (lineOfSight(
+										&player->mPos,
+										&candidate->mPos,
+										0,
+										0))
+								{
+									if (!best ||
+										score >
+											bestScore +
+											0.000001 ||
+										(score >=
+											bestScore -
+											0.000001 &&
+										 playerDistanceSquared <
+											bestPlayerDistanceSquared))
+									{
+										best =
+											candidate;
+										bestScore =
+											score;
+										bestPlayerDistanceSquared =
+											playerDistanceSquared;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			candidate =
+				next;
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		best =
+			0;
+		bestScore =
+			-1.0;
+	}
+
+	if (outCandidateCount)
+		*outCandidateCount =
+			candidates;
+	if (outScore &&
+		best)
+	{
+		*outScore =
+			bestScore;
+	}
+
+	return best;
+}
+
+// Retail SelectTargetBaddy remains available as a compatibility fallback for
+// unusual targetable bodies. Normal mode-3 enemy auto-aim now uses the visible
+// camera ray directly, with the same basic retail target-table/zombie/range/LOS
+// eligibility rules. This removes the player-origin/camera-origin impedance
+// mismatch that caused a centered target to appear and disappear on adjacent
+// selector calls.
 static CBody* SpideyCameraSelectTargetBaddyCommon(
 		CPlayer* player,
 		int arg1,
@@ -9430,11 +9645,6 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		(SpideyRetailSelectTargetBaddyFn)0x004C8410;
 	SpideyRetailQToMFn retailQToM =
 		(SpideyRetailQToMFn)0x0047C7F0;
-	typedef int (__cdecl *SpideyRetailLineOfSightFn)(
-		CVector*,
-		CVector*,
-		CVector*,
-		int);
 	SpideyRetailLineOfSightFn retailLineOfSight =
 		(SpideyRetailLineOfSightFn)0x004E67A0;
 
@@ -9464,6 +9674,10 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		0;
 	int cameraOriginPlayerLos =
 		0;
+	int cameraScanCandidates =
+		0;
+	double cameraScanScore =
+		0.0;
 
 	if (!useCamera)
 	{
@@ -9478,102 +9692,47 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 	}
 	else
 	{
-		MATRIX playerTargetMatrix;
-		MATRIX cameraTargetMatrix;
-		CVector playerPosition;
-
-		memcpy(
-			&playerTargetMatrix,
-			&player->field_89C,
-			sizeof(playerTargetMatrix));
-		playerPosition =
-			player->mPos;
-
-		// This is the same retail quaternion-to-matrix conversion used by
-		// CCamera::LoadIntoMikeCamera before the visible camera is published.
-		retailQToM(
-			&camera->field_214,
-			&cameraTargetMatrix);
-
-		// Canonical SelectTargetBaddy transforms its origin->candidate vector
-		// through field_89C, normalizes it, then scores -localZ.
-		cameraTargetMatrix.m[2][0] =
-			-cameraTargetMatrix.m[2][0];
-		cameraTargetMatrix.m[2][1] =
-			-cameraTargetMatrix.m[2][1];
-		cameraTargetMatrix.m[2][2] =
-			-cameraTargetMatrix.m[2][2];
-
-		memcpy(
-			&player->field_89C,
-			&cameraTargetMatrix,
-			sizeof(cameraTargetMatrix));
-
-		__try
-		{
-			// The previous camera patch changed only orientation. Retail still
-			// formed its scoring vector from Spider-Man's body position, which
-			// creates severe parallax for close targets because the visible
-			// camera is behind/above him. For centeredness scoring, temporarily
-			// present the render camera as the origin as well. Candidate flags,
-			// cached player-distance weighting and retail camera LOS remain
-			// untouched inside SelectTargetBaddy.
-			player->mPos =
-				camera->mPos;
-
-			target =
-				retail(
-					player,
-					0,
-					arg1,
-					arg2,
-					arg3,
-					arg4);
-
-			cameraOriginCandidate =
-				target ? 1 : 0;
-		}
-		__finally
-		{
-			player->mPos =
-				playerPosition;
-			memcpy(
-				&player->field_89C,
-				&playerTargetMatrix,
-				sizeof(playerTargetMatrix));
-		}
-
-		// A camera-centered target is useful only if Spider-Man himself has a
-		// clear shot. Retail's first pass tested LOS from the temporary camera
-		// origin, so revalidate from the real player position before accepting.
-		if (target)
-		{
-			cameraOriginPlayerLos =
-				retailLineOfSight(
-					&player->mPos,
-					&target->mPos,
-					0,
-					0) ?
-					1 :
-					0;
-
-			if (!cameraOriginPlayerLos)
-			{
-				target =
-					0;
-			}
-		}
+		target =
+			SpideyCameraSelectModernTarget(
+				player,
+				camera,
+				arg1,
+				arg2,
+				retailLineOfSight,
+				&cameraScanCandidates,
+				&cameraScanScore);
 
 		if (target)
 		{
 			selectionSource =
-				"render_camera_origin";
+				"modern_camera_scan";
+			cameraOriginPlayerLos =
+				1;
 		}
 		else
 		{
-			// Preserve the already-proven orientation-only path as a fallback
-			// for cases where the third-person camera is obstructed while
-			// Spider-Man still has a valid shot.
+			MATRIX playerTargetMatrix;
+			MATRIX cameraTargetMatrix;
+			CVector playerPosition;
+
+			memcpy(
+				&playerTargetMatrix,
+				&player->field_89C,
+				sizeof(playerTargetMatrix));
+			playerPosition =
+				player->mPos;
+
+			retailQToM(
+				&camera->field_214,
+				&cameraTargetMatrix);
+
+			cameraTargetMatrix.m[2][0] =
+				-cameraTargetMatrix.m[2][0];
+			cameraTargetMatrix.m[2][1] =
+				-cameraTargetMatrix.m[2][1];
+			cameraTargetMatrix.m[2][2] =
+				-cameraTargetMatrix.m[2][2];
+
 			memcpy(
 				&player->field_89C,
 				&cameraTargetMatrix,
@@ -9581,6 +9740,9 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 
 			__try
 			{
+				player->mPos =
+					camera->mPos;
+
 				target =
 					retail(
 						player,
@@ -9589,19 +9751,74 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 						arg2,
 						arg3,
 						arg4);
+
+				cameraOriginCandidate =
+					target ? 1 : 0;
 			}
 			__finally
 			{
+				player->mPos =
+					playerPosition;
 				memcpy(
 					&player->field_89C,
 					&playerTargetMatrix,
 					sizeof(playerTargetMatrix));
 			}
 
-			selectionSource =
-				target ?
-					"render_camera_orientation_fallback" :
-					"render_camera_no_target";
+			if (target)
+			{
+				cameraOriginPlayerLos =
+					retailLineOfSight(
+						&player->mPos,
+						&target->mPos,
+						0,
+						0) ?
+						1 :
+						0;
+
+				if (!cameraOriginPlayerLos)
+				{
+					target =
+						0;
+				}
+			}
+
+			if (target)
+			{
+				selectionSource =
+					"render_camera_origin_fallback";
+			}
+			else
+			{
+				memcpy(
+					&player->field_89C,
+					&cameraTargetMatrix,
+					sizeof(cameraTargetMatrix));
+
+				__try
+				{
+					target =
+						retail(
+							player,
+							0,
+							arg1,
+							arg2,
+							arg3,
+							arg4);
+				}
+				__finally
+				{
+					memcpy(
+						&player->field_89C,
+						&playerTargetMatrix,
+						sizeof(playerTargetMatrix));
+				}
+
+				selectionSource =
+					target ?
+						"render_camera_orientation_fallback" :
+						"render_camera_no_target";
+			}
 		}
 	}
 
@@ -9618,7 +9835,7 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		{
 			fprintf(
 				f,
-				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX camera_origin_candidate=%d player_los=%d args=%d,%d,%d,%d\n",
+				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX camera_scan_candidates=%d camera_scan_score=%.6f camera_origin_candidate=%d player_los=%d args=%d,%d,%d,%d\n",
 				gSpideyCameraWebTargetCalls,
 				callSource ? callSource : "unknown",
 				selectionSource,
@@ -9632,6 +9849,8 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 					 0x0FFF) :
 					-1,
 				(unsigned long)target,
+				cameraScanCandidates,
+				cameraScanScore,
 				cameraOriginCandidate,
 				cameraOriginPlayerLos,
 				arg1,
@@ -9704,7 +9923,7 @@ static void SpideyInstallCameraWebTargetingCompat()
 	{
 		fprintf(
 			f,
-			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_origin forward_axis=negative_local_z scope=select_auto_aim_and_check_web_shot player_los=revalidated fallback=orientation_only_then_retail_non_mode3\n",
+			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 primary=modern_camera_scan filters=targettable_non_zombie_real_range_player_los cone=arg2_over_4096 scope=select_auto_aim_and_check_web_shot fallback=retail_camera_origin_then_orientation\n",
 			autoAimInstalled,
 			checkWebShotInstalled);
 		fclose(f);
