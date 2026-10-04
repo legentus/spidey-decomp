@@ -1,5 +1,36 @@
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
+
+## 2026-10-04 LIVE UPDATE — PAUSE HARDENING, BOTH WEB PATHS, SHADOW CASTER PROBE
+
+The original ZIP handoff froze `dev` at `ea5f5f676d60ceb36a3c78df51aaffa73509b0dd`. **Continue from live `dev`, not that frozen commit.**
+
+New source frontier:
+- `f7c2532a956610768609e6732ec64e83b89bd463` — `pause: resize expanding box in place`
+  - removes retail `CMenu::Zoom` / delete+reallocate from the hooked pause frame;
+  - preserves the live `CExpandingBox` and updates its target rectangle in place under SEH.
+- `23260d11fb8a0b0533b9d0588cb96b927c8def44` — `gameplay: align CheckWebShot targeting to camera`
+  - wraps both retail `SelectTargetBaddy` call sites: `0x004C5B2F` (SelectAutoAimTarget) and `0x004C09E2` (CheckWebShot);
+  - both use the same camera-forward temporary scoring matrix and preserve the retail scorer.
+- `62d8711b09eb633a3ddc8a5271aeff0f55a697c6` + `0b72b0a340a3676f4678b8d0fc6888d24af242b7`
+  - guarded world-space shadow-caster telemetry for the retail mech-list head and current web target.
+
+Shadow RE breakthrough:
+- Renderer11's normal replay still sees projected `FVF 0x144 / XYZRHW` vertices, so do not attempt to invert that path back to world space;
+- historical `thps2-stuff/m3d.mik::RenderSuperItem` proves the pre-projection engine has the exact inputs required for real animated shadows: `CSuper::mTransform`, per-part `SMatrix` animation transforms, `SModel` local vertices, and face lists;
+- the new runtime probe logs region/model/pose/ground-contact evidence as `[SHADOW] world_space_probe ...`;
+- once validated, next implementation is a Renderer11 world-space caster submission API + directional depth-map pass, then removal of legacy character blobs only after the replacement is stable.
+
+Exact next combined runtime test:
+1. run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. confirm the session revision is newer than the frozen handoff revision;
+3. pause/unpause repeatedly and enter/exit custom Pause -> Options several times;
+4. test web attacks with the camera and Spider-Man deliberately facing different directions;
+5. remain near a targetable NPC for more than five seconds;
+6. return the single consolidated `spidey-decomp*.log`.
+
+Do not request a separate shadow-only test before examining that combined log.
+
 **Fetch live `dev` first. GitHub outranks this file if it has advanced.**
 
 Live frontier immediately before this handoff refresh:
