@@ -1,3 +1,91 @@
+# LIVE FRONTIER — TPS CAMERA MOVES; VERTICAL AIM FRAMING READY (2026-10-04)
+
+## LATEST TESTED RUNTIME
+
+Revision:
+- `0ed86176ca66461e96693cba29a2a32c2fc8bde8`
+
+Log:
+- `spidey-decomp(20261004-195535).log`
+
+User result:
+- aimed locomotion still works;
+- unified manual-aim camera now really moves/orbits;
+- reticle/cursor is again effectively centered through Spider-Man, so aiming feels obstructed.
+
+Runtime confirms real manual-aim orbit movement:
+- yaw changes substantially during aim (for example `3804 -> 17 -> 494 -> 724 -> 1380 ...`);
+- camera position changes accordingly;
+- aimed movement still changes Spider-Man world position.
+
+Freeze:
+- locomotion/re-entry suppression;
+- unified mode-3 look input;
+- timer pacing;
+- hip-fire targeting.
+
+## NEW UNTESTED SOURCE
+
+Source:
+- `e68c8de3021c20119c47b3d15bc0372bd907883f` — vertical TPS aim framing
+- `b37788fe417a26d39e00389ac87853e9cc9a08c2` — VC6-safe telemetry scope fix
+
+Docs:
+- `45301e82bf22a6ee18047e6bf6ca4336c0ec27f5` — CURRENT_STATUS checkpoint
+
+### New manual-aim framing
+
+Goal:
+- keep actual TPS camera freely movable;
+- put Spider-Man below the reticle instead of underneath it;
+- reticle should appear slightly above Spider-Man;
+- web ray should follow that same visible aim line.
+
+Implementation:
+- framed focus = Spider-Man body position with Y shifted 96 game units upward;
+- exact fixed-point shift = `96 * 4096 = 393216`;
+- patch direct call `0x00418458 -> 0x00416B10`;
+- CM_Normal still owns orbit position/collision;
+- wrapper changes only `field_144` before retail shared postprocess builds final orientation;
+- LoadIntoMikeCamera remains untouched;
+- reticle field_DC0 ray is now camera -> same framed focus, extended x8.
+
+Expected startup:
+- `modern_manual_camera_framing installed=1 ...`
+- `modern_camera_install ... manual_focus=framed_above_body manual_framing=1 framing_up_units=96 ...`
+- `modern_manual_aim_install ... reticle_source=framed_tps_camera_ray ...`
+
+Expected runtime:
+- `modern_manual_camera event=framing ... framing_up_units=96`
+- reticle logs include `framed_focus` and `framing_up_units=96`.
+
+Success:
+- Spider-Man visibly sits below reticle;
+- camera still orbits/tilts while aim held;
+- aimed movement remains functional;
+- webs land along reticle/view direction.
+
+If the vertical offset feels wrong, tune 96 up/down. If vertical framing is good but Spider-Man still blocks aim horizontally, add a small shoulder offset next. Do not restore the old independent free-view cursor.
+
+## EXACT NEXT ACTION
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`b37788fe...` or newer**.
+
+Test:
+1. hold manual aim and judge reticle vertical placement relative to Spider-Man;
+2. sweep camera left/right/up/down;
+3. aim/fire at several world points;
+4. move W/A/S/D + diagonals while aiming and rotating camera;
+5. release aim and verify clean normal-camera return;
+6. quick hip-fire sanity.
+
+Return one consolidated log.
+
+---
+
 # LIVE FRONTIER — AIMED MOVEMENT FIXED; UNIFIED TPS MANUAL-AIM CAMERA READY (2026-10-04)
 
 ## LATEST TESTED RUNTIME
