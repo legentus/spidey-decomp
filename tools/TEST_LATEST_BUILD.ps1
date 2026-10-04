@@ -317,6 +317,45 @@ try {
     if ($LASTEXITCODE -ne 0) {
         Stop-WithPause "Matching build failed." $LASTEXITCODE
     }
+
+    if ($Fast -and $env:SPIDEY_FAST_FORCE_CLEAN -ne "1") {
+        $fastBuiltDll = Join-Path $RepoRoot "Release\spider.dll"
+        $needsRelinkPass = $true
+
+        if (Test-Path -LiteralPath $fastBuiltDll) {
+            $fastBuiltInfo = Get-Item -LiteralPath $fastBuiltDll
+            $needsRelinkPass = ($fastBuiltInfo.LastWriteTimeUtc -lt $buildStartedUtc.AddSeconds(-2))
+        }
+
+        if ($needsRelinkPass) {
+            Write-Host ""
+            Write-Host "[FAST] First NMAKE pass rebuilt objects without relinking the DLL."
+            Write-Host "[FAST] Running a cheap second pass to catch up the link target..."
+
+            & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
+            if ($LASTEXITCODE -ne 0) {
+                Stop-WithPause "Incremental relink pass failed." $LASTEXITCODE
+            }
+        }
+
+        $stillStale = $true
+        if (Test-Path -LiteralPath $fastBuiltDll) {
+            $fastBuiltInfo = Get-Item -LiteralPath $fastBuiltDll
+            $stillStale = ($fastBuiltInfo.LastWriteTimeUtc -lt $buildStartedUtc.AddSeconds(-2))
+        }
+
+        if ($stillStale) {
+            Write-Host ""
+            Write-Host "[WARNING] Incremental relink still did not regenerate spider.dll."
+            Write-Host "[INFO] Falling back to one clean matching build for safety."
+
+            $env:SPIDEY_FORCE_CLEAN = "1"
+            & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
+            if ($LASTEXITCODE -ne 0) {
+                Stop-WithPause "Fallback clean matching build failed." $LASTEXITCODE
+            }
+        }
+    }
 } finally {
     if ($hadRuntimeHeader) {
         [System.IO.File]::WriteAllText($runtimeHeader, $runtimeBackup)
