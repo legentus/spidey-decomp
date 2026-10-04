@@ -1,6 +1,24 @@
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
 
+## MANDATORY RECOVERY / LIVE-UPDATE RULE FOR THE NEXT CHAT
+
+**Do not keep important work only in the conversation.** This project must survive an `error in input stream` at any point.
+
+Required operating procedure:
+- fetch live `dev` before working;
+- read the newest `docs/CURRENT_STATUS.md`;
+- continuously append confirmed RE findings / runtime results / exact next steps to `CURRENT_STATUS.md`;
+- commit + push every coherent source fix promptly;
+- also commit doc-only RE checkpoints after meaningful discoveries, even if no source changed yet;
+- update `NEW_CHAT_HANDOFF.md` whenever the recovery frontier materially advances;
+- before asking the user to test, make sure source + docs are already committed and pushed;
+- after the test result arrives, checkpoint the conclusion before starting the next fix;
+- if interrupted, recover from live GitHub first rather than redoing work from the transcript.
+
+The user explicitly requested frequent live Git updates so interruptions do not lose progress. Treat this as mandatory, not optional housekeeping.
+
+
 ## 2026-10-04 LATEST — THIRD-PASS MANUAL AIM / HIP-FIRE IMPLEMENTED
 
 Latest tested build before this source change: `7a6af671...`.
