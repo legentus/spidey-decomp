@@ -138,9 +138,8 @@ class CPlayer : public CSuper
 		CVector field_AC8;
 
 		u8 field_AD4;
-
-		PADDING(0xAD7-0xAD4-1);
-
+		u8 field_AD5;
+		u8 field_AD6;
 		u8 field_AD7;
 
 		PADDING(0xAE4-0xAD7-1);
