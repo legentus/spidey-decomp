@@ -10115,6 +10115,16 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 
 	if (manualAim)
 	{
+		// SetupLookaroundCamera runs earlier in SpideyAI0, before this frame's
+		// camera orbit/post-process. Its field_DC0 value is therefore one
+		// camera update stale during fast look input. Rebuild the aim point
+		// here from the final current-frame camera/framed focus so the rendered
+		// reticle cannot chase the camera by one frame.
+		const int postCameraReticleApplied =
+			SpideyModernAimApplyCameraPoint(
+				player,
+				camera);
+
 		++gSpideyManualAimFramingCalls;
 
 		if (gSpideyManualAimFramingCalls <= 6 ||
@@ -10127,7 +10137,7 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 			{
 				fprintf(
 					f,
-					"modern_manual_camera event=framing call=%lu camera=0x%08lX focus=%d,%d,%d body=%d,%d,%d framing_up_units=%d heading=%d transform_heading=%d\n",
+					"modern_manual_camera event=framing call=%lu camera=0x%08lX focus=%d,%d,%d body=%d,%d,%d framing_up_units=%d heading=%d transform_heading=%d post_camera_reticle=%d reticle_point=%d,%d,%d\n",
 					gSpideyManualAimFramingCalls,
 					(unsigned long)camera,
 					camera->field_144.vx,
@@ -10138,7 +10148,11 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 					player->mPos.vz,
 					kSpideyManualAimFocusHeightUnits,
 					(int)camera->field_236,
-					(int)camera->field_23A);
+					(int)camera->field_23A,
+					postCameraReticleApplied,
+					player->field_DC0.vx,
+					player->field_DC0.vy,
+					player->field_DC0.vz);
 				fclose(f);
 			}
 		}
