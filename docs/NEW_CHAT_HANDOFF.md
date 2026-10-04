@@ -1,3 +1,45 @@
+# CHAT-LIMIT MASTER HANDOFF — RETICLE NO-DRAG + HITCH PHASE TEST READY (2026-10-04)
+
+This chat ended at the exact point where the next runtime test is ready.
+
+Authoritative project:
+- Repo: https://github.com/legentus/spidey-decomp
+- Branch: `dev`
+- Google Drive root: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+- Handoff folder ID: `1l-4gLh-jftGT1aNrP73wD8n3IScqQcvO`
+- Logs folder ID: `1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s`
+
+Latest tested runtime:
+- revision `2ec405d96253df7332d5fe6609729fb4f310b720`
+- log `spidey-decomp(20261004-200625).log`
+
+Latest untested source:
+- `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1` — same-frame post-camera reticle update
+- `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0` — slow-frame presenter phase partition
+
+Current source is **implemented and committed but not runtime-tested**.
+
+The next chat must:
+1. fetch live `dev` first;
+2. read the top of `docs/CURRENT_STATUS.md` and this file;
+3. run no duplicate RE before checking the latest source;
+4. ask the user to run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+5. test fast manual-aim sweeps for zero reticle drag;
+6. collect several hitch events;
+7. use the new phase fields to decide whether stalls are inside PresentShadow/replay/transient/draw-probe/presenter remainder or outside presenter;
+8. document the runtime result before changing source.
+
+Freeze unless regression:
+- hip-fire targeting;
+- aimed locomotion/re-entry suppression;
+- unified TPS mode-3 camera;
+- 96-unit vertical manual-aim framing;
+- elapsed-time 60 Hz pacing.
+
+Do not resume real-shadow work until this camera/hitch test is evaluated.
+
+---
+
 # LIVE FRONTIER — RETICLE DRAG FIX + HITCH PHASE PROBE READY (2026-10-04)
 
 ## LATEST TESTED RUNTIME
