@@ -7,5 +7,6 @@
 #include "export.h"
 
 EXPORT void Physics_SetGravity(CVector *);
+void patch_physics(void);
 
 #endif
