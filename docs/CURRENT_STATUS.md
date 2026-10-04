@@ -46,6 +46,107 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## IMPLEMENTATION CHECKPOINT — SAME-FRAME RETICLE + SLOW-FRAME PHASE PARTITION READY (2026-10-04)
+
+**Status: source implemented; NOT runtime-tested yet.**
+
+Source commits:
+- `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1` — `gameplay: update manual reticle after camera orbit`
+- `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0` — `timing: partition slow frames by presenter phase`
+
+### Reticle responsiveness fix
+
+The validated 96-unit vertical framing remains unchanged.
+
+The early SpideyAI0 / SetupLookaroundCamera path still writes a compatibility reticle point, but it is no longer authoritative for the rendered frame.
+
+At the existing manual camera framing hook:
+- `0x00418458 -> 0x00416B10`;
+- framed focus is applied;
+- untouched retail postprocess runs;
+- **after retail returns**, `SpideyModernAimApplyCameraPoint` runs again;
+- `field_DC0` is rebuilt from the **final current-frame camera position -> framed focus**;
+- `field_DE4=1`.
+
+This removes the one-frame stale camera sample that made the cursor trail behind fast look input.
+
+Expected framing telemetry now includes:
+- `post_camera_reticle=1`
+- `reticle_point=x,y,z`
+
+Success criterion:
+- fast mouse flicks keep reticle locked/snappy with camera motion;
+- no visible chase/drag;
+- framing remains 96 units above Spider-Man;
+- aimed locomotion and web direction remain intact.
+
+### Hitch phase partition
+
+The direct FireWeb timestamps proved web firing happens **after** the large stalls, so FireWeb is not treated as a cause.
+
+The existing slow-event probe is extended without adding per-frame file I/O.
+
+For each completed DXPOLY flip wrapper, the following phase durations are retained in memory:
+- `record_timing_us` — frame-safe timing bookkeeping;
+- `transient_us` — pending transient-surface processing;
+- `shadow_end_us` — DX11 shadow replay/end-frame;
+- `draw_probe_us` — retail draw-probe flush/install;
+- `present_shadow_us` — actual DX11 PresentShadow call;
+- `other_present_us` — remainder of wrapper work;
+- `present_work_us` — total time spent inside previous DXPOLY flip wrapper;
+- `outside_present_us` — slow inter-present interval minus previous wrapper work.
+
+These are copied into the existing in-memory slow-event record and only emitted on the normal once-per-second timing flush.
+
+New slow-event format:
+- `present_work_us=...`
+- `outside_present_us=...`
+- `record_timing_us=...`
+- `transient_us=...`
+- `shadow_end_us=...`
+- `draw_probe_us=...`
+- `present_shadow_us=...`
+- `other_present_us=...`
+
+Interpretation for the next hitch:
+- huge `present_shadow_us` => actual visible DX11 present/GPU wait;
+- huge `shadow_end_us` => DX11 replay/end-frame path;
+- huge `transient_us` => transient surface mirror/lock path;
+- huge `draw_probe_us` => retail capture/probe flush;
+- huge `other_present_us` => another presenter-side operation;
+- huge `outside_present_us` with small `present_work_us` => stall occurs in game/update/render work before entering presenter, not in presentation itself.
+
+### Static audit
+
+After `ca2af74d...`:
+- braces: 1093 / 1093;
+- parentheses: 5103 / 5103;
+- brackets: 363 / 363;
+- no C++11 `auto`, lambdas, or `nullptr`;
+- timing phase probe uses only QPC and in-memory counters on the hot path;
+- slow-event file output remains once per timing window;
+- no existing camera sensitivity, framing constant, locomotion mask, hip-fire or web-target code changed;
+- no GitHub CI status is currently attached.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`ca2af74d...` or newer**.
+
+Test:
+1. manual aim and make several very fast left/right/up/down mouse sweeps;
+2. judge specifically whether the reticle still trails or now stays glued to the current camera direction;
+3. verify 96-unit placement still feels right;
+4. move while aiming + turning + firing;
+5. play until several hitches occur;
+6. optional: continue firing once after each hitch as a sanity marker, though FireWeb is already ruled out as the trigger;
+7. quick hip-fire sanity.
+
+Return one consolidated log.
+
+
 ## RUNTIME CHECKPOINT — VERTICAL AIM FRAMING GOOD; RETICLE HAS ONE-FRAME DRAG; WEB FIRE NOT HITCH CAUSE (2026-10-04)
 
 Tested revision:
