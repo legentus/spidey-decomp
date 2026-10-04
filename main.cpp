@@ -1219,8 +1219,12 @@ static int gSpideyPauseParentSnapshotValid = 0;
 static CMenu* gSpideyPauseMenuOwner = 0;
 // CMenu is validated as 0x53C bytes. Preserve everything after the vtable
 // and expanding-box pointer while the same retail pause CMenu is repurposed
-// as our custom Options submenu.
-static unsigned char gSpideyPauseParentState[0x534];
+// as our custom Options submenu. The compile-time guard prevents a future
+// layout change from silently making this snapshot range invalid.
+typedef char SpideyPauseCMenuSizeCheck[
+	(sizeof(CMenu) == 0x53C) ? 1 : -1];
+static unsigned char gSpideyPauseParentState[
+	sizeof(CMenu) - 8];
 static int gSpideyInLevelDisplayMenuActive = 0;
 
 static void SpideyApplyFrontendTextScale(
