@@ -46,6 +46,180 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## IMPLEMENTATION CHECKPOINT — FINAL MANUAL CAMERA PUBLISH + AIM RE-ENTRY GUARD + ELAPSED-TIME 60 HZ DISPATCH READY (2026-10-04)
+
+**Status: source implemented and committed; NOT runtime-tested yet.**
+
+Source commits after tested revision `93d63347505da81a769c1d58ba62361c4650f4b5`:
+- `71d6bf609bca7ba9cacc860aa008db03c302da74` — `gameplay: publish free aim camera and guard aim reentry`
+- `b4d961a4a349bf397a45b5025aaeba353a3f479f` — `timing: remove one-shot drift and timestamp web fire`
+- `26a03d05afe21e82517bee43400129c1190176b5` — `timing: anchor 60hz dispatcher to elapsed milliseconds`
+
+### Manual-aim visible camera
+
+The previous build already changed the free-aim world focus, but only after `CM_Normal`. That correctly moved the reticle/web ray while leaving the final visible camera quaternion unchanged.
+
+New implementation:
+- patches only `CCamera::AI` final direct publish call:
+  - `0x0041865F -> CCamera::LoadIntoMikeCamera @ 0x00416A20`;
+- only while effective manual aim is active in ordinary mode 3:
+  1. save retail `camera->field_214` and `field_23A`;
+  2. derive aim angles from `camera->mPos -> camera->field_144` using retail `Utils_CalcAim`;
+  3. construct the rotation with retail `M3dMaths_RotMatrixYXZ`;
+  4. convert it with retail `MToQ`;
+  5. temporarily place that quaternion in `field_214`;
+  6. call untouched retail `LoadIntoMikeCamera`, which publishes the visible `gMikeCamera[0].Transform`;
+  7. restore the internal retail quaternion/heading immediately afterward.
+- camera position, collision, interpolation and all non-mode-3/scripted modes remain retail-owned.
+
+Expected startup marker:
+- `modern_camera_install ... manual_publish=1 manual_publish_call=0x0041865F retail_publish=0x00416A20`
+
+Expected runtime marker:
+- `modern_manual_camera event=publish ... aim_angles=... pos=... focus=... published_heading=...`
+
+Success criterion:
+- while manual aim is held, moving mouse/right stick visibly rotates the gameplay view;
+- reticle/web direction stays on the same visible camera ray.
+
+### Manual-aim locomotion re-entry guard
+
+The prior runtime showed the raw `field_8EA` value reasserting to 1 while the locomotion sidecar remained active, followed by stand/run oscillation and zero body delta.
+
+New implementation:
+- adds `SpideyModernAimEnterLookaroundMode`;
+- scans the known SpideyAI0/player-AI range `0x004B0000..0x004B9000` for direct calls targeting `EnterLookaroundMode @ 0x004C3580`;
+- each exact direct call is patched through the existing target-validated direct-call helper;
+- normal initial manual-aim entry still calls untouched retail;
+- if the modern locomotion sidecar is already active, redundant retail re-entry is suppressed;
+- if retail has reasserted raw `field_8EA=1` while the mask is active, the wrapper clears it back to 0 instead of allowing another aim-state reinitialization;
+- CheckForwards also has a defensive raw-flag re-clear at entry while the same mask is active.
+
+New movement telemetry:
+- `enter_retail=<count>`
+- `enter_suppressed=<count>`
+- `raw_reclear=<count>`
+
+Expected startup marker:
+- `modern_manual_aim_install ... enter_reentry_calls=<nonzero expected> enter_target=0x004C3580 ...`
+
+Success criterion:
+- while aim + movement are held:
+  - `locomotion_mask=1`;
+  - `actual_aim_state=0` stays stable through movement;
+  - `enter_suppressed` rises if held-aim retail code attempts to re-enter;
+  - Spider-Man body position actually changes / `body_delta != 0`;
+  - no repeated stand/run vibration.
+
+### Timer pacing — remove one-shot re-arm drift
+
+The first phased timer runtime materially removed the old 24-frame ~32 ms beat, but settled gameplay commonly ran at only 58–59 Hz.
+
+Root cause targeted:
+- chained 16/17 ms one-shot timers were re-armed from inside their callback;
+- callback/re-arm scheduler latency accumulated into a slower delivery clock.
+
+New source:
+- one real WinMM periodic timer runs at 1 ms;
+- it does **not** call retail TimerCallback every millisecond;
+- it checks the next absolute 60 Hz deadline:
+  - `floor(n * 1000 / 60) + 1`;
+- when that deadline is reached, it invokes untouched retail TimerCallback once with the exact 16/17 ms interval in `STimerInfo.field_4`;
+- the heartbeat is anchored to absolute elapsed WinMM `timeGetTime`, not counted callbacks;
+- if a 1 ms heartbeat is late or skipped, the missing callback does not permanently slow the delivery phase;
+- fallback is `GetTickCount` only if `timeGetTime` cannot be resolved;
+- existing atomic `timeKillEvent`-before-`timeSetEvent` fail-closed install remains.
+
+Expected startup:
+- `timer_pacing_install ... time_get_time=0x... policy=periodic_1ms_source_dispatch_16_17ms_60hz ...`
+- `timer_pacing event=intercept ... source_period_ms=1 ... source_clock=timeGetTime ...`
+
+Expected steady timing:
+- `timer_source_callbacks` grows at roughly 1000/sec;
+- `timer_source_ms` follows real elapsed milliseconds;
+- dispatched `timer_callbacks`, logic and ordinary gameplay presents should return near 60/sec;
+- the old exact 24-frame 31–33 ms cadence should remain absent.
+
+### Direct FireWeb hitch timestamp
+
+The previous `check_web_shot_calls` counter never moved despite actual user web shots, so it is no longer used as the primary manual correlation signal.
+
+New implementation:
+- scans the main EXE direct-call range for calls to `CPlayer::FireWeb @ 0x004C5DD0`;
+- each exact direct call is wrapped;
+- wrapper increments:
+  - `fire_web_calls`;
+  - `last_fire_frame`;
+- untouched retail FireWeb executes immediately afterward.
+
+Slow-frame diagnostics:
+- capture threshold is lowered from 25 ms to **18 ms**;
+- capture is gameplay-only, in-memory, and still flushes only with the existing timing window;
+- each event now includes:
+  - `fire_web_calls`;
+  - `last_fire_frame`;
+  - existing web-target/check-web counters.
+
+Expected install:
+- `timing_install ... fire_web_hooks=<nonzero expected> ... slow_threshold_us=18000`
+
+Expected event:
+- `[TIMING] slow_present_events threshold_us=18000 ... fire_web_calls=... last_fire_frame=...`
+
+### Static audit
+
+After `26a03d05...`:
+- braces balanced: 1084 / 1084;
+- parentheses balanced: 5080 / 5080;
+- brackets balanced: 363 / 363;
+- no `nullptr` or lambdas introduced;
+- only "auto" occurrences are existing comment text, not C++11 `auto`;
+- old one-shot interval helper removed;
+- final-camera retail helper signatures verified against headers:
+  - `Utils_CalcAim(CSVector*, CVector*, CVector*)`;
+  - `M3dMaths_RotMatrixYXZ(SVECTOR*, MATRIX*)`;
+  - `MToQ(MATRIX const&, CQuat&)`.
+- no GitHub CI/status result is attached yet; do not describe this source as CI-green.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source revision:
+- **`26a03d05...` or newer**.
+
+In one session:
+
+1. **Manual camera**
+   - hold manual aim;
+   - move mouse left/right/up/down through a clear range;
+   - verify the actual visible camera now rotates, not only the cursor;
+   - verify cursor/web direction remains aligned with the view.
+
+2. **Movement while aiming**
+   - hold aim + W/A/S/D individually and diagonals;
+   - verify Spider-Man actually translates rather than vibrating in place;
+   - rotate the camera while moving;
+   - fire while aim + move + camera are all active.
+
+3. **Aim release**
+   - release aim while moving;
+   - verify clean return to normal movement/camera;
+   - quick pause/unpause / ordinary camera transition sanity check.
+
+4. **Hitch**
+   - play long enough to encounter several perceived small hitches;
+   - firing a web near each visible hitch is useful again because FireWeb is now timestamped directly;
+   - report whether the hitch feels gone, reduced, unchanged, or worse.
+
+5. **Hip-fire**
+   - quick sanity only; do not retest extensively unless a regression appears.
+
+Return one consolidated `spidey-decomp.log`.
+
+Do not resume real-shadow work until this runtime is evaluated.
+
+
 ## RUNTIME CHECKPOINT — MANUAL AIM RAY WORKS; FINAL CAMERA TRANSFORM + AIM RE-ENTRY RESET IDENTIFIED (2026-10-04)
 
 Tested revision:
