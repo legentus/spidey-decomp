@@ -2949,6 +2949,8 @@ static void SpideyPauseResetPendingToCommitted(
 		gSpideyGameplayUiScalePercent;
 	gSpideyPendingMenuTextScalePercent =
 		gSpideyMenuTextScalePercent;
+	gSpideyPendingCameraSensitivityPercent =
+		gSpideyCameraSensitivityPercent;
 	SpideyUpdateUiScaleMenuLabels();
 
 	FILE* f =
@@ -2958,10 +2960,11 @@ static void SpideyPauseResetPendingToCommitted(
 	{
 		fprintf(
 			f,
-			"pause_options_pending_reset reason=%s gameplay=%d text=%d\n",
+			"pause_options_pending_reset reason=%s gameplay=%d text=%d camera_sensitivity=%d\n",
 			reason ? reason : "unknown",
 			gSpideyPendingGameplayUiScalePercent,
-			gSpideyPendingMenuTextScalePercent);
+			gSpideyPendingMenuTextScalePercent,
+			gSpideyPendingCameraSensitivityPercent);
 		fclose(f);
 	}
 }
@@ -3040,7 +3043,7 @@ static int SpideyPauseEnterOptions(
 
 	int entryIndex;
 	for (entryIndex = 0;
-		 entryIndex < 5;
+		 entryIndex < 6;
 		 ++entryIndex)
 	{
 		menu->mEntry[entryIndex].what =
@@ -3065,6 +3068,10 @@ static int SpideyPauseEnterOptions(
 		menu,
 		0,
 		gSpideyPauseMenuTextScaleMenuLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyPauseCameraSensitivityMenuLabel);
 	retailAdd(
 		menu,
 		0,
@@ -3096,7 +3103,7 @@ static int SpideyPauseEnterOptions(
 	{
 		fprintf(
 			f,
-			"pause_options_state action=enter menu=0x%08lX rows=%u line=%u cursor=%u y=%d line_sep=%d heading_disabled=%d gameplay=%d text=%d\n",
+			"pause_options_state action=enter menu=0x%08lX rows=%u line=%u cursor=%u y=%d line_sep=%d heading_disabled=%d gameplay=%d text=%d camera_sensitivity=%d\n",
 			(unsigned long)menu,
 			(unsigned int)menu->mNumLines,
 			(unsigned int)menu->mLine,
@@ -3105,7 +3112,8 @@ static int SpideyPauseEnterOptions(
 			menu->mLineSep,
 			menu->mEntry[0].what ? 1 : 0,
 			gSpideyPendingGameplayUiScalePercent,
-			gSpideyPendingMenuTextScalePercent);
+			gSpideyPendingMenuTextScalePercent,
+			gSpideyPendingCameraSensitivityPercent);
 		fclose(f);
 	}
 
@@ -3152,12 +3160,13 @@ static int SpideyPauseRestoreParent(
 	{
 		fprintf(
 			f,
-			"pause_options_state action=restore reason=%s rows=%u line=%u gameplay=%d text=%d\n",
+			"pause_options_state action=restore reason=%s rows=%u line=%u gameplay=%d text=%d camera_sensitivity=%d\n",
 			reason ? reason : "unknown",
 			(unsigned int)menu->mNumLines,
 			(unsigned int)menu->mLine,
 			gSpideyGameplayUiScalePercent,
-			gSpideyMenuTextScalePercent);
+			gSpideyMenuTextScalePercent,
+			gSpideyCameraSensitivityPercent);
 		fclose(f);
 	}
 
@@ -3171,6 +3180,8 @@ static void SpideyPauseCommitUiScale()
 		gSpideyGameplayUiScalePercent;
 	const int oldText =
 		gSpideyMenuTextScalePercent;
+	const int oldCameraSensitivity =
+		gSpideyCameraSensitivityPercent;
 
 	gSpideyGameplayUiScalePercent =
 		SpideyClampUiScalePercent(
@@ -3178,6 +3189,9 @@ static void SpideyPauseCommitUiScale()
 	gSpideyMenuTextScalePercent =
 		SpideyClampUiScalePercent(
 			gSpideyPendingMenuTextScalePercent);
+	gSpideyCameraSensitivityPercent =
+		SpideyClampCameraSensitivityPercent(
+			gSpideyPendingCameraSensitivityPercent);
 
 	SpideySaveModernVideoSettings();
 	SpideyUpdateUiScaleMenuLabels();
@@ -3191,11 +3205,13 @@ static void SpideyPauseCommitUiScale()
 	{
 		fprintf(
 			f,
-			"pause_ui_apply old_gameplay=%d new_gameplay=%d old_text=%d new_text=%d saved=1 live_gameplay=next_draw live_text=reapplied_no_device_rebuild\n",
+			"pause_ui_apply old_gameplay=%d new_gameplay=%d old_text=%d new_text=%d old_camera_sensitivity=%d new_camera_sensitivity=%d saved=1 live_gameplay=next_draw live_text=reapplied_no_device_rebuild live_camera=next_input\n",
 			oldGameplay,
 			gSpideyGameplayUiScalePercent,
 			oldText,
-			gSpideyMenuTextScalePercent);
+			gSpideyMenuTextScalePercent,
+			oldCameraSensitivity,
+			gSpideyCameraSensitivityPercent);
 		fclose(f);
 	}
 }
@@ -3224,7 +3240,7 @@ static void __fastcall SpideyPauseMenuUpdate(
 			menu != gSpideyPauseMenuOwner;
 		const int submenuShapeLost =
 			!ownerChanged &&
-			(menu->mNumLines != 5 ||
+			(menu->mNumLines != 6 ||
 			 !SpideyPauseMenuHasEntry(
 				menu,
 				gSpideyPauseOptionsHeadingLabel) ||
@@ -3234,6 +3250,9 @@ static void __fastcall SpideyPauseMenuUpdate(
 			 !SpideyPauseMenuHasEntry(
 				menu,
 				gSpideyPauseMenuTextScaleMenuLabel) ||
+			 !SpideyPauseMenuHasEntry(
+				menu,
+				gSpideyPauseCameraSensitivityMenuLabel) ||
 			 !SpideyPauseMenuHasEntry(
 				menu,
 				gSpideyPauseApplyUiScaleLabel) ||
