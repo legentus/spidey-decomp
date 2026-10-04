@@ -42,8 +42,10 @@ Implementation commits in this batch:
 - fa0f7e230c210019d8c6066076585fb84144b8ee — pause: wire camera sensitivity controls
 - fde069d43a284c27ca385ef427a6751f3b5bd06f — camera: apply configurable sensitivity
 - 954882bb63a86c39011bbc3996104f905b8559aa — gameplay: aim web auto-targeting from camera
+- c71240e223884de59665e63c1b8984b606301845 — perf: throttle validated camera telemetry
 - 1313b3840b8aaa0696783d6fe0d6baadee9b20b2 — docs: checkpoint camera sensitivity and web targeting
 - 9ad45941f8c772933733973f00356195a8fe862f — docs: checkpoint camera follow-up batch
+- 743b02c937ccb92130f781dfab454e4e0144c110 — docs: record camera telemetry throttle
 
 Runtime evidence from prior revision 5ec06e...:
 - modern camera installed and acquired successfully;
