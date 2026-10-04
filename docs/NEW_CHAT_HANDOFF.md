@@ -1,3 +1,24 @@
+# BUILD-RECOVERY UPDATE — NATIVE-60 TEST BUILD FIXED AFTER VC6 COMPILE FAILURE (2026-10-04)
+
+The first attempt to build the combined native-60 player-physics + RotY batch at `33c3016d...` failed before runtime.
+
+Compile blockers and committed fixes:
+- `8043e1ef...` — include `physics.h` so `patch_physics()` is declared;
+- `a2c022f2...` — correct crawling side-probe C78/C7C/C80 component math;
+- `8bce08e5...` — replace stale CPlayer collision aliases with the corrected `mLineInfo` / `mLineInfo2` layout;
+- `84a0c0d4...` — CURRENT_STATUS checkpoint documenting the failed build and exact structural mappings.
+
+No runtime test has happened yet for the native-60 physics/RotY changes.
+
+Next action:
+- run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` again from the newest `dev`;
+- if compilation succeeds, perform the existing traversal/crawl/AI/game-speed test;
+- if another VC6 compile error appears, fix that first and do not treat it as a gameplay result.
+
+The timing architecture and source conversions themselves are unchanged by this build-repair pass.
+
+---
+
 # NATIVE 60-HZ HANDOFF UPDATE — FIRST PHYSICS + AI CONVERSION BATCH READY (2026-10-04)
 
 Latest tested runtime:
