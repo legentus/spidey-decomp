@@ -9272,3 +9272,35 @@ If the latest build still crashes on pause:
 - preserve/upload the new consolidated log;
 - also upload any `spidey-decomp-crash*.log` if generated;
 - do not diagnose the old ef78 run as a crash reproduction because its session closed normally.
+
+
+## Stale direct-launch runtime identified + play-current logging hardened (2026-10-04)
+
+User reported:
+- pause crash during gameplay;
+- camera-based web targeting improved but still intermittent, especially against aggro enemies;
+- character blob shadows still camera-relative.
+
+The uploaded `spidey-decomp(20261004-071556).log` does **not** represent the current source frontier:
+- session revision in the file is `ef78ea5ff959f4518a96567aed340bd935c251e5`;
+- live `dev` at diagnosis was `414617b67870d9bf1880fdd66c919f81cd22bba4`;
+- therefore the run predates:
+  - `5e3dd2e...` camera-web negative-local-Z axis correction;
+  - `a24b4d27...` QuadBit camera-basis restoration;
+  - `dd35f977...` dynamic Pause Options expanding-box resize.
+- the uploaded log ends with `[SESSION] exit_code=0`, so it does not contain the reported pause crash.
+
+Interpretation:
+- do not treat the reported shadow failure as evidence against `a24b4d27...`; that hook was absent from the tested build;
+- do not treat the aggro-targeting behavior as proof that the separate `CheckWebShot -> SelectTargetBaddy` path must be patched yet; the tested build also lacked the newer axis correction;
+- do not debug the reported pause crash from this log because the crash session is not present.
+
+Workflow hardening commits:
+- `f892eaa163459fdca5e7504e6e0a83cfcdff6d9a` — runtime stamps `runtime_revision=<RUNTIME_VERSION>` into the consolidated log on DLL attach, so direct launches identify the actually loaded proxy.
+- `5709bdef9269f6d6e9e02c2c0ced6a74f3fbaf56` — `RUN_GAME.bat` now clears stale logs, seeds a fresh current-installed-build session, waits for game exit, records exit code, and points to the one uploadable `spidey-decomp.log`; it still performs no update/download/build/install.
+
+Next runtime:
+1. run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` **once** to install the current dev build;
+2. then direct playtesting may use `RUN_GAME.bat` without updating/rebuilding;
+3. re-test pause, aggro/non-aggro camera web targeting, and blob-shadow camera anchoring;
+4. upload the freshly generated `spidey-decomp.log` if anything fails.
