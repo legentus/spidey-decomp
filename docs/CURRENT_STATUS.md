@@ -1,5 +1,61 @@
 # CURRENT STATUS
 
+## RUNTIME RESULT — HITCH CLEANUP VALIDATED; 60-HZ TIMING NOW SOLE FRONTIER (2026-10-04)
+
+Tested runtime:
+- revision `a4e1105d1f9568a24ca8817847573392a7f8324a`;
+- log `spidey-decomp(20261004-213030).log`;
+- user confirms the logging cleanup **got rid of the hitches**.
+
+Hitch conclusion:
+- the recurring hitch problem was dominated by our own synchronous diagnostic/success logging;
+- `98d52ec80b5876db8e347460be307555b905de4b` and `31f80818ab5ee73cacae4b3d952205add448fc86` are now runtime-validated as the practical hitch fix;
+- remove hitch diagnosis from the active work queue unless a new, reproducible stall appears;
+- web firing was only a marker and requires no hitch-related changes.
+
+60-Hz user-visible result:
+- gameplay is still **slightly sped up at 60 FPS**;
+- user explicitly requires **60 Hz as the minimum/native simulation target**;
+- higher refresh must be achieved by rendering/interpolation above a correct 60-Hz simulation, not by lowering the whole game to 30.
+
+Timer result from this runtime:
+- the master virtual-vblank clock remains approximately 60 Hz rather than running fast;
+- therefore remaining speed-up comes from subsystems that advance once per Logic/AI call instead of consuming canonical elapsed ticks.
+
+Retail RE capture completed successfully:
+- `Ob_AI @ 0x00460FC0` captured completely;
+- `CVenom_FollowDirections @ 0x004EB530` captured completely;
+- `SpideyAI0 @ 0x004B13F0` captured completely.
+
+New `Ob_AI` conclusion:
+- every active object receives `EveryFrame()`;
+- supers receive `UpdateFrame()`;
+- virtual `AI()` then runs every `Ob_AI` dispatch;
+- there is no hidden 30-Hz AI interleave inside `Ob_AI`.
+
+This makes raw per-call timers real 60-Hz acceleration candidates. Confirmed example:
+- `CAIProc::Wait` decrements `field_C` by exactly one per Execute call.
+
+Counterexample already correct:
+- `CAIProc_MoveTo` uses the owning baddy's `field_80`;
+- `CBaddy::RunTimer` subtracts `field_80`;
+- body/camera/animation systems widely use `field_80` or absolute `gTimerRelated`.
+
+Mysterio runtime result:
+- first elapsed-time laser patch safely declined installation because runtime vtable slot 0 was `0x0045B540`, not the guessed `0x0045B300`;
+- slot 1 matched `0x0045BAC0`;
+- source correction `6cf830b974316134a8a7813ac1eda42279eacd60` updates the guard to the runtime-proven destructor and removes the no-longer-needed startup byte-dump instrumentation.
+
+Active timing architecture:
+1. make gameplay **natively correct at 60 Hz**;
+2. preserve every subsystem already consuming canonical elapsed ticks;
+3. convert reusable raw per-update timing primitives and proven raw gameplay timers to 60-Hz elapsed-time semantics;
+4. keep player input/camera responsiveness at full 60 Hz;
+5. once simulation is correct, never advance gameplay more than once per canonical 60-Hz tick;
+6. decouple Display/presentation and interpolate for 120/144/165/240+ Hz.
+
+Do not resume shadow work until the 60-Hz timing conversion reaches a stable runtime checkpoint.
+
 ## AUTHORITATIVE HIGH-FPS FRONTIER — SOURCE + RE CAPTURE READY (2026-10-04)
 
 Latest tested runtime:
