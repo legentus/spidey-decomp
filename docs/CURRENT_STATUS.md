@@ -46,6 +46,98 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## RUNTIME CHECKPOINT — CAMERA RAY VALIDATED; AIM PIVOT + LOCOMOTION RESET + 24-FRAME HITCH IDENTIFIED (2026-10-04)
+
+User runtime:
+- `spidey-decomp(20261004-182002).log`
+- tested revision: `8958de0676dda897b5c8dc346493276d4c5ffffd`
+
+### User-visible result
+
+Manual aim:
+- camera/reticle behavior is noticeably better than the prior inverted/off-screen version;
+- webs now consistently travel in the direction the user can aim;
+- however the camera still stays centered on Spider-Man instead of behaving as a proper free/manual aiming view;
+- Spider-Man still cannot move while manual aim is held.
+
+Hitching:
+- the small recurring frametime blip remains;
+- near the end, the user again attempted to fire a web whenever the hitch was visible.
+
+### Manual-aim evidence
+
+The unmodified visible camera ray is now validated:
+- manual aim `field_DC0` is collinear with `camera.field_144 - camera.mPos`;
+- user confirms webs travel along the intended aim direction;
+- do not reintroduce X/Y reflection or change the hip-fire selector.
+
+The remaining camera problem is now upstream:
+- during manual aim, `camera.field_144` remains exactly the Spider-Man body position;
+- the mode-3 camera therefore continues looking/orbiting around Spider-Man as its focus anchor;
+- proper manual aim needs a separate camera/view aim target after retail mode-3 position generation, not another reticle-ray sign change.
+
+Locomotion telemetry is decisive:
+- normal standing samples: `state=0x1 anim=0 collision=0x2 aim_state=1 wall=0 ceiling=0 ignore_input=0 ground_grace=4`;
+- movement input is received correctly;
+- CheckForwards can transition to `state=0x10 anim=1 result=1`;
+- reticle samples can still observe that movement state later in the frame;
+- on a subsequent frame the player is forced back to `state=0x1 anim=0`;
+- `body_delta=0,0,0` and `body_vel=0,0,0` throughout;
+- no wall/ceiling/ignore-input/collision blocker is present.
+
+Interpretation:
+- this is a later manual-aim state reset, not an input or collision failure;
+- the next locomotion implementation should mask `field_8EA` across the normal movement portion of SpideyAI0 instead of only removing gates inside CheckForwards.
+
+### Hitch evidence — hypothesis promoted to runtime-confirmed cadence match
+
+The new exact slow-frame buffer shows a stable sequence of ~31-33 ms frames spaced almost perfectly every **24 presented frames**.
+
+Representative late-game sequence:
+- 9484
+- 9508
+- 9532
+- 9556
+- 9580
+- 9604
+- 9628
+- 9652
+- 9676
+- 9700
+
+That is 24 frames / 60 Hz = **0.4 seconds**.
+
+This exactly matches the already-documented retail timer beat:
+- retail requests a 16 ms multimedia timer = 62.5 callbacks/sec;
+- engine virtual-vblank target is 60 Hz;
+- difference = 2.5 Hz;
+- beat period = 1 / 2.5 = 0.4 s;
+- equivalent = one cadence correction every 24 60-Hz frames.
+
+The web-shot correlation counter remained zero and therefore did not capture the user's fire-button timestamp. More importantly, the slow frames continue on the same 24-frame phase regardless of web-target call changes, so web targeting is not the cause.
+
+This is now strong runtime confirmation that the residual constant hitch is the legacy **16 ms multimedia timer / 60 Hz virtual-vblank mismatch**, not Renderer11 and not diagnostic logging.
+
+### Next implementation targets
+
+1. **Modern timer/vblank pacing**
+   - replace only the game's retail 16 ms periodic multimedia-timer source with a 60 Hz high-resolution cadence;
+   - preserve the retail `MyVSync` work rather than directly incrementing only the Vblanks integer;
+   - fail closed to retail timing if the timer callback / MyVSync target cannot be resolved safely;
+   - log install/resolution and keep existing cadence telemetry for validation.
+
+2. **Manual aim camera**
+   - keep retail mode-3 camera position/collision generation;
+   - during manual aim, decouple final look target from Spider-Man and maintain an independent mouse/right-stick aim yaw/pitch;
+   - publish a forward aim focus after retail mode-3 returns so downstream orientation uses the free aim target;
+   - existing field_DC0/web direction should automatically follow that new camera focus.
+
+3. **Manual-aim movement**
+   - mask `field_8EA` across the locomotion section beginning at the wrapped CheckForwards call;
+   - restore the aim state at a safe later boundary;
+   - retain a fail-safe restoration at end-of-frame so an early player-AI exit cannot leave manual aim disabled.
+
+
 ## IMPLEMENTATION CHECKPOINT — CAMERA-RAY MANUAL AIM + LOW-OVERHEAD HITCH CORRELATION (2026-10-04)
 
 Latest gameplay source commit:
