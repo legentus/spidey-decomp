@@ -1,3 +1,129 @@
+# HIGH-FPS MASTER HANDOFF — 60-HZ CORRECTNESS + STARTUP RE CAPTURE READY (2026-10-04)
+
+This supersedes the older reticle/hitch handoff below. Do **not** redo the camera/reticle RE.
+
+Authoritative project:
+- Repo: https://github.com/legentus/spidey-decomp
+- Branch: `dev`
+- Google Drive root: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+- Handoff folder ID: `1l-4gLh-jftGT1aNrP73wD8n3IScqQcvO`
+- Logs folder ID: `1Lly3NKgwHt2tHq7chejgt9gvsOTyPu5s`
+
+Latest tested runtime:
+- `091c2345ef1d4c927878d6ec47c2c54efaadf9ce`
+- log `spidey-decomp(20261004-203738).log`
+- user result: manual aiming is perfect for now; freeze it unless regression.
+
+Latest high-FPS source:
+- `98d52ec80b5876db8e347460be307555b905de4b` — quiet timing hot-path success I/O;
+- `31f80818ab5ee73cacae4b3d952205add448fc86` — quiet renderer hot-path success logs;
+- `6cfcd74aaecc72a2e1ac37885a03dc4aad0f52ae` — elapsed-time Mysterio laser liveness;
+- `9f8a62f46d00e437861cd55facf0a6ef91a76b4e` — startup-only missing-retail capture;
+- `62c7e71dc32f6cadec9c077dde13ec66d1645a0c` — full chunked `SpideyAI0` capture;
+- `52c9a5cf9c22740839a2fc03d28a013605a5f240` — detailed high-FPS architecture audit;
+- `58c00e48cca88de09aba5ed5915a1904f612d5bb` — CURRENT_STATUS frontier checkpoint.
+
+Source state: **committed, NOT runtime-tested yet**.
+
+## What is already proven
+
+The engine is a mixed timing model, not a simple fixed-30-FPS simulation:
+- `PlayAway @ 0x004559D0` calls `Logic @ 0x00455400` and `Display @ 0x004555A0`, then waits if `Vblanks` did not advance;
+- `gTimerRelated @ 0x006B4CA8` is a canonical ~60-unit/sec elapsed-time clock;
+- `CBody::EveryFrame @ 0x00460ED0` derives `field_80 = gTimerRelated - previous`, capped at 6;
+- `CSuper::UpdateFrame @ 0x00460DA0` advances animation by `field_80 * mAnimSpeed / 2`;
+- many movement/camera/boss paths already scale by `field_80` or use `CBaddy::RunTimer`;
+- other AI/effect/cutscene paths still advance raw counters once per update.
+
+Therefore:
+- do not globally multiply gameplay by a new float delta;
+- do not simply remove the PlayAway wait and run Logic >60 Hz;
+- do not globally force all Logic to 30 Hz and sacrifice the validated 60-Hz camera/input path.
+
+Target architecture:
+1. repair raw timing assumptions until 60-Hz Logic is correct;
+2. keep simulation advancement at a canonical maximum of 60 Hz;
+3. later decouple Display/presentation for 120/144/240+ Hz;
+4. interpolate visible state on render-only frames where needed.
+
+Full reasoning:
+- `docs/HIGH_FPS_TIMING_AUDIT.md`.
+
+## Mysterio high-FPS repair already implemented
+
+Retail phase-2 laser uses a one-update liveness handshake:
+- constructor `0x0045B3E0` installs vtable `0x0053BB34`;
+- derived Move slot is `0x0045BAC0`;
+- `SetPos @ 0x0045B5E0` writes byte `this+0x44 = 1`;
+- Move kills the bit if the marker is zero, then clears it each update.
+
+`6cfcd74...` converts only that liveness primitive to elapsed `gTimerRelated` time:
+- vtable patch is guarded against exact expected slot values;
+- existing marker byte is reused as a compact timestamp;
+- liveness grace is three 60-Hz ticks / 50 ms, allowing the documented 20-Hz authored producer cadence;
+- stale beam still dies through retail `CBit::Die`.
+
+No global clock change.
+
+## Hitch result
+
+The `091c...` probe proved:
+- several huge stalls were caused by our synchronous diagnostic writes;
+- some genuine stalls remain in DX11 shadow replay/end-frame;
+- some genuine stalls remain inside untouched retail `Logic`;
+- web firing follows hitches and is not the trigger.
+
+The two quiet-logging commits above are intended to remove the self-inflicted part and need the next runtime to validate them.
+
+## Missing retail RE prepared for next runtime
+
+The decompiled tree and upstream both still lack the critical routines.
+
+Startup-only byte capture now emits:
+- `Ob_AI @ 0x00460FC0`, size `0x1A0`;
+- `CVenom_FollowDirections @ 0x004EB530`, size `0x160`;
+- `SpideyAI0 @ 0x004B13F0`, size `0x73A0`.
+
+Why:
+- `Ob_AI` will prove actual object/AI interleave cadence before changing `CAIProc::Wait`;
+- `CVenom_FollowDirections` is a direct target for the known 20-FPS Catch/Chase Venom failure;
+- `SpideyAI0` contains the otherwise-stubbed player AI/cutscene state machine and is needed to locate automated player movement.
+
+Capture is startup-only and chunked; it adds no per-frame logging cost.
+
+## Exact next action
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+The test build must contain `62c7e71d...` or newer source.
+
+Test:
+1. boot and enter normal gameplay;
+2. move through the level long enough for several of the previously recurring hitches;
+3. note whether hitching is substantially reduced after logging cleanup;
+4. optionally fire once immediately after a perceived hitch as a marker;
+5. quick aim sanity only — manual aim is frozen/perfect;
+6. return the single consolidated `spidey-decomp.log`.
+
+The log must contain:
+- `high_fps_compat mysterio_laser=1 ...`;
+- `high_fps_re_bytes_done label=Ob_AI ... valid=1`;
+- `high_fps_re_bytes_done label=CVenom_FollowDirections ... valid=1`;
+- `high_fps_re_bytes_done label=SpideyAI0 ... valid=1`.
+
+After receiving it:
+1. reconstruct the hex chunks into exact binary functions;
+2. disassemble `Ob_AI`;
+3. determine object-AI interleave cadence;
+4. disassemble `CVenom_FollowDirections`;
+5. inspect `SpideyAI0` for automated/cutscene movement;
+6. implement the next elapsed-tick repairs in small commits;
+7. continue toward fixed-60 simulation + uncapped/interpolated rendering.
+
+Do not return to real-shadow work until this timing phase is sufficiently complete.
+
+---
+
 # CHAT-LIMIT MASTER HANDOFF — RETICLE NO-DRAG + HITCH PHASE TEST READY (2026-10-04)
 
 This chat ended at the exact point where the next runtime test is ready.
