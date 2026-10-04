@@ -1,3 +1,56 @@
+# LIVE CONTINUATION — WEB AIM + BLOB SHADOW + DYNAMIC PAUSE BOX READY FOR RUNTIME TEST (2026-10-04)
+
+This is the current live frontier. It supersedes older test instructions below.
+
+Source fixes now on `dev`:
+
+- `5e3dd2e066de9bd89d94dd675f152baaf85d22e3` — camera web targeting: align active-camera forward with retail SelectTargetBaddy's negative-local-Z scoring convention.
+- `a24b4d27f586c97af175e5202bb9fb7db2268cbe` — blob/world QuadBits: restore the active camera GTE rotation before retail DisplayQuadBitList so floor blobs stay world-anchored.
+- `dd35f977e54e963d0deaede43c895cd7a8d2a95e` — Pause Options: rebuild the existing retail expanding box from the current row list via `CMenu::Zoom @ 0x0043FC60`.
+
+The Options container fix is dynamic, not a six-row pixel hack:
+- entering custom Options rebuilds the box from current submenu rows;
+- Back restores the parent CMenu state then rebuilds the parent box;
+- initial insertion of Options above Quit also rebuilds the parent box;
+- future row-count changes should therefore follow retail `GetMenuHeight()` automatically.
+
+## Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`, then test in one session:
+
+1. **Camera web targeting**
+   - turn Spider-Man's body away from a baddy;
+   - center the baddy with the camera;
+   - fire the normal enemy-targeting web;
+   - expected: selection/hit follows camera center;
+   - verify ordinary straight-ahead targeting too.
+
+2. **Blob shadow anchoring**
+   - keep a thug/cop/NPC stationary;
+   - orbit the camera around them;
+   - expected: floor blob remains under the NPC rather than sliding with camera rotation;
+   - briefly watch other QuadBit effects for regression.
+
+3. **Pause Options container**
+   - open Pause -> Options;
+   - expected: purple container encloses Options, UI Scale, Text Scale, Camera Sensitivity, Apply Settings, and Back;
+   - press Back;
+   - expected: parent pause container encloses Options and Quit normally.
+
+4. Brief move/swing/orbit regression.
+
+If anything is wrong, upload only the single consolidated `spidey-decomp.log` and describe the visible result.
+
+Useful lines:
+- `camera_web_target_install ... forward_axis=negative_local_z`
+- `quadbit_camera_anchor installed=1 ... reason=ok`
+- `pause_menu_box_refresh reason=enter_options refreshed=1 ...`
+- `pause_menu_box_refresh reason=add_options_parent refreshed=1 ...`
+
+Do not patch the separate `CheckWebShot @ 0x004C09E2 -> SelectTargetBaddy` path unless runtime evidence demonstrates the normal enemy-targeting action still needs it. That call stores a separate handle state and is not the grounded `SelectAutoAimTarget -> player+0xDCC -> FireWeb` path fixed here.
+
+---
+
 # LIVE CONTINUATION — WEB TARGET AXIS + QUADBIT CAMERA ANCHOR READY FOR RUNTIME TEST (2026-10-04)
 
 This continuation supersedes older web-target/shadow hypotheses below.
