@@ -1,5 +1,104 @@
 # CURRENT STATUS
 
+## RUNTIME RESULT — FOUR NATIVE-60 CAPTURES COMPLETE; MASTER CLOCK CORRECT (2026-10-04)
+
+Latest tested runtime:
+- revision `21ced52bc9c8e5903fe66cc939e4114804c248fb`;
+- log `spidey-decomp(20261004-220426).log`.
+
+Validated in this runtime:
+- Mysterio elapsed-time laser compatibility now installs successfully:
+  - vtable slot 0/delete destructor = `0x0045B540`;
+  - vtable slot 1/Move = `0x0045BAC0`;
+  - `high_fps_compat mysterio_laser=1`.
+- all four startup RE captures completed with `valid=1`:
+  - `CAIProc_RotY_Block @ 0x00401060`, size `0x120`;
+  - `CVenom_SynthesizeAnalogueInput_Block @ 0x004E9B00`, size `0x19A0`;
+  - `CPlayer_DoPhysics_Real @ 0x00466CE0`, size `0x1040`;
+  - `CPlayer_DoCrawlingPhysics @ 0x00467FD0`, size `0xD70`.
+
+Master-clock result:
+- timer source callbacks: 94,352;
+- canonical dispatched callbacks / virtual ticks: 5,661;
+- source elapsed time: approximately 94.35 seconds;
+- dispatched cadence is therefore essentially 60 Hz;
+- the user-visible slight speed-up at 60 is **not** the master timer running fast;
+- the remaining problem is downstream code consuming a correct 60-Hz update cadence with legacy per-frame assumptions.
+
+### Exact CAIProc_RotY retail finding
+
+The captured block resolves the previously incomplete reconstructed source.
+
+Constructor `CAIProc_RotY::CAIProc_RotY @ 0x00401060`:
+- attaches AI type `0x104`;
+- stores `field_20 = numFrames`;
+- stores `field_24 = requestedAngle / numFrames`.
+
+Execute `CAIProc_RotY::Execute @ 0x00401110`:
+- adds `field_24` to the owning baddy's Y angle once per Execute;
+- sets the retail turn-direction flag;
+- decrements `field_20` by exactly one per Execute;
+- completes when the raw frame countdown reaches zero;
+- does **not** consume `field_80`.
+
+This is a proven legacy frame-counted AI primitive. At 60 Logic calls/sec it rotates and completes roughly twice as fast as the original two-vblank/30-Hz authored cadence.
+
+Safe native-60 strategy:
+- preserve the retail constructor and its integer division exactly;
+- use inherited `CAIProc::field_C` as a half-step phase accumulator for RotY only;
+- `CClass::operator new` zero-fills allocations, and retail RotY does not otherwise use `field_C`;
+- split each original `field_24` angular step into two integer-exact halves whose sum equals the original step, including odd and negative steps;
+- decrement `field_20` only after both 1/60 halves have been consumed;
+- if `field_80 == 2`, consume both halves in the same call and reproduce the original 30-Hz step exactly;
+- if `field_80 == 1`, consume one half for smooth native-60 rotation;
+- larger elapsed values consume the corresponding number of canonical half-ticks.
+
+### Player physics result
+
+The captured retail normal/crawling physics proves the same broad two-vblank assumption:
+- retail treats `field_80 == 1` and `field_80 == 2` as the same base velocity/displacement quantum in important paths;
+- this explains a large part of the subjective 60-FPS speed-up.
+
+The repo has already advanced beyond the tested runtime with a source reconstruction and first native-60 conversion:
+- `248dae028e58f48e4c77e5ac7a095364ae6093b4` — reconstruct retail player physics;
+- `6b56677c383331da12035109df59b165ae69a066` — split retail player physics step for native 60 Hz;
+- `e19e1918ec13abc21523d3c650f6add099ddc255` — correct player physics symbol map.
+
+The current player-physics conversion:
+- half-steps acceleration/friction at `field_80 == 1`;
+- uses a fixed-point square-root damping split so two 60-Hz velocity updates reproduce one original 30-Hz velocity update apart from integer rounding;
+- halves displacement/fall movement for a single 1/60 tick;
+- covers normal and crawling physics;
+- is implemented/committed but **not runtime-tested yet** by this log.
+
+### Venom synthesized-input result
+
+The capture disproves the simple hypothesis that the known Venom chase failure is caused by raw one-per-call timers inside `CVenom::SynthesizeAnalogueInput`.
+
+Observed timing behavior:
+- `field_350 += field_80`;
+- command timers subtract `field_80`;
+- path/index progression such as `field_394` advances by `field_80`;
+- multiple command handlers are already canonical elapsed-tick aware.
+
+Therefore:
+- do **not** add a blind 0.5 scaler to Venom's synthesized-input dispatcher;
+- the high-FPS chase failure is more likely downstream/upstream of that dispatcher, including shared player physics or other raw AI timing primitives;
+- keep the exact Venom capture as reference, but no Venom-specific timing patch is justified yet.
+
+### Immediate implementation frontier
+
+1. land native-60 `CAIProc_RotY::Execute` using the proven half-step scheme;
+2. retain the already-committed player-physics 60-Hz conversion;
+3. retire the four completed startup byte captures so normal logs stay compact;
+4. runtime-test the combined physics + RotY batch;
+5. only after that result, continue into additional proven raw frame-counted AI/effect/cutscene primitives.
+
+The 60-Hz requirement remains:
+- gameplay simulation must be semantically correct at native 60 Hz;
+- state/event counters are not delta-scaled;
+- after native 60 is stable, >60 presentation will be decoupled/interpolated without running gameplay faster than 60.
+
 ## SOURCE ADVANCE — TRUE PLAYER PHYSICS ADDED TO NEXT NATIVE-60 CAPTURE (2026-10-04)
 
 Latest source:
