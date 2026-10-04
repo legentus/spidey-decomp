@@ -4317,27 +4317,53 @@ static void SpideyLogHighFpsRetailBytes(
 	if (!f)
 		return;
 
-	fprintf(
-		f,
-		"high_fps_re_bytes label=%s address=0x%08lX size=%lu hex=",
-		label,
-		address,
-		size);
-
 	int valid =
 		1;
+	const unsigned long chunkSize =
+		128;
+
 	__try
 	{
 		const unsigned char* bytes =
 			(const unsigned char*)address;
-		for (unsigned long i = 0;
-			 i < size;
-			 ++i)
+
+		for (unsigned long offset = 0;
+			 offset < size;
+			 offset += chunkSize)
 		{
+			unsigned long count =
+				size - offset;
+			if (count >
+				chunkSize)
+			{
+				count =
+					chunkSize;
+			}
+
 			fprintf(
 				f,
-				"%02X",
-				(unsigned int)bytes[i]);
+				"high_fps_re_bytes label=%s address=0x%08lX size=%lu offset=0x%04lX count=%lu hex=",
+				label,
+				address,
+				size,
+				offset,
+				count);
+
+			for (unsigned long i = 0;
+				 i < count;
+				 ++i)
+			{
+				fprintf(
+					f,
+					"%02X",
+					(unsigned int)bytes[
+						offset +
+						i]);
+			}
+
+			fputc(
+				'\n',
+				f);
 		}
 	}
 	__except(EXCEPTION_EXECUTE_HANDLER)
@@ -4348,7 +4374,10 @@ static void SpideyLogHighFpsRetailBytes(
 
 	fprintf(
 		f,
-		" valid=%d\n",
+		"high_fps_re_bytes_done label=%s address=0x%08lX size=%lu valid=%d\n",
+		label,
+		address,
+		size,
 		valid);
 	fclose(f);
 }
@@ -4429,6 +4458,10 @@ static void SpideyInstallHighFpsTimingCompat()
 		"CVenom_FollowDirections",
 		0x004EB530,
 		0x160);
+	SpideyLogHighFpsRetailBytes(
+		"SpideyAI0",
+		0x004B13F0,
+		0x73A0);
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
