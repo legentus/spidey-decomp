@@ -16,6 +16,7 @@ Latest tested runtime:
 Latest untested source:
 - `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1` — same-frame post-camera reticle update
 - `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0` — slow-frame presenter phase partition
+- `c286d708b6f6d4a8f2fefef35808d44a6179cdad` — split outside-present stalls into retail logic vs logic telemetry vs other work
 
 Current source is **implemented and committed but not runtime-tested**.
 
@@ -66,7 +67,8 @@ Validated hitch correlation:
 
 - `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1` — same-frame post-camera manual reticle update
 - `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0` — in-memory slow-frame presenter phase partition
-- `3fce9e0edacdd16ae3d66cf2975eeef587d01327` — CURRENT_STATUS checkpoint
+- `c286d708b6f6d4a8f2fefef35808d44a6179cdad` — outside-present retail-logic / telemetry discriminator
+- `f3c22660941980a0be645c6fb984e92d288d00e3` — CURRENT_STATUS checkpoint for the added discriminator
 
 ### Reticle fix
 
@@ -111,12 +113,23 @@ Interpretation:
 - large other_present_us = another presenter-side operation;
 - large outside_present_us with small presenter values = hitch is in game/update/render code before presenter.
 
+Additional `c286d708...` outside-present discriminator:
+- `logic_retail_us` = time inside untouched retail gameplay logic `0x00455400`;
+- `logic_telemetry_us` = time spent writing the once-per-second logic timing line;
+- `logic_calls` = wrapped retail logic calls in that inter-present interval;
+- `outside_nonlogic_us` = outside-present remainder after subtracting the two logic buckets.
+
+Why this was added before testing:
+- the old runtime has a strong correlation between several 300–630 ms stalls and the gameplay-logic timing hook immediately before the delayed present;
+- that ordering alone cannot distinguish a retail logic stall from synchronous telemetry I/O;
+- the next log now resolves that ambiguity without another runtime cycle.
+
 ## EXACT NEXT ACTION
 
 Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
 
 Required source:
-- **`ca2af74d...` or newer**.
+- **`c286d708...` or newer**.
 
 Test:
 1. manual aim and perform fast mouse sweeps;
