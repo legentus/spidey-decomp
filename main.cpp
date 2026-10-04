@@ -12893,7 +12893,7 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	if (!gSpideyPacingRealTimerId)
 	{
 		InterlockedExchange(
-			&gSpideyPacingTimerActive,
+			(LONG*)&gSpideyPacingTimerActive,
 			0);
 
 		if (gSpideyPacingBeginPeriodOne &&
@@ -12946,7 +12946,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 		gSpideyPacingTimerActive)
 	{
 		InterlockedExchange(
-			&gSpideyPacingTimerActive,
+			(LONG*)&gSpideyPacingTimerActive,
 			0);
 
 		const UINT realTimerId =
