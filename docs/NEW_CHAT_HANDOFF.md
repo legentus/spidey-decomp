@@ -1,3 +1,50 @@
+# LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
+
+**Fetch live `dev` first. GitHub outranks this file if it has advanced.**
+
+Live frontier immediately before this handoff refresh:
+- code fix: `71290b003e895f179c2ab1921fb59bdb39b1753e` — `compat: scope process attach locals for VC6`
+- status checkpoint: `5bdcdb2eaf3461889549cdaad3928e08adca4007` — `docs: record VC6 switch-scope build fix`
+
+The user's most recent FAST build attempt was revision:
+`5709bdef9269f6d6e9e02c2c0ced6a74f3fbaf56`
+
+It failed in VC6 with C2360 because `FILE* runtimeVersionLog` was initialized directly under the `DLL_PROCESS_ATTACH` switch case and later case labels could jump across that initialization.
+
+The compile blocker is now fixed:
+- the entire `DLL_PROCESS_ATTACH` case body is enclosed in its own braces;
+- the local `runtimeVersionLog` lifetime cannot cross `DLL_THREAD_ATTACH`, `DLL_THREAD_DETACH`, or `DLL_PROCESS_DETACH`;
+- no runtime behavior was intentionally changed;
+- static structure after the edit: braces 911/911, parentheses 4507/4507, brackets 323/323.
+
+**This fixed revision has not yet been locally compiled/runtime-tested by the user.**
+
+## Exact next action
+
+Run:
+`FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`
+
+If the matching VC6 build succeeds, perform the already-pending current-build validation in one session:
+
+1. Pause/unpause repeatedly during gameplay, including around active/aggro enemies.
+2. Test camera-centered web targeting against both non-aggro and aggro enemies while Spider-Man's body faces elsewhere.
+3. Orbit the camera around Spider-Man and NPCs and verify floor/blob shadows remain anchored underneath their owners.
+4. Open Pause -> Options and verify the purple container encloses all six custom rows through Back, then Back returns to a correctly-sized parent pause box.
+5. Brief move/swing/orbit regression.
+
+Expected current-build startup/runtime evidence:
+- `[RUNTIME] runtime_revision=<current revision>`
+- `camera_web_target_install ... forward_axis=negative_local_z`
+- `quadbit_camera_anchor installed=1 ... reason=ok`
+- `pause_menu_box_refresh reason=add_options_parent refreshed=1 ...`
+- `pause_menu_box_refresh reason=enter_options refreshed=1 ...`
+
+If pause still crashes on the current build, upload the fresh consolidated `spidey-decomp.log`; also preserve any crash log if one is generated.
+
+Do **not** treat the previous `ef78...` runtime log as evidence that the new web-axis, QuadBit-anchor, or dynamic pause-box fixes failed. That log predates all three.
+
+---
+
 # LIVE CONTINUATION — STALE PLAY-CURRENT TEST IDENTIFIED; FRESH CURRENT-BUILD LOGGING ADDED (2026-10-04)
 
 The latest user feedback was produced by an **older installed build**, not the current source frontier.
