@@ -1,6 +1,36 @@
 # LIVE FRONTIER — VC6 COMPILE BLOCKER FIXED; CURRENT BUILD MUST BE RERUN (2026-10-04)
 
 
+## 2026-10-04 CHECKPOINT — DO NOT LOSE THIS MANUAL-AIM FRONTIER
+
+Latest tested runtime: `7a6af671ec671d7f61a1003b296f59d655b39dcd` with `spidey-decomp(20261004-093356).log`.
+
+User result:
+- Spider-Man **tries** to move while manual aim is held (body twists/leans) but translation is still blocked;
+- WASD still moves the legacy aiming cursor;
+- mouse moves the modern camera, but the resulting reticle response is inverted on BOTH X and Y;
+- hip-fire auto-targeting is still not fully reliable.
+
+Interpretation:
+- the earlier CheckForwards gates are no longer the whole movement problem; a later locomotion/state gate still blocks translation;
+- SetupLookaroundCamera still consumes E2D/E2E for legacy reticle motion, so its axis reads must be neutralized/overridden during modern aim while preserving normal movement axes;
+- current camera-ray -> field_DC0 sign convention is reversed for reticle projection and needs both axes corrected;
+- hip-fire must continue as a separate camera-ray-selection problem.
+
+Exact resume order:
+1. inspect latest `modern_manual_aim event=movement/reticle` telemetry;
+2. trace the post-CheckForwards movement commit/state gate that leaves Spider-Man twisting in place;
+3. stop SetupLookaroundCamera from consuming WASD/E2D/E2E for reticle motion while modern aim is active;
+4. correct both reticle axes so left/right/up/down are natural;
+5. retest hip-fire camera scan independently;
+6. only then resume Renderer11 real-shadow implementation (caster probe already passed).
+
+Do not revert or recreate the existing commits:
+- `aabf69a90786b639c4e32e1d74e64cae88e3430e`
+- `b44b3bdca3337c0cfe4a57dc8a042feaa0a946ea`
+
+
+
 ## 2026-10-04 LATEST FRONTIER — SECOND MANUAL-AIM PASS + DIRECT CAMERA TARGET SCAN
 
 Supersedes the prior first-pass modern-manual-aim test instructions.
