@@ -4299,95 +4299,12 @@ static void __fastcall SpideyMysterioLaserMoveHighFps(
 		0);
 }
 
-static void SpideyLogHighFpsRetailBytes(
-		const char* label,
-		unsigned long address,
-		unsigned long size)
-{
-	if (!label ||
-		!address ||
-		!size)
-	{
-		return;
-	}
-
-	FILE* f =
-		SpideyOpenConsolidatedLog(
-			"TIMING");
-	if (!f)
-		return;
-
-	int valid =
-		1;
-	const unsigned long chunkSize =
-		128;
-
-	__try
-	{
-		const unsigned char* bytes =
-			(const unsigned char*)address;
-
-		for (unsigned long offset = 0;
-			 offset < size;
-			 offset += chunkSize)
-		{
-			unsigned long count =
-				size - offset;
-			if (count >
-				chunkSize)
-			{
-				count =
-					chunkSize;
-			}
-
-			fprintf(
-				f,
-				"high_fps_re_bytes label=%s address=0x%08lX size=%lu offset=0x%04lX count=%lu hex=",
-				label,
-				address,
-				size,
-				offset,
-				count);
-
-			for (unsigned long i = 0;
-				 i < count;
-				 ++i)
-			{
-				fprintf(
-					f,
-					"%02X",
-					(unsigned int)bytes[
-						offset +
-						i]);
-			}
-
-			fputc(
-				'\n',
-				f);
-		}
-	}
-	__except(EXCEPTION_EXECUTE_HANDLER)
-	{
-		valid =
-			0;
-	}
-
-	fprintf(
-		f,
-		"high_fps_re_bytes_done label=%s address=0x%08lX size=%lu valid=%d\n",
-		label,
-		address,
-		size,
-		valid);
-	fclose(f);
-}
-
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
 		(void**)0x0053BB34;
 	const unsigned long expectedDestructor =
-		0x0045B300;
+		0x0045B540;
 	const unsigned long expectedMove =
 		0x0045BAC0;
 
@@ -4448,20 +4365,6 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	// The decompiled tree still lacks these retail routines. Capture them once
-	// at startup so the next normal test advances timing RE with no hot-path I/O.
-	SpideyLogHighFpsRetailBytes(
-		"Ob_AI",
-		0x00460FC0,
-		0x1A0);
-	SpideyLogHighFpsRetailBytes(
-		"CVenom_FollowDirections",
-		0x004EB530,
-		0x160);
-	SpideyLogHighFpsRetailBytes(
-		"SpideyAI0",
-		0x004B13F0,
-		0x73A0);
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
