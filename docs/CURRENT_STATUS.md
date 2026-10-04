@@ -7,8 +7,9 @@ The chat reached its maximum length immediately after the reticle-lag/hitch inve
 Authoritative live frontier:
 - latest **tested** runtime revision: `2ec405d96253df7332d5fe6609729fb4f310b720`
 - latest tested log: `spidey-decomp(20261004-200625).log`
-- latest source-changing commit: `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0`
-- source immediately before it: `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1`
+- latest source-changing commit: `c286d708b6f6d4a8f2fefef35808d44a6179cdad`
+- source immediately before it: `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0`
+- reticle source immediately before that: `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1`
 - current source status: **implemented, committed, NOT runtime-tested**
 - exact next action: run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`, test fast manual-aim mouse sweeps plus several hitches, and return one consolidated `spidey-decomp.log`
 
@@ -33,6 +34,26 @@ What is ready for the next runtime:
   - `other_present_us`
 
 Do **not** resume real-shadow work until the reticle/hitch test is evaluated. Do not tune camera sensitivity or the 96-unit framing unless the next runtime demonstrates a need.
+
+### Additional hitch discriminator added before runtime — `c286d708...`
+
+Static correlation in the latest tested log exposed one important ambiguity worth removing before asking for another test:
+
+- many 300–630 ms slow-present events occur on the frame immediately after the once-per-second gameplay-logic timing wrapper runs;
+- this does **not** prove diagnostic logging is the cause, because a stall inside untouched retail logic would produce the same ordering;
+- therefore the next runtime now accumulates the work between presenter entries and splits it into:
+  - `logic_retail_us` — time inside untouched retail gameplay logic `0x00455400`;
+  - `logic_telemetry_us` — time spent writing the once-per-second logic timing telemetry;
+  - `logic_calls` — number of wrapped retail logic calls in the interval;
+  - `outside_nonlogic_us` — remaining outside-present time after subtracting retail logic + logic telemetry.
+
+Together with the existing presenter phase fields, one hitch can now distinguish:
+- DX11 present / replay / transient / draw-probe / presenter remainder;
+- retail gameplay logic;
+- timing-log I/O;
+- or other game/update/render work outside both presenter and the wrapped retail logic.
+
+This is diagnostics only: no camera, reticle, movement, targeting, timer cadence, renderer behavior, or 96-unit framing policy changed.
 
 - Repo: https://github.com/legentus/spidey-decomp
 - Branch: `dev`
@@ -174,7 +195,7 @@ After `ca2af74d...`:
 Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
 
 Required source:
-- **`ca2af74d...` or newer**.
+- **`c286d708...` or newer**.
 
 Test:
 1. manual aim and make several very fast left/right/up/down mouse sweeps;
