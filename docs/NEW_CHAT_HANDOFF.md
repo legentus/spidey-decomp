@@ -1,3 +1,33 @@
+# LIVE CONTINUATION — FRAME-PACING CLASSIFICATION ADDED TO THE COMBINED TEST (2026-10-04)
+
+The original full handoff frontier was verified exactly before continuing:
+- handoff/live dev at recovery: `df1adf4f2664a5183146efd639dac2a65ae5ecf9`;
+- no hidden newer source work existed and no RE was repeated.
+
+New continuation work is telemetry-only and does **not** change camera, web targeting, renderer output, or retail timing behavior:
+- `08e4acdafaa38b267fcb57862c8e2a5ed8539703` — low-overhead frame cadence telemetry;
+- `f69abaf545193bb1441d3421661e3f752daf896d` — VC6-safe cadence arithmetic.
+
+The exact combined runtime test is still the next authoritative user action. It now also produces enough evidence to classify any smaller hitch that survives the already-disabled 120-frame blocking readbacks.
+
+New `timing_present` fields:
+- `cadence_intervals`;
+- `over20ms`, `over25ms`, `over30ms`, `over50ms`;
+- `max_interval_us`;
+- `vblank_same`, `vblank_one`, `vblank_multi`, `vblank_max_delta`.
+
+Why this matters:
+- the active gameplay presenter is DX11 shadow, not the HDC fallback;
+- old log samples average ~5,357 tiny DX11 commands / ~16,299 vertices per frame, which is a later CPU-efficiency target but did not positively correlate with the old low-Hz windows;
+- reconstructed retail `PCTIMER_Init` uses a 16 ms multimedia timer and accumulates 0.96 of a 60-Hz vblank per callback;
+- if retail `MyVSync` advances `Vblanks` as expected, that arithmetic produces a 32 ms cadence gap about every 25 callbacks (~0.4 s), making the timer/vblank model a strong residual micro-stutter hypothesis;
+- do **not** replace the timer yet: current `MyVSync` source is still an incomplete decomp stub, so validate with the new runtime cadence data first.
+
+NEXT:
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` once, test Camera Sensitivity + major-freeze behavior + smaller hitch behavior + camera-forward enemy web targeting + brief movement/swing regression, then upload only the consolidated `spidey-decomp.log`.
+
+---
+
 # HANDOFF PACKAGE CHECKPOINT — CAMERA FOLLOW-UP BATCH AWAITING ONE COMBINED RUNTIME (2026-10-04)
 
 This file was refreshed specifically for a new-chat handoff after an interrupted engineering turn.
