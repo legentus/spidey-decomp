@@ -1,3 +1,26 @@
+# LIVE-CUTSCENE CRASH FIX UPDATE (2026-10-04)
+
+The first runtime of the native-60 physics + RotY batch built successfully but crashed at:
+New Game -> difficulty -> first Doc Ock pre-render -> transition into the next in-engine cutscene.
+
+Crash evidence:
+- movie surface released successfully first;
+- then `0xC0000005` in the proxy;
+- retail stack includes `M3dColij_InitLineInfo` and `Utils_GetGroundHeight`, proving live-world collision/placement had started;
+- user clarified the next scene is an in-game cutscene, not another pre-render.
+
+Root-cause candidate and fix:
+- reconstructed `CPlayer::DoPhysics` left local `SLineInfo::pItem` uninitialized when movement length was zero;
+- recompiled stack layout makes that retail defect unsafe for stationary live-cutscene startup;
+- `9d05114c1d401daac541023c8b3776bdc0d196fb` explicitly sets `lineInfo.pItem = 0` before the sweep.
+
+Next test:
+- repeat only the exact New Game -> difficulty -> Doc Ock movie -> in-game cutscene transition first;
+- if it passes, resume normal gameplay/native-60 checks;
+- if it still crashes, use the fresh log plus `Release/spider.map` to symbolize the proxy fault and isolate the physics hook.
+
+---
+
 # BUILD-RECOVERY UPDATE — NATIVE-60 TEST BUILD FIXED AFTER VC6 COMPILE FAILURE (2026-10-04)
 
 The first attempt to build the combined native-60 player-physics + RotY batch at `33c3016d...` failed before runtime.
