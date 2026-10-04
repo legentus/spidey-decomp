@@ -4075,6 +4075,171 @@ static int SpideyPatchDirectCall(
 	return 1;
 }
 
+static int SpideyPatchBytes(
+		unsigned long address,
+		const unsigned char* expected,
+		const unsigned char* replacement,
+		unsigned long size,
+		const char* name)
+{
+	unsigned char* target =
+		(unsigned char*)address;
+
+	if (!target ||
+		!expected ||
+		!replacement ||
+		!size)
+	{
+		return 0;
+	}
+
+	if (memcmp(
+			target,
+			expected,
+			size) != 0)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"byte_patch name=%s installed=0 reason=expected_bytes address=0x%08lX size=%lu actual=",
+				name ? name : "unknown",
+				address,
+				size);
+			for (unsigned long i = 0;
+				 i < size;
+				 ++i)
+			{
+				fprintf(
+					f,
+					"%02X",
+					(unsigned int)target[i]);
+			}
+			fputc(
+				'\n',
+				f);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	DWORD oldProtect =
+		0;
+	if (!VirtualProtect(
+			target,
+			size,
+			PAGE_EXECUTE_READWRITE,
+			&oldProtect))
+	{
+		return 0;
+	}
+
+	memcpy(
+		target,
+		replacement,
+		size);
+
+	DWORD ignoredProtect =
+		0;
+	VirtualProtect(
+		target,
+		size,
+		oldProtect,
+		&ignoredProtect);
+
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		target,
+		size);
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+				"byte_patch name=%s installed=1 address=0x%08lX size=%lu\n",
+				name ? name : "unknown",
+				address,
+				size);
+		fclose(f);
+	}
+
+	return 1;
+}
+
+static void SpideyInstallModernManualAimCompat()
+{
+	static const unsigned char enterExpected[2] =
+	{
+		0x6A,
+		0x07
+	};
+	static const unsigned char enterReplacement[2] =
+	{
+		0x6A,
+		0x03
+	};
+
+	// CPlayer::CheckForwards:
+	//   cmp byte ptr [esi+0x8EA], 0
+	//   jne 0x004BFA0A
+	//
+	// The JNE is the narrow locomotion lock applied solely because manual
+	// lookaround/aim is active. Keep all other aim-state checks untouched.
+	static const unsigned char forwardsExpected[6] =
+	{
+		0x0F,
+		0x85,
+		0x3F,
+		0x01,
+		0x00,
+		0x00
+	};
+	static const unsigned char forwardsReplacement[6] =
+	{
+		0x90,
+		0x90,
+		0x90,
+		0x90,
+		0x90,
+		0x90
+	};
+
+	const int cameraInstalled =
+		SpideyPatchBytes(
+			0x004C370B,
+			enterExpected,
+			enterReplacement,
+			sizeof(enterExpected),
+			"modern_manual_aim_camera_mode");
+	const int movementInstalled =
+		SpideyPatchBytes(
+			0x004BF8C5,
+			forwardsExpected,
+			forwardsReplacement,
+			sizeof(forwardsExpected),
+			"modern_manual_aim_check_forwards");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"CAMERA");
+	if (f)
+	{
+		fprintf(
+			f,
+				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement=%d check_forwards_jne=0x004BF8C5 reticle_state=retail_field_8EA camera_input=mouse_and_input11_right_stick movement_scope=check_forwards_only\n",
+				cameraInstalled,
+				movementInstalled);
+		fclose(f);
+	}
+}
+
+
 static char gSpideyAudioOutputMenuLabel[160];
 
 typedef void (__cdecl *SpideyRetailShutdownDirectSoundFn)(void);
@@ -9030,6 +9195,12 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 
 	CBody* target =
 		0;
+	const char* selectionSource =
+		"retail_player_transform";
+	int cameraOriginCandidate =
+		0;
+	int cameraOriginPlayerLos =
+		0;
 
 	if (!useCamera)
 	{
@@ -9046,11 +9217,14 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 	{
 		MATRIX playerTargetMatrix;
 		MATRIX cameraTargetMatrix;
+		CVector playerPosition;
 
 		memcpy(
 			&playerTargetMatrix,
 			&player->field_89C,
 			sizeof(playerTargetMatrix));
+		playerPosition =
+			player->mPos;
 
 		// This is the same retail quaternion-to-matrix conversion used by
 		// CCamera::LoadIntoMikeCamera before the visible camera is published.
@@ -9058,10 +9232,8 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 			&camera->field_214,
 			&cameraTargetMatrix);
 
-		// Canonical SelectTargetBaddy transforms player->candidate through
-		// field_89C, normalizes it, then scores -localZ. The camera transform
-		// produced by QToM uses +localZ for camera-forward, so copying it
-		// verbatim makes a centered enemy look backwards to the retail scorer.
+		// Canonical SelectTargetBaddy transforms its origin->candidate vector
+		// through field_89C, normalizes it, then scores -localZ.
 		cameraTargetMatrix.m[2][0] =
 			-cameraTargetMatrix.m[2][0];
 		cameraTargetMatrix.m[2][1] =
@@ -9076,6 +9248,16 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 
 		__try
 		{
+			// The previous camera patch changed only orientation. Retail still
+			// formed its scoring vector from Spider-Man's body position, which
+			// creates severe parallax for close targets because the visible
+			// camera is behind/above him. For centeredness scoring, temporarily
+			// present the render camera as the origin as well. Candidate flags,
+			// cached player-distance weighting and retail camera LOS remain
+			// untouched inside SelectTargetBaddy.
+			player->mPos =
+				camera->mPos;
+
 			target =
 				retail(
 					player,
@@ -9084,13 +9266,79 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 					arg2,
 					arg3,
 					arg4);
+
+			cameraOriginCandidate =
+				target ? 1 : 0;
 		}
 		__finally
 		{
+			player->mPos =
+				playerPosition;
 			memcpy(
 				&player->field_89C,
 				&playerTargetMatrix,
 				sizeof(playerTargetMatrix));
+		}
+
+		// A camera-centered target is useful only if Spider-Man himself has a
+		// clear shot. Retail's first pass tested LOS from the temporary camera
+		// origin, so revalidate from the real player position before accepting.
+		if (target)
+		{
+			cameraOriginPlayerLos =
+				Utils_LineOfSight(
+					&player->mPos,
+					&target->mPos,
+					0,
+					0) ?
+					1 :
+					0;
+
+			if (!cameraOriginPlayerLos)
+			{
+				target =
+					0;
+			}
+		}
+
+		if (target)
+		{
+			selectionSource =
+				"render_camera_origin";
+		}
+		else
+		{
+			// Preserve the already-proven orientation-only path as a fallback
+			// for cases where the third-person camera is obstructed while
+			// Spider-Man still has a valid shot.
+			memcpy(
+				&player->field_89C,
+				&cameraTargetMatrix,
+				sizeof(cameraTargetMatrix));
+
+			__try
+			{
+				target =
+					retail(
+						player,
+						0,
+						arg1,
+						arg2,
+						arg3,
+						arg4);
+			}
+			__finally
+			{
+				memcpy(
+					&player->field_89C,
+					&playerTargetMatrix,
+					sizeof(playerTargetMatrix));
+			}
+
+			selectionSource =
+				target ?
+					"render_camera_orientation_fallback" :
+					"render_camera_no_target";
 		}
 	}
 
@@ -9107,12 +9355,10 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		{
 			fprintf(
 				f,
-				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX args=%d,%d,%d,%d\n",
+				"camera_web_target event=select call=%lu path=%s source=%s camera=0x%08lX mode=%d modern_active=%d camera_heading=%d target=0x%08lX camera_origin_candidate=%d player_los=%d args=%d,%d,%d,%d\n",
 				gSpideyCameraWebTargetCalls,
 				callSource ? callSource : "unknown",
-				useCamera ?
-					"render_camera_transform" :
-					"retail_player_transform",
+				selectionSource,
 				(unsigned long)camera,
 				camera ?
 					(int)camera->mCameraMode :
@@ -9123,6 +9369,8 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 					 0x0FFF) :
 					-1,
 				(unsigned long)target,
+				cameraOriginCandidate,
+				cameraOriginPlayerLos,
 				arg1,
 				arg2,
 				arg3,
@@ -9193,7 +9441,7 @@ static void SpideyInstallCameraWebTargetingCompat()
 	{
 		fprintf(
 			f,
-			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_transform forward_axis=negative_local_z scope=select_auto_aim_and_check_web_shot fallback=retail_non_mode3\n",
+			"camera_web_target_install autoaim=%d autoaim_call=0x004C5B2F check_web_shot=%d check_web_shot_call=0x004C09E2 retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_origin forward_axis=negative_local_z scope=select_auto_aim_and_check_web_shot player_los=revalidated fallback=orientation_only_then_retail_non_mode3\n",
 			autoAimInstalled,
 			checkWebShotInstalled);
 		fclose(f);
@@ -15488,6 +15736,7 @@ void game_patches(void)
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
 	SpideyInstallModernCameraCompat();
+	SpideyInstallModernManualAimCompat();
 	SpideyInstallCameraWebTargetingCompat();
 	SpideyInstallQuadBitCameraAnchorCompat();
 	SpideyInstallMouseCoordinateCompat();
