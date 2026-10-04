@@ -1204,13 +1204,27 @@ static char gSpideyGameplayUiScaleMenuLabel[64] =
 	"Gameplay UI Scale: 125%";
 static char gSpideyMenuTextScaleMenuLabel[64] =
 	"Menu/Text Scale: 100%";
+static char gSpideyPauseOptionsLabel[] =
+	"Options";
 static char gSpideyPauseGameplayUiScaleMenuLabel[64] =
-	"UI Scale =====----- 125%";
+	"UI Scale: 125%";
 static char gSpideyPauseMenuTextScaleMenuLabel[64] =
-	"Menu Text ===------- 100%";
+	"Text Scale: 100%";
 static char gSpideyPauseApplyUiScaleLabel[] =
-	"Apply UI Scale";
+	"Apply Settings";
+static char gSpideyPauseBackLabel[] =
+	"Back";
+static int gSpideyPauseOptionsActive = 0;
+static int gSpideyPauseParentSnapshotValid = 0;
+static CMenu* gSpideyPauseMenuOwner = 0;
+// CMenu is validated as 0x53C bytes. Preserve everything after the vtable
+// and expanding-box pointer while the same retail pause CMenu is repurposed
+// as our custom Options submenu.
+static unsigned char gSpideyPauseParentState[0x534];
 static int gSpideyInLevelDisplayMenuActive = 0;
+
+static void SpideyApplyFrontendTextScale(
+		const char* reason);
 
 static const char* const gSpideyAspectLabels[] =
 {
@@ -1343,50 +1357,10 @@ static void SpideyBuildPauseUiScaleLabel(
 		SpideyClampUiScalePercent(
 			percent);
 
-	const int slots =
-		10;
-	const int range =
-		kSpideyUiScaleMaxPercent -
-		kSpideyUiScaleMinPercent;
-	int filled =
-		0;
-
-	if (range > 0)
-	{
-		filled =
-			((percent -
-			  kSpideyUiScaleMinPercent) *
-			 slots +
-			 range / 2) /
-			range;
-	}
-
-	if (filled < 0)
-		filled =
-			0;
-	if (filled > slots)
-		filled =
-			slots;
-
-	char bar[11];
-	int i;
-	for (i = 0;
-		 i < slots;
-		 ++i)
-	{
-		bar[i] =
-			i < filled ?
-				'=' :
-				'-';
-	}
-	bar[slots] =
-		0;
-
 	sprintf(
 		destination,
-		"%s %s %d%%",
+		"%s: %d%%",
 		prefix,
-		bar,
 		percent);
 }
 
@@ -1415,7 +1389,7 @@ static void SpideyUpdateUiScaleMenuLabels()
 		gSpideyPendingGameplayUiScalePercent);
 	SpideyBuildPauseUiScaleLabel(
 		gSpideyPauseMenuTextScaleMenuLabel,
-		"Menu Text",
+		"Text Scale",
 		gSpideyPendingMenuTextScalePercent);
 }
 
@@ -2892,6 +2866,222 @@ static int SpideyPauseMenuHasEntry(
 	return 0;
 }
 
+typedef void (__fastcall *SpideyRetailMenuSetLineFn)(
+		CMenu*,
+		void*,
+		char);
+
+// @Ok
+static void SpideyPauseResetPendingToCommitted(
+		const char* reason)
+{
+	gSpideyPendingGameplayUiScalePercent =
+		gSpideyGameplayUiScalePercent;
+	gSpideyPendingMenuTextScalePercent =
+		gSpideyMenuTextScalePercent;
+	SpideyUpdateUiScaleMenuLabels();
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_options_pending_reset reason=%s gameplay=%d text=%d\n",
+			reason ? reason : "unknown",
+			gSpideyPendingGameplayUiScalePercent,
+			gSpideyPendingMenuTextScalePercent);
+		fclose(f);
+	}
+}
+
+// @Ok
+static void SpideyPauseAbandonOptionsState(
+		const char* reason)
+{
+	SpideyPauseResetPendingToCommitted(
+		reason ? reason : "abandon");
+
+	gSpideyPauseOptionsActive =
+		0;
+	gSpideyPauseParentSnapshotValid =
+		0;
+	gSpideyPauseMenuOwner =
+		0;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_options_state action=abandon reason=%s\n",
+			reason ? reason : "unknown");
+		fclose(f);
+	}
+}
+
+// @Ok
+static int SpideyPauseEnterOptions(
+		CMenu* menu)
+{
+	if (!menu ||
+		gSpideyPauseOptionsActive)
+	{
+		return 0;
+	}
+
+	// Keep the parent menu's exact retail state so Back can restore it
+	// without reconstructing or invoking the retail Options menu.
+	memcpy(
+		gSpideyPauseParentState,
+		((unsigned char*)menu) + 8,
+		sizeof(gSpideyPauseParentState));
+	gSpideyPauseParentSnapshotValid =
+		1;
+	gSpideyPauseMenuOwner =
+		menu;
+
+	SpideyPauseResetPendingToCommitted(
+		"enter_options");
+
+	const int parentY =
+		menu->mY;
+	const int parentLineSep =
+		menu->mLineSep;
+
+	// Reuse the same live CMenu object. The expanding-box pointer at +4 is
+	// deliberately left untouched; only menu data from +8 onward changes.
+	menu->menu_width =
+		0;
+	menu->mCursorLine =
+		0;
+	menu->mNumLines =
+		0;
+	menu->field_32 =
+		0;
+	menu->field_1B =
+		(unsigned char)-1;
+	menu->mY =
+		parentY +
+		parentLineSep / 2;
+
+	int entryIndex;
+	for (entryIndex = 0;
+		 entryIndex < 4;
+		 ++entryIndex)
+	{
+		menu->mEntry[entryIndex].what =
+			0;
+		menu->mEntry[entryIndex].unk_b =
+			1;
+		menu->mEntry[entryIndex].unk_a =
+			0;
+	}
+
+	SpideyRetailMenuAddEntryFn retailAdd =
+		(SpideyRetailMenuAddEntryFn)0x0043FFF0;
+	retailAdd(
+		menu,
+		0,
+		gSpideyPauseGameplayUiScaleMenuLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyPauseMenuTextScaleMenuLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyPauseApplyUiScaleLabel);
+	retailAdd(
+		menu,
+		0,
+		gSpideyPauseBackLabel);
+
+	SpideyRetailMenuSetLineFn setLine =
+		(SpideyRetailMenuSetLineFn)0x0043FF80;
+	setLine(
+		menu,
+		0,
+		0);
+
+	gSpideyPauseOptionsActive =
+		1;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_options_state action=enter menu=0x%08lX rows=%u y=%d line_sep=%d gameplay=%d text=%d\n",
+			(unsigned long)menu,
+			(unsigned int)menu->mNumLines,
+			menu->mY,
+			menu->mLineSep,
+			gSpideyPendingGameplayUiScalePercent,
+			gSpideyPendingMenuTextScalePercent);
+		fclose(f);
+	}
+
+	return 1;
+}
+
+// @Ok
+static int SpideyPauseRestoreParent(
+		CMenu* menu,
+		const char* reason,
+		int discardPending)
+{
+	if (!menu ||
+		!gSpideyPauseParentSnapshotValid ||
+		menu != gSpideyPauseMenuOwner)
+	{
+		SpideyPauseAbandonOptionsState(
+			"restore_invalid_owner");
+		return 0;
+	}
+
+	if (discardPending)
+	{
+		SpideyPauseResetPendingToCommitted(
+			reason ? reason : "back");
+	}
+
+	memcpy(
+		((unsigned char*)menu) + 8,
+		gSpideyPauseParentState,
+		sizeof(gSpideyPauseParentState));
+
+	gSpideyPauseOptionsActive =
+		0;
+	gSpideyPauseParentSnapshotValid =
+		0;
+	gSpideyPauseMenuOwner =
+		menu;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_options_state action=restore reason=%s rows=%u line=%u gameplay=%d text=%d\n",
+			reason ? reason : "unknown",
+			(unsigned int)menu->mNumLines,
+			(unsigned int)menu->mLine,
+			gSpideyGameplayUiScalePercent,
+			gSpideyMenuTextScalePercent);
+		fclose(f);
+	}
+
+	return 1;
+}
+
 // @Ok
 static void SpideyPauseCommitUiScale()
 {
@@ -2909,6 +3099,8 @@ static void SpideyPauseCommitUiScale()
 
 	SpideySaveModernVideoSettings();
 	SpideyUpdateUiScaleMenuLabels();
+	SpideyApplyFrontendTextScale(
+		"pause_options_apply");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -2917,7 +3109,7 @@ static void SpideyPauseCommitUiScale()
 	{
 		fprintf(
 			f,
-			"pause_ui_apply old_gameplay=%d new_gameplay=%d old_text=%d new_text=%d saved=1 live_policy=next_draw_no_device_rebuild\n",
+			"pause_ui_apply old_gameplay=%d new_gameplay=%d old_text=%d new_text=%d saved=1 live_gameplay=next_draw live_text=reapplied_no_device_rebuild\n",
 			oldGameplay,
 			gSpideyGameplayUiScalePercent,
 			oldText,
@@ -2939,12 +3131,44 @@ static void __fastcall SpideyPauseMenuUpdate(
 			i32,
 			i32);
 
-	if (menu &&
+	if (!menu)
+		return;
+
+	// A pause close, level transition or retail menu rebuild can reuse the
+	// same address with different rows. Never carry submenu state across it.
+	if (gSpideyPauseOptionsActive)
+	{
+		const int ownerChanged =
+			menu != gSpideyPauseMenuOwner;
+		const int submenuShapeLost =
+			!ownerChanged &&
+			(menu->mNumLines != 4 ||
+			 !SpideyPauseMenuHasEntry(
+				menu,
+				gSpideyPauseApplyUiScaleLabel) ||
+			 !SpideyPauseMenuHasEntry(
+				menu,
+				gSpideyPauseBackLabel));
+
+		if (ownerChanged ||
+			submenuShapeLost)
+		{
+			SpideyPauseAbandonOptionsState(
+				ownerChanged ?
+					"menu_pointer_changed" :
+					"menu_rebuilt");
+		}
+	}
+
+	gSpideyPauseMenuOwner =
+		menu;
+
+	if (!gSpideyPauseOptionsActive &&
 		!SpideyPauseMenuHasEntry(
 			menu,
-			gSpideyPauseApplyUiScaleLabel))
+			gSpideyPauseOptionsLabel))
 	{
-		if (menu->mNumLines <= 37)
+		if (menu->mNumLines < 40)
 		{
 			SpideyRetailMenuAddEntryFn retailAdd =
 				(SpideyRetailMenuAddEntryFn)0x0043FFF0;
@@ -2952,19 +3176,11 @@ static void __fastcall SpideyPauseMenuUpdate(
 			retailAdd(
 				menu,
 				0,
-				gSpideyPauseGameplayUiScaleMenuLabel);
-			retailAdd(
-				menu,
-				0,
-				gSpideyPauseMenuTextScaleMenuLabel);
-			retailAdd(
-				menu,
-				0,
-				gSpideyPauseApplyUiScaleLabel);
+				gSpideyPauseOptionsLabel);
 
-			// Three extra rows: preserve approximately the same visual center.
+			// One added row: preserve approximately the retail visual center.
 			menu->mY -=
-				(menu->mLineSep * 3) / 2;
+				menu->mLineSep / 2;
 
 			FILE* f =
 				SpideyOpenConsolidatedLog(
@@ -2973,12 +3189,24 @@ static void __fastcall SpideyPauseMenuUpdate(
 			{
 				fprintf(
 					f,
-					"pause_ui_controls rows_added=3 rows=%u y=%d line_sep=%d gameplay=%d text=%d retail_display_options_disabled=1 graphical_slider_resources=0 controls=left_right_apply\n",
+					"pause_options_entry rows_added=1 rows=%u y=%d line_sep=%d parent_only=1 retail_options_invoked=0\n",
 					(unsigned int)menu->mNumLines,
 					menu->mY,
-					menu->mLineSep,
-					gSpideyPendingGameplayUiScalePercent,
-					gSpideyPendingMenuTextScalePercent);
+					menu->mLineSep);
+				fclose(f);
+			}
+		}
+		else
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"COMPAT");
+			if (f)
+			{
+				fprintf(
+					f,
+					"pause_options_entry rows_added=0 reason=capacity rows=%u\n",
+					(unsigned int)menu->mNumLines);
 				fclose(f);
 			}
 		}
@@ -2990,7 +3218,8 @@ static void __fastcall SpideyPauseMenuUpdate(
 		menu,
 		0);
 
-	if (!menu ||
+	if (!gSpideyPauseOptionsActive ||
+		menu != gSpideyPauseMenuOwner ||
 		menu->mLine >= menu->mNumLines ||
 		!menu->mEntry[menu->mLine].name)
 	{
@@ -3024,59 +3253,7 @@ static void __fastcall SpideyPauseMenuUpdate(
 	}
 	else
 	{
-		return;
-	}
-
-	RetailCheckTriggersFn checkTriggers =
-		(RetailCheckTriggersFn)0x0050C180;
-
-	int delta =
-		0;
-	if (checkTriggers(
-			0x00008008,
-			1,
-			1))
-	{
-		delta =
-			1;
-	}
-	else if (checkTriggers(
-			0x00004004,
-			1,
-			1))
-	{
-		delta =
-			-1;
-	}
-
-
-	if (delta)
-	{
-		SpideyStepPendingUiScale(
-			(int)menu->mLine,
-			percent,
-			kind,
-			delta);
-
-		FILE* f =
-			SpideyOpenConsolidatedLog(
-				"COMPAT");
-		if (f)
-		{
-			fprintf(
-				f,
-				"pause_ui_adjust kind=%s line=%u percent=%d pending_gameplay=%d pending_text=%d\n",
-				kind,
-				(unsigned int)menu->mLine,
-				*percent,
-				gSpideyPendingGameplayUiScalePercent,
-				gSpideyPendingMenuTextScalePercent);
-			fclose(f);
-		}
-	}
-}
-
-// @Ok
+		retur// @Ok
 static u8 __cdecl SpideyPauseConfirmTrigger(
 		u32 mask,
 		i32 option2,
@@ -3099,7 +3276,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 		return triggered;
 
 	CMenu* menu =
-		*(CMenu**)0x005FAED0;
+		gSpideyPauseMenuOwner;
 	if (!menu ||
 		menu->mLine >= menu->mNumLines ||
 		!menu->mEntry[menu->mLine].name)
@@ -3109,6 +3286,33 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 
 	const char* selected =
 		menu->mEntry[menu->mLine].name;
+
+	if (!gSpideyPauseOptionsActive &&
+		!strcmp(
+			selected,
+			gSpideyPauseOptionsLabel))
+	{
+		const int entered =
+			SpideyPauseEnterOptions(
+				menu);
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"pause_options_confirm action=open entered=%d mask=0x%08lX\n",
+				entered,
+				(unsigned long)mask);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	if (!gSpideyPauseOptionsActive)
+		return triggered;
 
 	if (!strcmp(
 			selected,
@@ -3123,7 +3327,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 		{
 			fprintf(
 				f,
-				"pause_ui_confirm action=apply line=%u rows=%u mask=0x%08lX gameplay=%d text=%d\n",
+				"pause_options_confirm action=apply line=%u rows=%u mask=0x%08lX gameplay=%d text=%d\n",
 				(unsigned int)menu->mLine,
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
@@ -3136,17 +3340,30 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 
 	if (!strcmp(
 			selected,
+			gSpideyPauseBackLabel))
+	{
+		SpideyPauseRestoreParent(
+			menu,
+			"back",
+			1);
+		return 0;
+	}
+
+	if (!strcmp(
+			selected,
 			gSpideyPauseGameplayUiScaleMenuLabel) ||
 		!strcmp(
 			selected,
 			gSpideyPauseMenuTextScaleMenuLabel))
 	{
-		// Synthetic pause rows are adjusted with left/right or the slider.
-		// Consume confirm so retail does not dispatch an unknown string.
+		// Scale rows are adjusted only with left/right. Confirm is consumed
+		// so retail never dispatches our custom labels as pause commands.
 		return 0;
 	}
 
-	return triggered;
+	// While our submenu owns the CMenu, never allow an unexpected custom row
+	// to fall through into the retail pause dispatcher.
+	return 0;
 }
 
 // @Ok
@@ -4095,7 +4312,7 @@ static void SpideyInstallDisplayAspectCompat()
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_inline=1 pause_text_sliders=1 pause_display_hook=0 pause_update=%d pause_confirm=%d range=%d-%d step=%d defaults=%d,%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_custom_options=1 pause_parent_rows_added=1 pause_submenu_rows=4 pause_retail_options_invoked=0 pause_update=%d pause_confirm=%d range=%d-%d step=%d defaults=%d,%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
