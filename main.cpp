@@ -1206,6 +1206,8 @@ static char gSpideyMenuTextScaleMenuLabel[64] =
 	"Menu/Text Scale: 100%";
 static char gSpideyPauseOptionsLabel[] =
 	"Options";
+static char gSpideyPauseOptionsHeadingLabel[] =
+	"Options";
 static char gSpideyPauseGameplayUiScaleMenuLabel[64] =
 	"UI Scale: 125%";
 static char gSpideyPauseMenuTextScaleMenuLabel[64] =
@@ -2968,13 +2970,15 @@ static int SpideyPauseEnterOptions(
 		0;
 	menu->field_1B =
 		(unsigned char)-1;
+	// Retail pause-menu presentation effectively consumes row 0 as the
+	// submenu heading/first display slot. Keep an explicit disabled heading
+	// there so both adjustable scale rows begin on normal selectable rows.
 	menu->mY =
-		parentY +
-		parentLineSep / 2;
+		parentY;
 
 	int entryIndex;
 	for (entryIndex = 0;
-		 entryIndex < 4;
+		 entryIndex < 5;
 		 ++entryIndex)
 	{
 		menu->mEntry[entryIndex].what =
@@ -2987,6 +2991,10 @@ static int SpideyPauseEnterOptions(
 
 	SpideyRetailMenuAddEntryFn retailAdd =
 		(SpideyRetailMenuAddEntryFn)0x0043FFF0;
+	retailAdd(
+		menu,
+		0,
+		gSpideyPauseOptionsHeadingLabel);
 	retailAdd(
 		menu,
 		0,
@@ -3004,12 +3012,17 @@ static int SpideyPauseEnterOptions(
 		0,
 		gSpideyPauseBackLabel);
 
+	// EntryEnable(false) in retail maps to what=1. Mark the heading directly
+	// so up/down navigation skips it while it remains visible as a title.
+	menu->mEntry[0].what =
+		1;
+
 	SpideyRetailMenuSetLineFn setLine =
 		(SpideyRetailMenuSetLineFn)0x0043FF80;
 	setLine(
 		menu,
 		0,
-		0);
+		1);
 
 	gSpideyPauseOptionsActive =
 		1;
@@ -3021,11 +3034,14 @@ static int SpideyPauseEnterOptions(
 	{
 		fprintf(
 			f,
-			"pause_options_state action=enter menu=0x%08lX rows=%u y=%d line_sep=%d gameplay=%d text=%d\n",
+			"pause_options_state action=enter menu=0x%08lX rows=%u line=%u cursor=%u y=%d line_sep=%d heading_disabled=%d gameplay=%d text=%d\n",
 			(unsigned long)menu,
 			(unsigned int)menu->mNumLines,
+			(unsigned int)menu->mLine,
+			(unsigned int)menu->mCursorLine,
 			menu->mY,
 			menu->mLineSep,
+			menu->mEntry[0].what ? 1 : 0,
 			gSpideyPendingGameplayUiScalePercent,
 			gSpideyPendingMenuTextScalePercent);
 		fclose(f);
@@ -3146,7 +3162,16 @@ static void __fastcall SpideyPauseMenuUpdate(
 			menu != gSpideyPauseMenuOwner;
 		const int submenuShapeLost =
 			!ownerChanged &&
-			(menu->mNumLines != 4 ||
+			(menu->mNumLines != 5 ||
+			 !SpideyPauseMenuHasEntry(
+				menu,
+				gSpideyPauseOptionsHeadingLabel) ||
+			 !SpideyPauseMenuHasEntry(
+				menu,
+				gSpideyPauseGameplayUiScaleMenuLabel) ||
+			 !SpideyPauseMenuHasEntry(
+				menu,
+				gSpideyPauseMenuTextScaleMenuLabel) ||
 			 !SpideyPauseMenuHasEntry(
 				menu,
 				gSpideyPauseApplyUiScaleLabel) ||
