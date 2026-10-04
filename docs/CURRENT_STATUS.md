@@ -8515,3 +8515,70 @@ The existing final freshness check remains in place, so stale DLLs still cannot 
 ### Next user action
 
 Run the same corrected `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` again. It will update from `b8cc4d5...` to the relink-fixed `dev` revision. Since Renderer11/Input11 were successfully rebuilt during the failed run and their sources did not change, the next fast run should reuse those bridge artifacts.
+
+
+## Pause Options final interaction polish (2026-10-03)
+
+Runtime test on revision `e5ca5a25fc6b0d6ccdbb85b446b18b03c0a825c0` confirmed the custom pause Options submenu is now functionally usable:
+
+- all expected rows appeared;
+- UI Scale adjustments worked;
+- Text Scale adjustments worked;
+- Apply Settings committed both values;
+- values persisted;
+- no crash occurred.
+
+The uploaded consolidated runtime log also confirms the canonical retail executable fingerprint:
+
+- SHA-256 `D55A0BB0E920C497CE1CA76F08ED2E62FEEFCB6FF3C2901C0D59890F099BA93C`
+- PE timestamp `0x3B7A3167`
+- image size `0x02A0D000`
+
+Observed successful custom confirmations were still coming through runtime mask `0x00000100`, matching the mouse-oriented pause trigger path. The user reported that Enter could not open Options or activate Apply Settings.
+
+The retail keyboard mapping table in `PCInput.cpp` maps action `0x00001000` to DIK `0x1C` (Enter) by default. Therefore the custom pause confirmation wrapper now probes retail confirm action `0x00001000` only while a custom Options row owns the selection. Normal retail pause rows are left untouched.
+
+User also requested that `Quit` remain the bottom-most parent pause row. Previously our `Options` row was appended after the retail final row.
+
+Implemented:
+
+- `9581ef731b21568da55a99cd49eb7de4cf593e7c` — **fix: keyboard confirm and pause Options order**
+  - custom pause confirmation now accepts native retail action `0x00001000` in addition to the already-working patched-call trigger;
+  - Open, Apply Settings, Back and confirm-consumption for scale rows all flow through the same custom handler;
+  - confirmation telemetry records `source=confirm_action_0x1000` when native confirm is what triggered the action;
+  - parent Options insertion now appends once through retail `CMenu::AddEntry`, then swaps the complete new `SEntry` with the previous final retail row;
+  - the previous final row therefore remains bottom-most;
+  - if the previous final row was selected during insertion, selection follows it to its new index so insertion does not unexpectedly jump the highlight.
+- `648b293e3590c1346decfab8028a6b64c2e4b479` — **chore: refresh pause Options telemetry**
+  - startup telemetry now states `pause_parent_insert=before_last`;
+  - submenu row count corrected to 5;
+  - native confirm action recorded as `0x1000`.
+
+Static validation after the source change:
+
+- lexical delimiter balance: braces 0, parentheses 0, brackets 0;
+- custom submenu shape guard remains 5 rows;
+- existing mouse confirmation path remains intact;
+- normal retail pause rows are not given the synthetic/native confirm probe;
+- complete `SEntry` structures are swapped, preserving label, colors, scaling and row flags.
+
+### Exact next runtime test
+
+Use `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Verify only:
+
+1. Pause menu order has `Options` immediately above `Quit`, with `Quit` still last.
+2. Highlight `Options` with keyboard navigation and press Enter; submenu should open.
+3. Change one scale value.
+4. Highlight `Apply Settings` and press Enter; value should apply.
+5. Highlight `Back` and press Enter; parent pause menu should restore.
+6. Mouse click behavior should still work.
+
+Expected useful telemetry:
+
+- `pause_options_entry ... options_row=... quit_row=... previous_last=...`
+- `pause_options_confirm action=open ... source=confirm_action_0x1000`
+- `pause_options_confirm action=apply ... source=confirm_action_0x1000`
+
+If this passes, close the pause-options/UI-scale milestone and move directly to the already-instrumented camera work. No additional UI test should be requested unless this specific interaction polish fails.
