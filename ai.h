@@ -81,11 +81,9 @@ class CAIProc_RotY : public CAIProc
 		EXPORT CAIProc_RotY(CBaddy*, int, int ,int);
 		EXPORT virtual ~CAIProc_RotY(void);
 
-		// @TODO
-		// this doesn't exist, i'm confused
-		void Execute(void)
-		{
-		}
+		// Original 0x00401110. Retail advances one full authored frame per call;
+		// split that legacy frame across canonical 60-Hz ticks.
+		EXPORT virtual void Execute(void);
 
 		int field_20;
 		int field_24;
@@ -159,5 +157,6 @@ void validate_CAIProc_MonitorAttack(void);
 void validate_CAIProc_AccZ(void);
 void validate_SMoveToInfo(void);
 void validate_CAIProc_MoveTo(void);
+void patch_ai(void);
 
 #endif
