@@ -1,3 +1,67 @@
+# LATEST FRONTIER — UI SCALE ROW-0 FIX; CAMERA NEXT AFTER ONE SHORT TEST (2026-10-03)
+
+**THIS SECTION OVERRIDES THE OLDER PAUSE-OPTIONS TEST STATE BELOW.**
+
+The user's runtime test of session revision `bfdaf30d9c6eb75983862e168d753b9903fbf8ae` succeeded overall:
+
+- custom in-level **Options** submenu opens and works;
+- **Text Scale** was visible, adjustable, applied live, and persisted correctly;
+- the **Gameplay UI Scale** row was not exposed/usable;
+- the user explicitly wants to move to camera work as soon as this final UI-scale issue is closed.
+
+Runtime proof:
+- submenu entered as four rows;
+- all observed scale-adjust events were `kind=menu_text line=1`;
+- Text Scale applied from 100% to 115%;
+- Gameplay UI remained 125%;
+- Apply and Back both completed cleanly.
+
+The fix is already on live `dev`:
+
+- `ba5691d4fb84feeb6334269bb1edce1778c23627` — **fix: expose gameplay UI scale in pause Options**
+- `4159190bcaa7341896561f913504cc34f437c987` — **chore: tighten pause Options row fix**
+- `b9dc5127a4cbcd99abbc0fda5a2fe245ee9ca7de` — **docs: record pause Options runtime and UI-scale row fix**
+
+New submenu layout:
+
+0. `Options` — disabled heading / sacrificial retail first row
+1. `UI Scale: N%`
+2. `Text Scale: N%`
+3. `Apply Settings`
+4. `Back`
+
+The submenu now starts selection on row 1. Shape validation requires all five entries. New enter telemetry reports row count, selected line, cursor line, and heading-disabled state.
+
+## Exact next action
+
+Run only this short test:
+
+1. `UPDATE_AND_TEST_LATEST_BUILD.bat`
+2. gameplay -> Pause -> Options;
+3. confirm `UI Scale: N%` is now visible and initially selected;
+4. change UI Scale to something obvious such as 150%;
+5. Apply Settings;
+6. return to gameplay and verify the HUD geometry changes immediately;
+7. reopen Options and confirm the applied value persisted;
+8. optionally nudge Text Scale once to ensure it still works.
+
+Expected log:
+- `pause_options_state action=enter ... rows=5 line=1 ... heading_disabled=1`
+- `pause_options_adjust kind=gameplay_ui line=1 ...`
+- `pause_ui_apply old_gameplay=125 new_gameplay=...`
+- `pause_options_confirm action=apply line=3 rows=5 ...`
+
+If that passes:
+- checkpoint the success in `docs/CURRENT_STATUS.md` immediately;
+- **move directly to the requested camera implementation**;
+- do not spend another runtime cycle on already-proven UI work unless a regression appears.
+
+The same runtime also continued to show the single-hook compass arrow geometry inside the established compact-holder region. Do not reopen health/web-cartridge/compass transforms unless the user reports a visual problem.
+
+Fetch live `dev` first in every new chat; it outranks this document if newer.
+
+---
+
 # CURRENT NEW-CHAT FRONTIER — PAUSE OPTIONS SUBMENU + COMPASS ISOLATION (2026-10-03/04)
 
 **READ THIS SECTION BEFORE ALL OLDER MATERIAL BELOW.**
