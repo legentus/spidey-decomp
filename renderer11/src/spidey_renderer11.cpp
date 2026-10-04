@@ -1841,7 +1841,7 @@ int __cdecl SpideyRenderer11_PresentPixels(
 
     static unsigned long frame = 0;
     ++frame;
-    if (frame <= 5 || (frame % 120) == 0)
+    if (frame <= 5)
     {
         Log(
             "present_pixels frame=%lu src=%lux%lu pitch=%ld dst=%lux%lu rect=%lu,%lu,%lux%lu aspect=%d vsync=%d",
@@ -2016,7 +2016,7 @@ int __cdecl SpideyRenderer11_PresentHdc(
 
     static unsigned long frame = 0;
     ++frame;
-    if (frame <= 5 || (frame % 120) == 0)
+    if (frame <= 5)
     {
         Log(
             "present_hdc frame=%lu src=%lux%lu dst=%lux%lu rect=%d,%d,%dx%d aspect=%d vsync=%d",
@@ -2220,18 +2220,8 @@ int __cdecl SpideyRenderer11_UpdateTexture(
     entry.legacyHandle = 0;
     ++gResidentTextureCount;
 
-    Log(
-        "texture_update id=%lu size=%lux%lu src_bpp=%lu masks=%08lX,%08lX,%08lX,%08lX resident=%lu",
-        textureId,
-        width,
-        height,
-        bitsPerPixel,
-        redMask,
-        greenMask,
-        blueMask,
-        alphaMask,
-        gResidentTextureCount);
-
+    // Successful uploads are normal streaming work. Per-upload file I/O
+    // was perturbing frame pacing; failures remain logged above.
     return 1;
 }
 
@@ -2260,11 +2250,8 @@ int __cdecl SpideyRenderer11_AssociateTextureHandle(
     entry.legacyHandle = legacyHandle;
     gLegacyHandleToTextureId[legacyHandle] = textureId;
 
-    Log(
-        "texture_handle id=%lu handle=0x%08lX",
-        textureId,
-        legacyHandle);
-
+    // Handle association is a high-frequency success path; keep failures
+    // logged but do not synchronously write every successful association.
     return 1;
 }
 
@@ -2503,7 +2490,7 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
 
     if (queuedCommands == 0)
     {
-        if (frame <= 5 || (frame % 120) == 0 || skippedSubmit)
+        if (frame <= 5 || skippedSubmit)
         {
             Log(
                 "shadow_frame frame=%lu target=%lux%lu queued=0 submitted=%lu skipped_submit=%lu rendered=0 skipped_render=0 vertices=0 presentable=0",
@@ -2773,7 +2760,6 @@ int __cdecl SpideyRenderer11_ShadowEndFrame(
             samplePixels) ? 1 : 0;
 
     if (frame <= 5 ||
-        (frame % 120) == 0 ||
         skippedSubmit ||
         skippedRender ||
         rendered != queuedCommands)
@@ -2943,8 +2929,7 @@ int __cdecl SpideyRenderer11_PresentShadow(
     static unsigned long shadowPresentFrame = 0;
     ++shadowPresentFrame;
 
-    if (shadowPresentFrame <= 5 ||
-        (shadowPresentFrame % 120) == 0)
+    if (shadowPresentFrame <= 5)
     {
         Log(
             "present_shadow frame=%lu src=%lux%lu dst=%lux%lu rect=%lu,%lu,%lux%lu aspect=%d vsync=%d",
@@ -2971,19 +2956,7 @@ void __cdecl SpideyRenderer11_ReleaseTexture(
     if (textureId >= kGameTextureCapacity)
         return;
 
-    const bool wasResident =
-        gGameTextures[textureId].texture != nullptr ||
-        gGameTextures[textureId].srv != nullptr;
-
     ReleaseGameTexture(textureId);
-
-    if (wasResident)
-    {
-        Log(
-            "texture_release id=%lu resident=%lu",
-            textureId,
-            gResidentTextureCount);
-    }
 }
 
 extern "C" __declspec(dllexport)
