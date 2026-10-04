@@ -84,6 +84,83 @@ void CSwinger_GetCurrentParams(i32 *pSwinger, CVector *pOut)
 	*pOut = Origin - (Scale * Offset);
 }
 
+#ifdef _WIN32
+typedef __int64 SpideyPhysicsWide;
+#else
+typedef long long SpideyPhysicsWide;
+#endif
+
+// Retail player physics was authored around a two-vblank (30 Hz) quantum:
+// field_80 == 1 and field_80 == 2 take the same displacement/force path.
+// For a true 60 Hz tick, split that original force+damping step in half.
+//
+// For retail friction shift f:
+//   q = 1 - 2^-f
+//   h = sqrt(q)
+//   a = q / (1 + h)
+// Two 60 Hz applications therefore reproduce one retail 30 Hz velocity
+// update for constant acceleration/friction, apart from integer rounding.
+static const u32 gSpideyPhysicsHalfDampingQ16[32] =
+{
+	0, 46341, 56756, 61303, 63455, 64504, 65022, 65279,
+	65408, 65472, 65504, 65520, 65528, 65532, 65534, 65535,
+	65535, 65536, 65536, 65536, 65536, 65536, 65536, 65536,
+	65536, 65536, 65536, 65536, 65536, 65536, 65536, 65536
+};
+
+static const u32 gSpideyPhysicsHalfAccelQ16[32] =
+{
+	0, 19195, 26340, 29629, 31216, 31996, 32383, 32576,
+	32672, 32720, 32744, 32756, 32762, 32765, 32766, 32767,
+	32768, 32768, 32768, 32768, 32768, 32768, 32768, 32768,
+	32768, 32768, 32768, 32768, 32768, 32768, 32768, 32768
+};
+
+static i32 SpideyPhysicsMulQ16(i32 value, u32 factor)
+{
+	SpideyPhysicsWide product =
+		(SpideyPhysicsWide)value *
+		(SpideyPhysicsWide)factor;
+	return (i32)(product / 65536);
+}
+
+static i32 SpideyPhysicsHalfStepAxis(
+		i32 velocity,
+		i32 acceleration,
+		u8 frictionShift)
+{
+	u32 index = frictionShift;
+	if (index > 31)
+		index = 31;
+
+	return SpideyPhysicsMulQ16(
+			velocity,
+			gSpideyPhysicsHalfDampingQ16[index]) +
+		SpideyPhysicsMulQ16(
+			acceleration,
+			gSpideyPhysicsHalfAccelQ16[index]);
+}
+
+static void SpideyPhysicsIntegrateVelocity60(
+		CVector* velocity,
+		const CVector* acceleration,
+		const CFriction* friction)
+{
+	velocity->vx = SpideyPhysicsHalfStepAxis(
+		velocity->vx,
+		acceleration->vx,
+		friction->vx);
+	velocity->vy = SpideyPhysicsHalfStepAxis(
+		velocity->vy,
+		acceleration->vy,
+		friction->vy);
+	velocity->vz = SpideyPhysicsHalfStepAxis(
+		velocity->vz,
+		acceleration->vz,
+		friction->vz);
+	velocity->KillSmall();
+}
+
 // @Ok
 // Original 0x467D20. Runs while the player hangs on a web line: the swinger
 // object moves mPos along the swing arc, then three short rays look for a
@@ -240,15 +317,26 @@ void CPlayer::DoCrawlingPhysics(void)
 	this->field_B09 = 0;
 	bStopped = 0;
 
-	this->mVel += this->mAcc;
-	this->mVel %= this->mFric;
-	this->mVel.KillSmall();
+	if (this->field_80 == 1)
+	{
+		SpideyPhysicsIntegrateVelocity60(&this->mVel, &this->mAcc, &this->mFric);
+	}
+	else
+	{
+		this->mVel += this->mAcc;
+		this->mVel %= this->mFric;
+		this->mVel.KillSmall();
+	}
 
 	prevPos.vx = this->mPos.vx;
 	prevPos.vy = this->mPos.vy;
 	prevPos.vz = this->mPos.vz;
 
-	if (this->field_80 <= 2)
+	if (this->field_80 == 1)
+	{
+		delta = this->mVel >> 1;
+	}
+	else if (this->field_80 <= 2)
 	{
 		delta.vx = this->mVel.vx;
 		delta.vy = this->mVel.vy;
@@ -644,6 +732,7 @@ void CPlayer::DoPhysics(void)
 {
 	CVector startPos;
 	CVector move;
+	CVector fullMoveVelocity;
 	CVector ray;
 	CVector radial;
 	CVector slideNormal;
@@ -708,18 +797,30 @@ void CPlayer::DoPhysics(void)
 	startPos.vy = this->mPos.vy;
 	startPos.vz = this->mPos.vz;
 
-	this->mVel += this->mAcc;
-	this->mVel %= this->mFric;
-	this->mVel.KillSmall();
+	if (this->field_80 == 1)
+	{
+		SpideyPhysicsIntegrateVelocity60(&this->mVel, &this->mAcc, &this->mFric);
+	}
+	else
+	{
+		this->mVel += this->mAcc;
+		this->mVel %= this->mFric;
+		this->mVel.KillSmall();
+	}
 
 	// one animation window moves the player with no collision at all.
 	if (this->field_E1C == 0x40000
 		&& ((this->mAnim == 270 && this->mFrame >= 13) || this->mAnim == 271))
 	{
-		this->mPos += this->mVel;
+		if (this->field_80 == 1)
+			this->mPos += this->mVel >> 1;
+		else
+		{
+			this->mPos += this->mVel;
 
-		if (this->field_80 > 2)
-			this->mPos += this->mVel * (this->field_80 - 2);
+			if (this->field_80 > 2)
+				this->mPos += this->mVel * (this->field_80 - 2);
+		}
 
 		return;
 	}
@@ -734,7 +835,13 @@ void CPlayer::DoPhysics(void)
 		this->mVel.vy = 0;
 	}
 
-	if (this->field_80 <= 2)
+	fullMoveVelocity = this->mVel;
+
+	if (this->field_80 == 1)
+	{
+		move = fullMoveVelocity >> 1;
+	}
+	else if (this->field_80 <= 2)
 	{
 		move.vx = this->mVel.vx;
 		move.vy = this->mVel.vy;
@@ -923,7 +1030,21 @@ void CPlayer::DoPhysics(void)
 		len3 = M3dMaths_SquareRoot0(sqx + sqz + (move.vy >> 9) * (move.vy >> 9));
 	}
 
-	if (this->field_80 <= 2)
+	if (this->field_80 == 1)
+	{
+		CVector expectedHalf = fullMoveVelocity >> 1;
+		if (move.vx == expectedHalf.vx &&
+			move.vy == expectedHalf.vy &&
+			move.vz == expectedHalf.vz)
+		{
+			this->mVel = fullMoveVelocity;
+		}
+		else
+		{
+			this->mVel = move << 1;
+		}
+	}
+	else if (this->field_80 <= 2)
 	{
 		this->mVel.vx = move.vx;
 		this->mVel.vy = move.vy;
@@ -1009,7 +1130,9 @@ void CPlayer::DoPhysics(void)
 
 	fall = savedFallVel;
 
-	if (this->field_80 > 2)
+	if (this->field_80 == 1)
+		fall = savedFallVel >> 1;
+	else if (this->field_80 > 2)
 		fall = savedFallVel + (this->field_80 - 2) * (savedFallVel >> 1);
 
 	lineInfo.StartCoords.vx = this->mPos.vx;
