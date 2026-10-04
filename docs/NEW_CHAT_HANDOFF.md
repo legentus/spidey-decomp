@@ -1,3 +1,23 @@
+# LATEST FRONTIER — VERIFIED RETAIL ENTER MASK PATCH UNDER TEST; CAMERA NEXT (2026-10-04)
+
+The previous pause interaction patch correctly moved Options immediately above Quit, but Enter still did not activate Options, Apply Settings, or Back. Runtime on `b7acebd821d7bbefa95c7e69b2071be68045055e` showed only the mouse confirmation path firing.
+
+Exact retail disassembly of `SpideyPC.exe` resolved the mistake:
+
+- `PCSHELL_CheckTriggers @ 0x0050C180`
+- mask `0x10` directly checks DIK `0x1C` = Enter
+- mask `0x100` is mouse left click
+- mask `0x1000` is not Enter
+
+Implemented on `dev`:
+
+- `85df9590dc42d03145756e05e67f59b44a69f45d` — custom pause Enter fallback corrected to verified retail mask `0x10`; telemetry now uses `source=keyboard_enter_mask_0x10`.
+- `2a0e575db32d0a26d77172592a2fc930b771ff3d` — live status checkpoint with disassembly evidence and exact next test.
+
+Next test: `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`. Verify Options remains above Quit, Enter opens Options, Enter activates Apply Settings, Enter activates Back, and mouse clicks still work. If this passes, immediately checkpoint the pass and move to camera work.
+
+---
+
 # LATEST FRONTIER — PAUSE OPTIONS KEYBOARD + ORDER POLISH UNDER TEST; CAMERA NEXT (2026-10-03)
 
 Runtime on `e5ca5a25fc6b0d6ccdbb85b446b18b03c0a825c0` proved the custom pause Options submenu works end-to-end for visibility, UI Scale, Text Scale, Apply and persistence. Remaining user-reported polish:
