@@ -2230,6 +2230,16 @@ static void SpideySaveModernVideoSettings()
 		"MenuTextScalePercent",
 		value,
 		SpideyGetModernVideoIniPath());
+
+	sprintf(
+		value,
+		"%d",
+		gSpideyCameraSensitivityPercent);
+	WritePrivateProfileStringA(
+		"Controls",
+		"CameraSensitivityPercent",
+		value,
+		SpideyGetModernVideoIniPath());
 }
 
 static void SpideyLoadModernVideoSettings()
@@ -2280,6 +2290,13 @@ static void SpideyLoadModernVideoSettings()
 				"MenuTextScalePercent",
 				kSpideyDefaultMenuTextScalePercent,
 				SpideyGetModernVideoIniPath()));
+	gSpideyCameraSensitivityPercent =
+		SpideyClampCameraSensitivityPercent(
+			GetPrivateProfileIntA(
+				"Controls",
+				"CameraSensitivityPercent",
+				kSpideyDefaultCameraSensitivityPercent,
+				SpideyGetModernVideoIniPath()));
 
 	gSpideyPendingWindowMode =
 		gSpideyWindowMode;
@@ -2289,6 +2306,8 @@ static void SpideyLoadModernVideoSettings()
 		gSpideyGameplayUiScalePercent;
 	gSpideyPendingMenuTextScalePercent =
 		gSpideyMenuTextScalePercent;
+	gSpideyPendingCameraSensitivityPercent =
+		gSpideyCameraSensitivityPercent;
 
 	SpideyUpdateDisplayModeMenuLabel();
 	SpideyUpdateUiScaleMenuLabels();
@@ -2300,12 +2319,16 @@ static void SpideyLoadModernVideoSettings()
 	{
 		fprintf(
 			f,
-			"ui_scale_settings load gameplay_percent=%d text_percent=%d range=%d-%d step=%d config=%s\n",
+			"ui_scale_settings load gameplay_percent=%d text_percent=%d range=%d-%d step=%d camera_sensitivity=%d camera_range=%d-%d camera_step=%d config=%s\n",
 			gSpideyGameplayUiScalePercent,
 			gSpideyMenuTextScalePercent,
 			kSpideyUiScaleMinPercent,
 			kSpideyUiScaleMaxPercent,
 			kSpideyUiScaleStepPercent,
+			gSpideyCameraSensitivityPercent,
+			kSpideyCameraSensitivityMinPercent,
+			kSpideyCameraSensitivityMaxPercent,
+			kSpideyCameraSensitivityStepPercent,
 			SpideyGetModernVideoIniPath());
 		fclose(f);
 	}
@@ -2326,6 +2349,8 @@ static void SpideyResetPendingDisplaySettings(
 		gSpideyGameplayUiScalePercent;
 	gSpideyPendingMenuTextScalePercent =
 		gSpideyMenuTextScalePercent;
+	gSpideyPendingCameraSensitivityPercent =
+		gSpideyCameraSensitivityPercent;
 	SpideyUpdateDisplayModeMenuLabel();
 	SpideyUpdateUiScaleMenuLabels();
 
