@@ -46,6 +46,63 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## RUNTIME CHECKPOINT — THIRD PASS TESTED; HIP-FIRE VALIDATED, MANUAL AIM STILL BROKEN (2026-10-04)
+
+User runtime log:
+- `spidey-decomp(20261004-175613).log`
+- runtime-reported revision: `b779d80f11cd94704c4acccb95cdd8ac1dcd70ec`
+- IMPORTANT: GitHub `dev` is still `ea74466184ba3727858fa13988f3d356a349adcc`. The `b779d80f...` runtime revision is not present on recoverable GitHub `dev`, so treat it as a local/runtime build identity rather than a committed recovery frontier.
+
+### User-visible result
+
+- Hip-fire aiming is now described by the user as "pretty much perfect and fixed".
+- Manual aim remains unusable:
+  - reticle/cursor direction is still inverted;
+  - Spider-Man cannot translate while aim is held;
+  - the reticle can drift off-screen while the camera moves;
+  - desired behavior is a camera-locked reticle that looks exactly where the visible camera looks.
+- The small periodic frametime blip returned. The user intentionally attempted a web shot on each visible graph blip near the end of the run to provide a timing marker.
+
+### Decisive log evidence
+
+Manual aim third-pass hooks are installed and retail SetupLookaroundCamera is bypassed:
+- `modern_manual_aim_install ... retail_setup=0` behavior is active.
+- `CheckForwards` receives full movement axes and repeatedly returns success while aim is held, including state `0x10`.
+- Despite that, later reticle telemetry keeps `body_pos` unchanged and `body_vel=0,0,0`; therefore the remaining locomotion block is after the wrapped CheckForwards evaluation.
+- The current third-pass reticle point reflects X/Y around the camera origin but keeps Z forward. That point is not collinear with the visible camera ray and is now disproven by runtime behavior.
+
+Hip-fire is now positively validated:
+- `source=modern_camera_scan` appears with a real target and high camera-ray centeredness score.
+- This uses the unmodified visible ray `camera.field_144 - camera.mPos`.
+- Do not change the hip-fire selector while fixing manual aim.
+
+Frametime telemetry:
+- gameplay windows repeatedly show 2–3 present intervals over 30 ms per second with maxima around 31–33 ms.
+- normal gameplay windows usually show single-vblank progression rather than multi-vblank skips.
+- current logging still opens/closes `spidey-decomp.log` for each telemetry line, so new diagnostics must avoid adding per-frame file I/O.
+
+### Next implementation
+
+1. Manual reticle:
+   - remove the X/Y reflection and use the exact same unmodified camera ray already proven by hip-fire;
+   - keep the reticle world point on that ray;
+   - if legacy projection still prevents exact camera-center lock, bypass/replace the visual projection in a follow-up rather than re-inverting the world ray.
+
+2. Locomotion:
+   - instrument the post-CheckForwards movement state more precisely;
+   - prefer a narrow temporary `field_8EA` locomotion-state mask across the movement portion of SpideyAI0, with guaranteed restoration before lookaround/fire/render state is consumed;
+   - do not globally clear manual-aim state.
+
+3. Hitch telemetry:
+   - capture exact slow-present frames and deltas in memory;
+   - publish them in the existing once-per-second timing line;
+   - correlate against web-shot/check-web-shot call counts without adding hot-path file writes.
+
+4. Logging:
+   - stop logging every successful manual-movement call;
+   - log transitions/periodic samples instead so the diagnostic build itself is less likely to create the hitch being investigated.
+
+
 ## LIVE FRONTIER — MANUAL AIM THIRD PASS IMPLEMENTED; RETAIL TARGET LIST FIXED (2026-10-04)
 
 Latest tested runtime remains:
