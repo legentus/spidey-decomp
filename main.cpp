@@ -4451,21 +4451,9 @@ static void SpideyInstallHighFpsTimingCompat()
 	// Startup-only RE capture for the two remaining central timing seams.
 	// This is intentionally not in any gameplay/render hot path.
 	SpideyLogHighFpsRetailBytes(
-		"AIProcBlock",
-		0x00401000,
-		0x1100);
-	SpideyLogHighFpsRetailBytes(
-		"CPlayer_DoPhysics",
-		0x004BFEC0,
-		0x1F0);
-	SpideyLogHighFpsRetailBytes(
-		"CPlayer_AI",
-		0x004C65C0,
-		0x2E0);
-	SpideyLogHighFpsRetailBytes(
-		"CPlayer_SynthesizeAnalogueInput",
-		0x004BC300,
-		0x1450);
+		"CAIProc_RotY_Block",
+		0x00401060,
+		0x120);
 	SpideyLogHighFpsRetailBytes(
 		"CVenom_SynthesizeAnalogueInput_Block",
 		0x004E9B00,
