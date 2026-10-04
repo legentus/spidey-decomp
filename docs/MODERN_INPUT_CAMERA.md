@@ -553,3 +553,173 @@ Success means:
 - entering a non-mode-3/scripted camera releases modern ownership instead of fighting it.
 
 Sensitivity, inversion, recenter behavior, wall/ceiling special handling, shoulder offset and smoothing are explicitly follow-up tuning/Stage-B work.
+
+
+---
+
+## Camera sensitivity, frame-pacing cleanup, and camera-forward web targeting — 2026-10-04
+
+The first Stage-A orbit-camera runtime test was a strong success.
+
+User report:
+- horizontal orbit works;
+- vertical orbit works;
+- no notable camera-control problems were reported.
+
+Runtime telemetry supports that result:
+- modern mode-3 ownership acquired normally;
+- sampled camera updates kept the requested yaw;
+- retail_overrode_yaw remained 0 in the examined orbit samples.
+
+### Persistent camera sensitivity
+
+A single Camera Sensitivity setting now scales both:
+- relative mouse camera X/Y;
+- Input11 right-stick camera X/Y.
+
+Configuration:
+- default: 100 percent, exactly matching the first successful prototype feel;
+- range: 25..200 percent;
+- step: 5 percent;
+- persisted in spidey-modern-video.ini:
+  - section: Controls
+  - key: CameraSensitivityPercent.
+
+Pause -> Options is now six rows:
+
+0. Options (disabled heading)
+1. UI Scale
+2. Text Scale
+3. Camera Sensitivity
+4. Apply Settings
+5. Back
+
+Apply Settings commits and persists camera sensitivity alongside UI/Text scale. The next camera input uses the new value immediately; no renderer/device rebuild is needed.
+
+Implementation commits:
+- 2ca650606bf1c851859c699be7e019b131f69e5b — input: add persistent camera sensitivity state
+- fdfe39ec6000856c655dbf137bf90c66d9c59aa8 — input: persist camera sensitivity setting
+- f6fcaa31edb7ae5cc8ea8cb8df2091ecfd302413 — pause: add camera sensitivity option
+- fa0f7e230c210019d8c6066076585fb84144b8ee — pause: wire camera sensitivity controls
+- fde069d43a284c27ca385ef427a6751f3b5bd06f — camera: apply configurable sensitivity
+
+### Periodic frame-hitch root cause and mitigation
+
+The successful camera runtime also exposed visible frametime hitching plus a larger freeze every several seconds.
+
+Two old renderer-validation diagnostics were still forcing synchronous readbacks on the normal gameplay path approximately every 120 frames:
+
+1. Proxy / DirectDraw surface sampling:
+   - SpideyLogSurfaceState
+   - GetDC
+   - nine GetPixel calls
+   - ReleaseDC.
+
+2. Renderer11 shadow-target sampling:
+   - copy nine pixels into a D3D11_USAGE_STAGING texture;
+   - blocking D3D11_MAP_READ.
+
+At roughly 60 FPS, the 120-frame cadence is approximately two seconds and is a strong match for the reported repeating freeze.
+
+These readbacks are now default OFF. They remain available only as explicit diagnostic opt-ins:
+
+- SPIDEY_DIAG_SURFACE_READBACK=1
+- SPIDEY_RENDERER11_DIAG_READBACK=1
+
+Ordinary metadata/timing telemetry remains enabled.
+
+Implementation:
+- 61419a368c7a7e962673a74f7052fe55465254ff — perf: disable periodic DX11 diagnostic readback
+- 6cb305796f272043654ed3819bb92e7c6c53249a — perf: disable periodic DirectDraw pixel sampling
+
+This is a high-confidence fix for the large periodic stall, but runtime validation is still required before declaring all frametime hitching solved.
+
+### Camera-forward web auto-aim RE
+
+User requirement:
+webbing an enemy should be selected by the direction the camera is facing rather than Spider-Man's body heading.
+
+Exact retained-function RE:
+
+- CPlayer::CheckWebShot = 0x004C0510
+- CPlayer::SelectAutoAimTarget = 0x004C5AA0
+- CPlayer::FireWeb = 0x004C5DD0
+- CPlayer::SelectTargetBaddy = 0x004C8410
+- CPlayer::SelectTargetSwitch = 0x004C8570.
+
+Inside SelectAutoAimTarget:
+- call site 0x004C5B2F calls SelectTargetBaddy @ 0x004C8410.
+
+Inside SelectTargetBaddy:
+- retail keeps its candidate eligibility checks;
+- range weighting remains retail;
+- LOS/final acceptance remains retail;
+- candidate-relative world vectors are transformed through player->field_89C;
+- that player orientation matrix is what makes centeredness scoring body-facing rather than camera-facing.
+
+The exact retained function blobs were independently verified against the materialized same-build executable using Git blob SHA:
+- SelectAutoAimTarget retained blob matched exactly;
+- SelectTargetBaddy retained blob matched exactly;
+- SelectTargetSwitch retained blob matched exactly;
+- CheckWebShot retained blob matched exactly;
+- FireWeb retained blob matched exactly.
+
+Therefore this targeting RE is grounded in the repository's retained canonical function bytes rather than inferred from nearby code.
+
+### Camera-forward targeting implementation
+
+Commit:
+- 954882bb63a86c39011bbc3996104f905b8559aa — gameplay: aim web auto-targeting from camera
+
+Patch scope:
+- only SelectAutoAimTarget's direct call at 0x004C5B2F is replaced;
+- expected target remains 0x004C8410;
+- other callers of SelectTargetBaddy are unchanged.
+
+Wrapper:
+- preserves retail enemy enumeration, filtering, distance weighting, LOS, and result handling;
+- when the active camera is ordinary mode 3:
+  - copies Spider-Man's field_89C target-scoring matrix;
+  - converts the active camera's final orientation quaternion field_214 using retail QToM @ 0x0047C7F0;
+  - temporarily presents that exact camera rotation to the retail SelectTargetBaddy scorer;
+  - restores Spider-Man's original matrix immediately after the retail call;
+- when the camera is not ordinary mode 3, selection falls back to untouched retail body-facing behavior.
+
+This uses the same final camera quaternion that CCamera::LoadIntoMikeCamera converts for the visible render camera, so pitch and camera collision/orientation adjustment are included rather than rebuilding aim direction from a guessed yaw.
+
+Telemetry:
+- camera_web_target_install ...
+- camera_web_target event=select source=render_camera_transform ... target=...
+- target changes are logged without logging every call.
+
+### Next combined runtime test
+
+Run FAST_UPDATE_AND_TEST_LATEST_BUILD.bat.
+
+Validate in one session:
+
+1. Pause -> Options:
+   - Camera Sensitivity row is present;
+   - change to an obvious lower value such as 50 percent;
+   - Apply Settings;
+   - camera becomes slower immediately;
+   - optionally try 150 percent;
+   - reopen Options and verify the applied value persists.
+
+2. Frametime:
+   - play for long enough to observe the old repeating freeze interval;
+   - specifically report whether the every-several-seconds half-second-class freeze is gone;
+   - report whether smaller constant hitching remains.
+
+3. Web targeting:
+   - rotate Spider-Man so his body is not facing an enemy;
+   - rotate the camera until that enemy is near screen center;
+   - fire the enemy-targeting web action;
+   - expected target selection follows the camera;
+   - test targets to camera-left/right and above/below if practical;
+   - moving Spider-Man's body away while keeping the camera on the enemy should not steal target priority.
+
+4. Brief movement/swing/camera regression check.
+
+Provide the single consolidated spidey-decomp.log after the run.
+
