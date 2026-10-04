@@ -8750,6 +8750,20 @@ static CBody* __fastcall SpideyCameraSelectTargetBaddy(
 			&camera->field_214,
 			&cameraTargetMatrix);
 
+		// Canonical SelectTargetBaddy transforms player->candidate through
+		// field_89C, normalizes it, then scores -localZ. The camera transform
+		// produced by QToM uses +localZ for camera-forward, so copying it
+		// verbatim makes a centered enemy look backwards to the retail scorer.
+		// Flip the camera's local forward row only for this temporary scoring
+		// matrix. Negating a row preserves the normalized-vector magnitude,
+		// while making camera-forward land on the -Z convention retail expects.
+		cameraTargetMatrix.m[2][0] =
+			-cameraTargetMatrix.m[2][0];
+		cameraTargetMatrix.m[2][1] =
+			-cameraTargetMatrix.m[2][1];
+		cameraTargetMatrix.m[2][2] =
+			-cameraTargetMatrix.m[2][2];
+
 		memcpy(
 			&player->field_89C,
 			&cameraTargetMatrix,
@@ -8833,7 +8847,7 @@ static void SpideyInstallCameraWebTargetingCompat()
 	{
 		fprintf(
 			f,
-			"camera_web_target_install installed=%d call=0x004C5B2F retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_transform scope=select_auto_aim_only fallback=retail_non_mode3\n",
+			"camera_web_target_install installed=%d call=0x004C5B2F retail_select=0x004C8410 retail_qtom=0x0047C7F0 source=active_render_camera_transform forward_axis=negative_local_z scope=select_auto_aim_only fallback=retail_non_mode3\n",
 			installed);
 		fclose(f);
 	}
