@@ -4458,6 +4458,18 @@ static void SpideyInstallHighFpsTimingCompat()
 		"CPlayer_DoPhysics",
 		0x004BFEC0,
 		0x1F0);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_AI",
+		0x004C65C0,
+		0x2E0);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_SynthesizeAnalogueInput",
+		0x004BC300,
+		0x1450);
+	SpideyLogHighFpsRetailBytes(
+		"CVenom_SynthesizeAnalogueInput_Block",
+		0x004E9B00,
+		0x19A0);
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
