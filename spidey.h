@@ -7,6 +7,7 @@
 #include "export.h"
 #include "ob.h"
 #include "manipob.h"
+#include "m3dcolij.h"
 
 EXPORT extern u8 gSpideyPsxIndex;
 
@@ -70,7 +71,8 @@ class CPlayer : public CSuper
 		i32 field_56C;
 
 		u32 field_570;
-		PADDING(8);
+		i32 field_574;
+		i32 field_578;
 
 		i8 field_57C;
 
@@ -147,32 +149,28 @@ class CPlayer : public CSuper
 		u8 field_AE5;
 		u8 field_AE6;
 
-		PADDING(0xB74-0xAE6-1);
+		PADDING(0xB08-0xAE6-1);
 
-		i32 field_B74;
+		u8 field_B08;
+		u8 field_B09;
 
-		PADDING(0xB84-0xB74-4);
+		PADDING(0xB0C-0xB09-1);
 
-		CSVector field_B84;
+		SLineInfo mLineInfo;
+		SLineInfo mLineInfo2;
 
-		PADDING(0xB8C-0xB84-sizeof(CSVector));
+		i32 field_C54;
+		i32 field_C58;
+		u8 field_C5C;
 
-		// @FIXME guess the type
-		i32* field_B8C;
+		PADDING(0xC60-0xC5C-1);
 
-		PADDING(0xC18-0xB8C-4);
+		i32 field_C60;
+		i32 field_C64;
+		u8 field_C68;
+		u8 field_C69;
 
-		i32 field_C18;
-		CVector field_C1C;
-		CSVector field_C28;
-
-		PADDING(2);
-
-
-		// @FIXME
-		i32* field_C30;
-
-		PADDING(0xC6C-0xC30-4);
+		PADDING(0xC6C-0xC69-1);
 
 		CVector field_C6C;
 		i32 field_C78;
@@ -206,12 +204,9 @@ class CPlayer : public CSuper
 		PADDING(0xDA0-0xD8C-sizeof(CSVector));
 
 		CVector field_DA0;
-
-		PADDING(0xDB8-0xDA0-sizeof(CVector));
-
+		CVector field_DAC;
 		i32 field_DB8;
-
-		PADDING(0xDC0-0xDB8-4);
+		CBody* field_DBC;
 
 		CVector field_DC0;
 
@@ -256,32 +251,49 @@ class CPlayer : public CSuper
 		PADDING((0xE48-0xE38)-0x4);
 
 		CManipOb* mHeldObject;
+		SHandle field_E4C;
+		SHandle field_E54;
+		SHandle field_E5C;
 
-		PADDING(0xE70-0xE48-4);
+		i32* field_E64;
 
+		PADDING(0xE6C-0xE64-4);
+
+		i32* field_E6C;
 		SHandle hLockTarget;
 
-		PADDING(0xE84-0xE70-sizeof(SHandle));
+		PADDING(0xE80-0xE70-sizeof(SHandle));
 
+		i32 field_E80;
 		i32 field_E84;
 		i32 field_E88;
-
 		u8 field_E8C;
+		u8 field_E8D;
 
-		PADDING(0xEA4-0xE8C-1);
+		PADDING(0xE90-0xE8D-1);
 
+		u16 field_E90;
 
+		PADDING(0xE94-0xE90-2);
+
+		CVector field_E94;
+		u16 field_EA0;
+		u16 field_EA2;
 		u8 field_EA4;
-
-		PADDING((0xEA8-0xEA4)-0x1);
-
+		u8 field_EA5;
+		i16 field_EA6;
 		u16 field_EA8;
+		u16 field_EAA;
+		CVector field_EAC;
 
-		PADDING(0xEF0 - 0xEA8 - 2);
+		PADDING(0xEF0-0xEAC-sizeof(CVector));
 
 		i32 mMaxHealth;
+		u8 field_EF4;
 
-		PADDING((0xEFC-0xEF0)-0x4);
+		PADDING(0xEF8-0xEF4-1);
+
+		i32 field_EF8;
 
 
 		EXPORT void SetCamAngleLock(u16);
@@ -349,6 +361,9 @@ class CPlayer : public CSuper
 		EXPORT void CreateCombatImpactEffect(CVector *,i32);
 		EXPORT void CreateWebDrips(bool,bool);
 		EXPORT void DoMGSShadow(void);
+		EXPORT void DoPhysics(void);
+		EXPORT void DoSwingingPhysics(void);
+		EXPORT void DoCrawlingPhysics(void);
 		EXPORT void DoShadowCheck(void);
 		EXPORT void DrawOffscreenSpideySenseIndicatorList(void);
 		EXPORT void DrawReticle(u16,u16,u32);
