@@ -8471,3 +8471,47 @@ Because the failed bootstrap already successfully refreshed the project to `7170
 Replace the old downloaded `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` with the corrected version from commit `c81b2073...` and run it again.
 
 No source/gameplay code changed as part of this launcher repair.
+
+
+## Fast incremental matching-build relink fix (2026-10-03)
+
+User reran the corrected fast launcher successfully through update/elevation/toolchain setup on revision:
+
+- `b8cc4d5f79c4e2c03a4db2179859b03242d31491`
+
+Observed behavior:
+
+- fast mode correctly selected an incremental matching build;
+- `nmake` recompiled `main.cpp`;
+- the VC6-generated NMAKE project returned success without regenerating `Release\spider.dll`;
+- the existing freshness guard caught this and aborted before installation:
+  - stale DLL timestamp: `2026-10-04T01:30:09.4315047Z`
+  - build start: `2026-10-04T02:01:29.7768220Z`
+- Renderer11 and Input11 both rebuilt successfully during that run and their input preflight passed.
+
+This is a safe failure: no stale proxy was installed or launched.
+
+### Cause / compatibility behavior
+
+The preserved Visual Studio 6 / NMAKE dependency graph can rebuild an object on the first incremental invocation without relinking the parent DLL target in that same pass. The generated `spider.mak` does declare `Release\spider.dll` as dependent on `LINK32_OBJS`, including `Release\main.obj`, but this runtime result proves one NMAKE invocation is not sufficient for our touched-source fast path.
+
+### Fix
+
+Commits:
+
+- `0a976aceb29068e2414c9aa60a52d8d60720fe76` — **fix: relink proxy after incremental object rebuild**
+- `1ede4e7c43fa51d243f06acfddfcab8c6e738ffc` — **fix: preserve same-revision fast reuse**
+
+Fast matching-build behavior is now:
+
+1. run the normal incremental NMAKE pass;
+2. if the DLL is still older than the build start, run a second cheap NMAKE pass;
+3. the second pass sees the freshly rebuilt object(s) and should relink `spider.dll`;
+4. if the DLL is somehow still stale, automatically fall back to one forced-clean matching build;
+5. if the dev revision did not change and reuse is explicitly allowed, skip this relink/fallback logic so a true no-change run stays fast.
+
+The existing final freshness check remains in place, so stale DLLs still cannot be installed.
+
+### Next user action
+
+Run the same corrected `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` again. It will update from `b8cc4d5...` to the relink-fixed `dev` revision. Since Renderer11/Input11 were successfully rebuilt during the failed run and their sources did not change, the next fast run should reuse those bridge artifacts.
