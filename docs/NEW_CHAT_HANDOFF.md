@@ -1,3 +1,27 @@
+# LIVE CONTINUATION — LAST UPLOADED RUNTIME WAS OLD ef78 BUILD (2026-10-04)
+
+The user's latest reported runtime problems (pause crash, inconsistent web targeting especially after enemy aggro, blob shadows still camera-relative) came from `spidey-decomp(20261004-071556).log`, whose session revision is:
+
+`ef78ea5ff959f4518a96567aed340bd935c251e5`
+
+That run predates the current fixes:
+- `5e3dd2e...` web forward-axis correction;
+- `a24b4d2...` QuadBit camera-anchor correction;
+- `dd35f97...` dynamic pause expanding-box rebuild.
+
+The log does not contain `quadbit_camera_anchor` or `pause_menu_box_refresh`, and it ends with `[SESSION] exit_code=0`; therefore it is not a valid runtime test of current `dev` and does not itself capture the reported crash.
+
+Current action:
+1. user must run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` once to install current dev;
+2. only then use `PLAY_CURRENT_BUILD.bat` for repeated tests without downloading/rebuilding;
+3. verify the session header is current and startup contains the new web/shadow markers;
+4. retest pause, aggro/non-aggro web targeting, and blob shadows;
+5. if pause still crashes, collect the new consolidated log plus any crash log.
+
+Do not rewrite current fixes based on the stale ef78 runtime.
+
+---
+
 # LIVE CONTINUATION — WEB AIM + BLOB SHADOW + DYNAMIC PAUSE BOX READY FOR RUNTIME TEST (2026-10-04)
 
 This is the current live frontier. It supersedes older test instructions below.
