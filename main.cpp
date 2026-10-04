@@ -1190,6 +1190,10 @@ static const int kSpideyUiScaleMaxPercent = 200;
 static const int kSpideyUiScaleStepPercent = 5;
 static const int kSpideyDefaultGameplayUiScalePercent = 125;
 static const int kSpideyDefaultMenuTextScalePercent = 100;
+static const int kSpideyCameraSensitivityMinPercent = 25;
+static const int kSpideyCameraSensitivityMaxPercent = 200;
+static const int kSpideyCameraSensitivityStepPercent = 5;
+static const int kSpideyDefaultCameraSensitivityPercent = 100;
 
 static int gSpideyGameplayUiScalePercent =
 	kSpideyDefaultGameplayUiScalePercent;
@@ -1199,6 +1203,10 @@ static int gSpideyMenuTextScalePercent =
 	kSpideyDefaultMenuTextScalePercent;
 static int gSpideyPendingMenuTextScalePercent =
 	kSpideyDefaultMenuTextScalePercent;
+static int gSpideyCameraSensitivityPercent =
+	kSpideyDefaultCameraSensitivityPercent;
+static int gSpideyPendingCameraSensitivityPercent =
+	kSpideyDefaultCameraSensitivityPercent;
 
 static char gSpideyGameplayUiScaleMenuLabel[64] =
 	"Gameplay UI Scale: 125%";
@@ -1212,6 +1220,8 @@ static char gSpideyPauseGameplayUiScaleMenuLabel[64] =
 	"UI Scale: 125%";
 static char gSpideyPauseMenuTextScaleMenuLabel[64] =
 	"Text Scale: 100%";
+static char gSpideyPauseCameraSensitivityMenuLabel[64] =
+	"Camera Sensitivity: 100%";
 static char gSpideyPauseApplyUiScaleLabel[] =
 	"Apply Settings";
 static char gSpideyPauseBackLabel[] =
@@ -1330,6 +1340,25 @@ static int SpideyClampUiScalePercent(
 }
 
 // @Ok
+static int SpideyClampCameraSensitivityPercent(
+		int percent)
+{
+	if (percent <
+		kSpideyCameraSensitivityMinPercent)
+	{
+		return kSpideyCameraSensitivityMinPercent;
+	}
+
+	if (percent >
+		kSpideyCameraSensitivityMaxPercent)
+	{
+		return kSpideyCameraSensitivityMaxPercent;
+	}
+
+	return percent;
+}
+
+// @Ok
 static int SpideyUiScalePercentToSliderValue(
 		int percent)
 {
@@ -1381,6 +1410,9 @@ static void SpideyUpdateUiScaleMenuLabels()
 	gSpideyPendingMenuTextScalePercent =
 		SpideyClampUiScalePercent(
 			gSpideyPendingMenuTextScalePercent);
+	gSpideyPendingCameraSensitivityPercent =
+		SpideyClampCameraSensitivityPercent(
+			gSpideyPendingCameraSensitivityPercent);
 
 	sprintf(
 		gSpideyGameplayUiScaleMenuLabel,
@@ -1399,6 +1431,11 @@ static void SpideyUpdateUiScaleMenuLabels()
 		gSpideyPauseMenuTextScaleMenuLabel,
 		"Text Scale",
 		gSpideyPendingMenuTextScalePercent);
+
+	sprintf(
+		gSpideyPauseCameraSensitivityMenuLabel,
+		"Camera Sensitivity: %d%%",
+		gSpideyPendingCameraSensitivityPercent);
 }
 
 static void SpideyUpdateDisplayModeMenuLabel()
