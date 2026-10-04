@@ -12579,10 +12579,21 @@ static int SpideyPatchMainImport(
 				continue;
 			}
 
+			// VC6's Platform SDK declares AddressOfData as a pointer-typed
+			// union member, whereas newer headers commonly expose an integer RVA.
+			// Copy the raw 32-bit thunk value so this source compiles correctly
+			// against both header generations.
+			DWORD importNameRva =
+				0;
+			memcpy(
+				&importNameRva,
+				&nameThunk->u1.AddressOfData,
+				sizeof(importNameRva));
+
 			IMAGE_IMPORT_BY_NAME* importName =
 				(IMAGE_IMPORT_BY_NAME*)(
 					base +
-					nameThunk->u1.AddressOfData);
+					importNameRva);
 			if (strcmp(
 					(const char*)importName->Name,
 					functionName) != 0)
@@ -12601,10 +12612,17 @@ static int SpideyPatchMainImport(
 				return 0;
 			}
 
-			*original =
-				(void*)addressThunk->u1.Function;
-			addressThunk->u1.Function =
-				(DWORD)replacement;
+			// Likewise, VC6 types Function as a pointer member. Avoid a
+			// header-version-dependent assignment by copying the raw Win32
+			// pointer bits in and out of the thunk slot.
+			memcpy(
+				original,
+				&addressThunk->u1.Function,
+				sizeof(void*));
+			memcpy(
+				&addressThunk->u1.Function,
+				&replacement,
+				sizeof(replacement));
 
 			DWORD ignoredProtect =
 				0;
@@ -12853,7 +12871,7 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	}
 
 	InterlockedExchange(
-		&gSpideyPacingTimerActive,
+		(LONG*)&gSpideyPacingTimerActive,
 		1);
 
 	unsigned long targetTotalMs =
