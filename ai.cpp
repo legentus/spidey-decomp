@@ -3,6 +3,7 @@
 #include <cmath>
 #include "ps2funcs.h"
 #include "message.h"
+#include "my_patch.h"
 
 // @Ok
 CAIProc_LookAt::~CAIProc_LookAt(void)
@@ -168,6 +169,61 @@ CAIProc_RotY::CAIProc_RotY(CBaddy* pBaddy, int a3, int numFrames, int a5)
 	print_if_false(numFrames > 0, "numFrames <= 0 illegal. you're under arrest dipshit.");
 	this->field_20 = numFrames;
 	this->field_24 = a3 / numFrames;
+}
+
+// Retail 0x00401110 applies field_24 once and decrements field_20 once per
+// Execute call. Ob_AI now reaches this method on every canonical 60-Hz Logic
+// tick, so preserve each retail frame as two half-ticks instead of letting the
+// turn run twice as fast.
+//
+// Keep the constructor's integer division untouched. field_C is unused by
+// retail RotY and starts zero because CClass::operator new clears allocations;
+// use bit 0 as the half-step phase. Two 1/60 steps sum exactly to field_24,
+// including odd/negative integer steps.
+void CAIProc_RotY::Execute(void)
+{
+	i32 elapsedTicks = this->pBaddy->field_80;
+	if (elapsedTicks < 0)
+		elapsedTicks = 0;
+
+	while (elapsedTicks > 0 && this->field_20 > 0)
+	{
+		const i32 fullStep = this->field_24;
+		const i32 halfStep = fullStep / 2;
+		i32 step;
+
+		if ((this->field_C & 1) == 0)
+		{
+			step = halfStep;
+			this->field_C = 1;
+		}
+		else
+		{
+			step = fullStep - halfStep;
+			this->field_C = 0;
+			this->field_20--;
+		}
+
+		this->pBaddy->mAngles.vy += (i16)step;
+
+		if (fullStep < 0)
+			this->pBaddy->field_2AC |= 0x10000;
+		else
+			this->pBaddy->field_2AC |= 0x20000;
+
+		elapsedTicks--;
+	}
+
+	if (this->field_20 <= 0)
+	{
+		if (this->field_14)
+		{
+			this->pBaddy->field_288 |= this->field_14;
+			this->field_14 &= 0xF0F0;
+		}
+
+		this->field_10 |= 1;
+	}
 }
 
 // @Ok
@@ -572,4 +628,9 @@ void validate_CAIProc_MoveTo(void)
 	VALIDATE(CAIProc_MoveTo, field_2C, 0x2C);
 	VALIDATE(CAIProc_MoveTo, field_30, 0x30);
 	VALIDATE(CAIProc_MoveTo, field_3C, 0x3C);
+}
+
+void patch_ai(void)
+{
+	PATCH_PUSH_RET(0x00401110, CAIProc_RotY::Execute);
 }
