@@ -1,5 +1,94 @@
 # CURRENT STATUS
 
+## CHECKPOINT — MANUAL AIM THIRD-PASS FRONTIER (2026-10-04)
+
+Latest tested runtime revision:
+- `7a6af671ec671d7f61a1003b296f59d655b39dcd`
+- user log: `spidey-decomp(20261004-093356).log`
+
+Relevant source already present in that runtime:
+- `aabf69a90786b639c4e32e1d74e64cae88e3430e` — manual-aim movement/reticle wrappers;
+- `b44b3bdca3337c0cfe4a57dc8a042feaa0a946ea` — direct camera-ray hip-fire scan.
+
+### Latest user-observed behavior
+
+Manual aim is still not correct, but the new test narrows the failure substantially:
+
+1. **Spider-Man now tries to move while manual aim is held.**
+   - His body visibly twists/leans as though locomotion is being requested.
+   - Actual translation remains blocked, so there is still a later movement/state constraint after the CheckForwards path we already opened.
+
+2. **WASD still moves the legacy aim cursor/reticle.**
+   - Therefore retail `SetupLookaroundCamera` continues consuming the E2D/E2E movement axes and mutating lookaround state even though we overwrite `field_DC0` afterward.
+   - The next pass must stop legacy WASD-to-reticle consumption rather than only overwriting the final point.
+
+3. **Mouse-controlled reticle direction is inverted on BOTH axes.**
+   - Horizontal: moving camera left/right produces the opposite reticle direction.
+   - Vertical: moving camera up/down produces the opposite reticle direction.
+   - The mode-3 ray used by `SpideyModernAimApplyCameraPoint` therefore has the wrong sign/convention for the reticle projection path.
+   - Both X and Y need to be inverted back so left=left, right=right, up=up, down=down.
+
+4. **Hip-fire targeting is still not considered solved.**
+   - Continue evaluating the new direct camera-ray scan independently of manual aim.
+   - Do not conflate manual-reticle behavior with hip-fire acquisition.
+
+### What this means technically
+
+The first two manual-aim patches are proven to execute, but the remaining blockers are now lower-level:
+
+- `CheckForwards` receives movement intent, because Spider-Man visibly enters a movement/twist response.
+- Something later in locomotion/state resolution prevents position translation while `field_8EA`/manual-aim state is active.
+- Retail `SetupLookaroundCamera @ 0x004C38A0` still reads the same E2D/E2E axes that should belong to movement, so WASD continues steering its internal lookaround accumulators.
+- Simply forcing `field_DC0` after the retail call is not enough; the legacy axis consumption must be bypassed or replaced while keeping trigger/web/reticle state that retail still owns.
+
+### Exact RE/implementation resume point
+
+When the user says **"continue"**, resume here:
+
+1. Parse `spidey-decomp(20261004-093356).log` for the new:
+   - `modern_manual_aim event=movement`
+   - `modern_manual_aim event=reticle`
+   - `camera_web_target ... source=modern_camera_scan`
+   markers if available.
+
+2. **Movement freeze**
+   - Trace the post-`CheckForwards` path after the function returns true / movement intent is present.
+   - Find the next `field_8EA`, lookaround-state, animation-state, velocity, or translation gate that prevents locomotion from committing.
+   - Prefer a narrow wrapper/temporary-state mask around normal locomotion over globally clearing `field_8EA`, because manual aim/reticle/web state still needs that flag.
+
+3. **WASD still steering reticle**
+   - RE the exact E2D/E2E reads inside `SetupLookaroundCamera @ 0x004C38A0`.
+   - Best likely solution: while modern manual aim is active, call the retail routine with temporary zero lookaround axes (or patch only the legacy axis reads), then immediately restore E2D/E2E so normal locomotion keeps the original input.
+   - Preserve any non-axis trigger/web state retail SetupLookaroundCamera manages.
+
+4. **Reticle inversion**
+   - Fix the sign convention in `SpideyModernAimApplyCameraPoint`.
+   - The current `camera.field_144 - camera.mPos` direction is opposite to what the reticle projection path expects on both horizontal and vertical axes.
+   - Verify whether the correct basis is `camera.mPos - camera.field_144`, or an equivalent camera-basis vector with X/Y sign correction, before committing.
+   - Desired behavior: mouse/right-stick left -> reticle left, right -> right, up -> up, down -> down.
+
+5. **Hip fire**
+   - Continue testing/adjusting `SpideyCameraSelectModernTarget` separately.
+   - If target flicker remains, inspect scan telemetry and consider short target hysteresis / sticky retention only after confirming the raw camera-ray score is correct.
+
+6. **Shadows**
+   - World-space caster probe remains PASSED.
+   - Do not redo shadow probing.
+   - Resume real Renderer11 shadow work only after manual aim/hip-fire are stable enough to stop contaminating gameplay tests.
+
+### Important recovery instruction
+
+Do NOT restart from the older first-pass manual aim model. The current live source already contains:
+- mode 7 -> mode 3 manual-aim camera patch;
+- CheckForwards field_8EA gate removal;
+- scoped movement-control wrapper;
+- SetupLookaroundCamera wrapper;
+- camera-ray field_DC0 override;
+- direct modern camera-ray hip-fire scan with retail fallback.
+
+The next work is to fix the three remaining behaviors above, not to rebuild those pieces.
+
+
 ## LIVE FRONTIER — MANUAL AIM INPUT DECOUPLING + DIRECT CAMERA-RAY HIP FIRE (2026-10-04)
 
 Latest user runtime: `bf1fb237dda30e51d2525ce9479e8c82843c0db9`, log `spidey-decomp(20261004-085912).log`.
