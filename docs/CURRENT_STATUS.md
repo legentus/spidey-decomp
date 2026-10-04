@@ -46,6 +46,137 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## IMPLEMENTATION CHECKPOINT — FREE MANUAL-AIM VIEW + LOCOMOTION MASK + 60 HZ TIMER PHASE FIX READY (2026-10-04)
+
+**Status: implemented and committed, NOT runtime-tested yet.**
+
+Source commit chain after the tested `8958de0676dda897b5c8dc346493276d4c5ffffd` runtime:
+- `edf6dcc169efce90f9655f8038eeda9337278902` — `timing: replace 16ms beat with phased 60hz timer`
+- `af820d29ebf2344bf087860a4287df0c6307c85d` — `gameplay: decouple manual aim view and locomotion state`
+- `a50f64b3afb22b55c30d508619e2d09691542f38` — `timing: harden phased timer install fail-closed`
+- `c7c20392e10c354c4b292810af4feb8dd229e54a` — `gameplay: harden manual aim ownership transitions`
+
+### Recovery note
+
+A stream interruption occurred immediately after the first aim implementation was written. Recovery from live GitHub proved the source commit had already survived:
+- `af820d29...` was one commit ahead of the known timer checkpoint;
+- no aim implementation had to be reconstructed from chat memory;
+- subsequent hardening was applied on top of that exact committed source.
+
+### Timer pacing implementation
+
+The residual ~0.4 s micro-hitch matched the retail 16 ms / 60 Hz beat exactly in the prior runtime.
+
+The new timer path:
+- leaves retail `TimerCallback`, `gTimerVblankRelated`, pause state, and `MyVSync` intact;
+- intercepts only the main EXE's retail 16 ms periodic WinMM timer request;
+- replaces the fixed 16 ms (62.5 Hz) source with chained one-shot 16/17 ms deadlines aligned to 60 Hz;
+- updates retail `STimerInfo.field_4` with the actual scheduled interval before invoking the untouched callback;
+- records callback/vblank behavior in the existing once-per-second timing telemetry;
+- falls back to untouched retail timing if the hook cannot be installed safely.
+
+Safety hardening:
+- `timeKillEvent` is hooked **before** `timeSetEvent`;
+- `timeSetEvent` is not intercepted at all unless cleanup interception already succeeded;
+- bound imports without an `OriginalFirstThunk` fail closed instead of interpreting resolved function pointers as import-name RVAs;
+- the timer can never deliberately return its synthetic timer ID without owning the matching cleanup path.
+
+Expected markers:
+- `timer_pacing_install ... install_order=kill_then_set atomic_cleanup=1 ...`
+- `timer_pacing event=intercept ... policy=chained_oneshot_60hz_deadline_plus_1ms ...`
+- `timing_present ... timer_active=1 timer_callbacks=... timer_virtual_ticks=... timer_unexpected_delta=... timer_last_interval_ms=...`
+
+Success criteria:
+- the previous stable ~24-frame / ~0.4 s sequence of 31–33 ms presents disappears or is materially reduced;
+- `timer_unexpected_delta=0`;
+- gameplay Logic remains approximately 60 Hz and game speed remains correct.
+
+### Manual aim free-view implementation
+
+The previous runtime proved the camera ray/web direction itself was correct but `camera.field_144` remained Spider-Man's body position.
+
+New behavior:
+- ordinary mode-3 retail camera still generates the camera position and collision response;
+- on entering manual aim, a separate view yaw/pitch is seeded from the exact current `camera.field_144 - camera.mPos` direction;
+- mouse/right-stick intent changes the **manual view direction** instead of continuing to force the final focus back onto Spider-Man;
+- after retail mode-3 position generation, `camera.field_144` is republished as a forward world-space focus point from that independent view yaw/pitch;
+- the already-validated `field_DC0` path then follows that new camera ray automatically, so web direction and reticle aim share one source.
+
+Current bounded free-look offsets:
+- yaw: ±768 engine angle units from entry direction;
+- pitch: ±512 engine angle units from entry direction;
+- final pitch additionally clamps to a safe ±900 engine units.
+
+Expected markers:
+- `modern_manual_camera event=acquire ... base_yaw=... base_pitch=...`
+- `modern_manual_camera event=update ... view_yaw=... view_pitch=... offset=... focus=...`
+- camera install line includes `manual_aim_free_view=1`.
+
+The runtime log from the prior test also confirms `G_MECHLIST @ 0x006A9038` head is the live Spider-Man actor (`region name=spidey` and body position matches the camera focus), so using that head to identify the current player in the camera wrapper is grounded by runtime evidence.
+
+### Manual-aim locomotion implementation
+
+Prior runtime:
+- CheckForwards received movement;
+- run state `0x10` / run animation could begin;
+- the following frame was forced back to stand;
+- position/velocity never committed;
+- no wall/ceiling/input/collision blocker was present.
+
+New behavior:
+- while **manual aim + movement** are both held, retail `field_8EA` is masked to 0 across the ordinary locomotion state machine;
+- the saved real aim state is retained in an out-of-band effective-aim sidecar;
+- the modern camera/reticle wrappers use effective aim, so they remain logically in manual aim while locomotion sees a normal movable player;
+- the held aim-control byte is still hidden only around retail CheckForwards, preserving the already-proven earlier gate fix;
+- when aim or movement is released, the real `field_8EA` value is restored;
+- present-time validation is the fail-safe;
+- player ownership or camera-mode changes now force immediate restoration and release the manual free-view sidecar.
+
+Expected movement markers now include:
+- `aim_state=<effective>`
+- `actual_aim_state=<retail field_8EA>`
+- `locomotion_mask=1`
+- `mask_count=...`
+- `restore_count=...`
+
+### Exact combined runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` and confirm the loaded revision is **`c7c20392...` or newer**.
+
+In one gameplay session:
+
+1. **Manual aim camera**
+   - enter manual aim;
+   - sweep mouse left/right/up/down through a useful range;
+   - verify the view can now aim away from Spider-Man instead of remaining locked onto his body;
+   - verify the reticle/web direction stays aligned with where the camera looks;
+   - note whether the current yaw/pitch limits feel too restrictive.
+
+2. **Manual aim + locomotion**
+   - while still aiming, hold W/A/S/D individually and diagonals;
+   - verify Spider-Man actually translates rather than only entering a run pose;
+   - rotate the aim camera while moving;
+   - fire webs while moving and confirm manual aim remains active.
+
+3. **Aim exit / camera ownership regression**
+   - release manual aim while moving;
+   - verify the camera/reticle exits cleanly and movement continues normally;
+   - quick pause/unpause;
+   - if convenient, trigger any ordinary camera-mode transition and verify no stuck aim state.
+
+4. **Hitch / timer**
+   - play long enough to cover many old 0.4 s hitch intervals;
+   - report whether the tiny regular frametime blip is gone, reduced, unchanged, or worse;
+   - no need to fire webs as hitch timestamps this time because the cadence source is now directly instrumented.
+
+5. **Hip-fire sanity**
+   - only a quick regression check; do not spend time re-testing the already validated selector.
+
+Return the single consolidated `spidey-decomp.log`.
+
+Do not resume shadow-map implementation until this combined test is evaluated.
+
+
 ## RUNTIME CHECKPOINT — CAMERA RAY VALIDATED; AIM PIVOT + LOCOMOTION RESET + 24-FRAME HITCH IDENTIFIED (2026-10-04)
 
 User runtime:
