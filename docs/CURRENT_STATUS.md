@@ -1,5 +1,106 @@
 # CURRENT STATUS
 
+## NATIVE 60-HZ RE FRONTIER — PLAYER STATE MACHINE CLEARED; TWO TIMING SEAMS REMAIN (2026-10-04)
+
+Authoritative `dev` source before this documentation checkpoint:
+- `026322a195ecb16ef41d3803ff477356504e8713` — `timing: prune resolved startup timing probes`.
+
+Latest tested runtime remains:
+- `a4e1105d1f9568a24ca8817847573392a7f8324a`;
+- log `spidey-decomp(20261004-213030).log`;
+- user confirms the diagnostic/logging cleanup eliminated the recurring hitching;
+- user-visible remaining timing defect: gameplay still feels slightly sped up at 60 FPS.
+
+### Locked requirement
+
+The target is **native, semantically correct 60-Hz gameplay simulation**:
+- 60 Hz is the minimum gameplay simulation rate;
+- game speed, AI, physics, cutscenes and boss fights must match intended real-time behavior at 60;
+- do not hide legacy timing assumptions by running gameplay at 20/30 Hz under a 60-Hz renderer;
+- after 60-Hz simulation is correct, 120/144/165/240+ presentation will be implemented by render/presentation decoupling and interpolation while gameplay remains capped to canonical 60-Hz advancement.
+
+### Recovered source work after the tested runtime
+
+The repo advanced safely through:
+- `6cf830b974316134a8a7813ac1eda42279eacd60` — correct Mysterio laser vtable guard to runtime-proven deleting destructor `0x0045B540`;
+- `62f9500c4085a0841f5afbe9f85ee7d68b021e1f` — temporary central AI/player-physics startup capture;
+- `54a6812e8fa3c4a793275f65d921de7e6a1f660b` — temporary full player/synthesized-input timing capture;
+- `026322a195ecb16ef41d3803ff477356504e8713` — prune already-resolved captures and retain only unresolved timing seams.
+
+Current startup-only capture now contains exactly:
+- `CAIProc_RotY_Block @ 0x00401060`, size `0x120`;
+- `CVenom_SynthesizeAnalogueInput_Block @ 0x004E9B00`, size `0x19A0`.
+
+No capture runs in a gameplay/render hot path.
+
+### Static conclusions from the completed SpideyAI0 capture
+
+The full `SpideyAI0 @ 0x004B13F0` capture was inspected beyond the initial dispatch mapping.
+
+Important negative result:
+- the small number of direct `++` operations found inside the giant player state machine are event/state counters, not continuously advancing gameplay timers;
+- examples occur only on camera/state setup, input transitions, switches, or state changes;
+- therefore **do not halve, skip, or delta-scale those counters**.
+
+Important positive result:
+- player AI already consults `field_80`, `gTimerRelated`, animation state and other elapsed-time-aware state in many branches;
+- the missing `CPlayer::AI`, `CPlayer::DoPhysics`, and synthesized-input functions are more valuable timing seams than globally modifying `SpideyAI0`.
+
+This further narrows native-60 work toward shared timing primitives rather than giant state-machine surgery.
+
+### Ob_AI result remains decisive
+
+Recovered `Ob_AI @ 0x00460FC0` proves:
+- each active body receives `EveryFrame()`;
+- supers receive `UpdateFrame()`;
+- virtual `AI()` runs every object dispatch;
+- there is no hidden 30-Hz object-AI interleave.
+
+Therefore a raw per-AI-call countdown really does expire faster when Logic frequency increases, whereas code using `field_80` preserves real time.
+
+### Current unresolved reusable AI seam
+
+`CAIProc::Wait` in reconstructed source performs a raw one-per-Execute decrement:
+- `field_C = field_C - 1`.
+
+However, do not patch it from the reconstructed source alone yet:
+- constructor and rotation semantics around `CAIProc_RotY` must be proven from the exact retail bytes;
+- `CAIProc_RotY` currently has incomplete/decompiler-placeholder behavior in the source tree;
+- the retained `0x00401060..0x00401180` startup capture exists specifically to settle this before implementing the first shared native-60 AI conversion.
+
+### Current unresolved Venom/cutscene seam
+
+Recovered `CVenom_FollowDirections @ 0x004EB530` is a compact scripted direction/state dispatcher, not a generic physics loop.
+
+It calls into:
+- `CVenom_SynthesizeAnalogueInput @ 0x004E9B00`;
+- player focus-lock/state helpers;
+- trigger/switch helpers;
+- level/script state checks.
+
+Because the known Venom chase failure is an automated movement/cutscene problem, the remaining `CVenom_SynthesizeAnalogueInput_Block` capture is the highest-value exact target for identifying the 20/30-Hz-authored path without slowing the whole game.
+
+### Next runtime — capture only, no hitch testing
+
+Run the latest `dev` with `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `026322a195ecb16ef41d3803ff477356504e8713` or newer documentation-only descendant.
+
+Expected startup lines:
+- `high_fps_compat mysterio_laser=1 ... destructor_found=0x0045B540 ... move_found=0x0045BAC0 ...`;
+- `high_fps_re_bytes_done label=CAIProc_RotY_Block ... valid=1`;
+- `high_fps_re_bytes_done label=CVenom_SynthesizeAnalogueInput_Block ... valid=1`.
+
+Normal gameplay is sufficient. No hitch reproduction is needed.
+
+After that log:
+1. reconstruct/disassemble the two remaining exact retail blocks;
+2. implement the first shared native-60 AI timing repair only where semantics are proven;
+3. repair the Venom automated-input timing path;
+4. continue classifying raw boss/cutscene timers;
+5. validate native 60 before beginning >60 render interpolation.
+
 ## RUNTIME RESULT — HITCH CLEANUP VALIDATED; 60-HZ TIMING NOW SOLE FRONTIER (2026-10-04)
 
 Tested runtime:
