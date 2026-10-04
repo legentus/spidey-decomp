@@ -15332,6 +15332,22 @@ BOOL WINAPI DllMain(
 
 			puts("spidey-decomp starting " RUNTIME_VERSION);
 
+			// Stamp the actually loaded proxy revision into the consolidated
+			// runtime log as well as the console title. This makes direct
+			// RUN_GAME / Play Current Build sessions self-identifying even
+			// when they are launched without the update/test PowerShell wrapper.
+			FILE* runtimeVersionLog =
+				SpideyOpenConsolidatedLog(
+					"RUNTIME");
+			if (runtimeVersionLog)
+			{
+				fprintf(
+					runtimeVersionLog,
+					"runtime_revision=%s\n",
+					RUNTIME_VERSION);
+				fclose(runtimeVersionLog);
+			}
+
 			runtime_assertions();
 			runtime_patches();
 
