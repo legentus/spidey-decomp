@@ -4251,10 +4251,20 @@ static void SpideyModernAimValidateLocomotionMaskAtFrameEnd()
 		const int movementHeld =
 			player->field_E2D != 0 ||
 			player->field_E2E != 0;
+		CPlayer* currentPlayer =
+			*(CPlayer**)0x006A9038;
+		CCamera* camera =
+			*(CCamera**)0x0056F3B8;
+		const int ordinaryGameplayCamera =
+			camera &&
+			camera->mCameraMode ==
+				CAMERAMODE_DEMO;
 
 		keepMasked =
 			aimHeld &&
-			movementHeld;
+			movementHeld &&
+			currentPlayer == player &&
+			ordinaryGameplayCamera;
 	}
 	__except(EXCEPTION_EXECUTE_HANDLER)
 	{
@@ -4722,7 +4732,7 @@ static void SpideyInstallModernManualAimCompat()
 	{
 		fprintf(
 			f,
-				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=mode3_camera_center_ray\n",
+				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B retail_mode=7 modern_mode=3 movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 aim_control=input_plus_0x40 movement_axes=E2D_E2E reticle_source=mode3_camera_center_ray locomotion_mask=field_8EA_while_aim_plus_move effective_aim_sidecar=1 frame_end_release_guard=1\n",
 				cameraInstalled,
 				movementAimGateInstalled,
 				movementControlInstalled,
@@ -9448,6 +9458,16 @@ static void SpideyModernCameraRelease(
 		0xFFFFFFFFUL;
 	gSpideyModernCameraLastLogSequence =
 		0;
+
+	// A scripted/cinematic camera takeover must not carry a stale manual-aim
+	// free-view basis or a masked retail aim flag back into ordinary gameplay.
+	if (gSpideyManualAimViewActive)
+	{
+		SpideyManualAimReleaseView(
+			reason ? reason : "camera_release");
+	}
+
+	SpideyModernAimRestoreLocomotionState();
 }
 
 typedef void (__fastcall *SpideyRetailMode3CameraFn)(
@@ -9472,6 +9492,13 @@ static void __fastcall SpideyModernMode3Camera(
 	if (camera->mCameraMode !=
 		CAMERAMODE_DEMO)
 	{
+		if (gSpideyManualAimViewActive)
+		{
+			SpideyManualAimReleaseView(
+				"mode3_wrapper_inactive");
+		}
+		SpideyModernAimRestoreLocomotionState();
+
 		retail(
 			camera,
 			0);
@@ -9881,13 +9908,15 @@ static void SpideyInstallModernCameraCompat()
 	{
 		fprintf(
 			f,
-			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3\n",
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=post_retail_forward\n",
 			installed,
 			gSpideyCameraSensitivityPercent,
 			kSpideyCameraSensitivityMinPercent,
 			kSpideyCameraSensitivityMaxPercent,
 			kSpideyModernCameraMinYDistance,
-			kSpideyModernCameraMaxYDistance);
+			kSpideyModernCameraMaxYDistance,
+			kSpideyManualAimMaxYawOffset,
+			kSpideyManualAimMaxPitchOffset);
 		fclose(f);
 	}
 }
