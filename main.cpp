@@ -10391,6 +10391,25 @@ static unsigned long gSpideyTimingLogicTicks = 0;
 static unsigned long gSpideyTimingPresentWindowStart = 0;
 static unsigned long gSpideyTimingPresentFrames = 0;
 
+// Keep frame-pacing diagnostics entirely in memory on the hot path. The
+// existing once-per-second timing line publishes the aggregate, so this adds
+// no extra per-frame file I/O while letting one runtime distinguish renderer
+// stalls from the retail multimedia-timer/vblank cadence.
+static LARGE_INTEGER gSpideyTimingPerfFrequency;
+static LARGE_INTEGER gSpideyTimingLastPresentCounter;
+static unsigned long gSpideyTimingPresentIntervals = 0;
+static unsigned long gSpideyTimingPresentOver20Ms = 0;
+static unsigned long gSpideyTimingPresentOver25Ms = 0;
+static unsigned long gSpideyTimingPresentOver30Ms = 0;
+static unsigned long gSpideyTimingPresentOver50Ms = 0;
+static unsigned long gSpideyTimingPresentMaxIntervalUs = 0;
+static int gSpideyTimingPresentVblankValid = 0;
+static long gSpideyTimingLastPresentVblank = 0;
+static unsigned long gSpideyTimingPresentVblankSame = 0;
+static unsigned long gSpideyTimingPresentVblankOne = 0;
+static unsigned long gSpideyTimingPresentVblankMulti = 0;
+static unsigned long gSpideyTimingPresentVblankMaxDelta = 0;
+
 static void SpideyLogTimingWindow(
 		const char* kind,
 		unsigned long elapsed,
@@ -10411,20 +10430,50 @@ static void SpideyLogTimingWindow(
 		((double)count * 1000.0) /
 		(double)elapsed;
 
-	fprintf(
-		f,
-		"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu\n",
-		kind,
-		elapsed,
-		count,
-		hz,
-		gSpideyFrontendLegacyMode,
-		(long)*(volatile long*)0x006B4CA0,
-		gSpideyPresentFrame,
-		gSpideyModernLogicalWidth,
-		gSpideyModernLogicalHeight,
-		gSpideyLegacyPhysicalWidth,
-		gSpideyLegacyPhysicalHeight);
+	if (kind[0] == 'p')
+	{
+		fprintf(
+			f,
+			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu cadence_intervals=%lu over20ms=%lu over25ms=%lu over30ms=%lu over50ms=%lu max_interval_us=%lu vblank_same=%lu vblank_one=%lu vblank_multi=%lu vblank_max_delta=%lu\n",
+			kind,
+			elapsed,
+			count,
+			hz,
+			gSpideyFrontendLegacyMode,
+			(long)*(volatile long*)0x006B4CA0,
+			gSpideyPresentFrame,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight,
+			gSpideyLegacyPhysicalWidth,
+			gSpideyLegacyPhysicalHeight,
+			gSpideyTimingPresentIntervals,
+			gSpideyTimingPresentOver20Ms,
+			gSpideyTimingPresentOver25Ms,
+			gSpideyTimingPresentOver30Ms,
+			gSpideyTimingPresentOver50Ms,
+			gSpideyTimingPresentMaxIntervalUs,
+			gSpideyTimingPresentVblankSame,
+			gSpideyTimingPresentVblankOne,
+			gSpideyTimingPresentVblankMulti,
+			gSpideyTimingPresentVblankMaxDelta);
+	}
+	else
+	{
+		fprintf(
+			f,
+			"timing_%s elapsed_ms=%lu count=%lu hz=%.3f frontend=%d vblanks=%ld present_frame=%lu logical=%lux%lu physical=%lux%lu\n",
+			kind,
+			elapsed,
+			count,
+			hz,
+			gSpideyFrontendLegacyMode,
+			(long)*(volatile long*)0x006B4CA0,
+			gSpideyPresentFrame,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight,
+			gSpideyLegacyPhysicalWidth,
+			gSpideyLegacyPhysicalHeight);
+	}
 	fclose(f);
 }
 
@@ -10470,6 +10519,85 @@ static void SpideyRecordPresentTiming()
 	SpideyTryRebindBinkAudio(
 		"frame_safe_point");
 
+	if (!gSpideyTimingPerfFrequency.QuadPart)
+	{
+		QueryPerformanceFrequency(
+			&gSpideyTimingPerfFrequency);
+	}
+
+	if (gSpideyTimingPerfFrequency.QuadPart)
+	{
+		LARGE_INTEGER presentCounter;
+		if (QueryPerformanceCounter(
+				&presentCounter))
+		{
+			if (gSpideyTimingLastPresentCounter.QuadPart)
+			{
+				const LONGLONG deltaTicks =
+					presentCounter.QuadPart -
+					gSpideyTimingLastPresentCounter.QuadPart;
+				const unsigned long deltaUs =
+					(unsigned long)(
+						(deltaTicks * 1000000LL) /
+						gSpideyTimingPerfFrequency.QuadPart);
+
+				++gSpideyTimingPresentIntervals;
+				if (deltaUs > 20000)
+					++gSpideyTimingPresentOver20Ms;
+				if (deltaUs > 25000)
+					++gSpideyTimingPresentOver25Ms;
+				if (deltaUs > 30000)
+					++gSpideyTimingPresentOver30Ms;
+				if (deltaUs > 50000)
+					++gSpideyTimingPresentOver50Ms;
+				if (deltaUs >
+						gSpideyTimingPresentMaxIntervalUs)
+				{
+					gSpideyTimingPresentMaxIntervalUs =
+						deltaUs;
+				}
+			}
+
+			gSpideyTimingLastPresentCounter =
+				presentCounter;
+		}
+	}
+
+	const long currentVblanks =
+		*(volatile long*)0x006B4CA0;
+	if (gSpideyTimingPresentVblankValid)
+	{
+		const long deltaVblanks =
+			currentVblanks -
+			gSpideyTimingLastPresentVblank;
+
+		if (deltaVblanks <= 0)
+		{
+			++gSpideyTimingPresentVblankSame;
+		}
+		else if (deltaVblanks == 1)
+		{
+			++gSpideyTimingPresentVblankOne;
+		}
+		else
+		{
+			++gSpideyTimingPresentVblankMulti;
+			if ((unsigned long)deltaVblanks >
+					gSpideyTimingPresentVblankMaxDelta)
+			{
+				gSpideyTimingPresentVblankMaxDelta =
+					(unsigned long)deltaVblanks;
+			}
+		}
+	}
+	else
+	{
+		gSpideyTimingPresentVblankValid =
+			1;
+	}
+	gSpideyTimingLastPresentVblank =
+		currentVblanks;
+
 	const unsigned long now =
 		(unsigned long)GetTickCount();
 
@@ -10496,6 +10624,26 @@ static void SpideyRecordPresentTiming()
 		gSpideyTimingPresentWindowStart =
 			now;
 		gSpideyTimingPresentFrames =
+			0;
+		gSpideyTimingPresentIntervals =
+			0;
+		gSpideyTimingPresentOver20Ms =
+			0;
+		gSpideyTimingPresentOver25Ms =
+			0;
+		gSpideyTimingPresentOver30Ms =
+			0;
+		gSpideyTimingPresentOver50Ms =
+			0;
+		gSpideyTimingPresentMaxIntervalUs =
+			0;
+		gSpideyTimingPresentVblankSame =
+			0;
+		gSpideyTimingPresentVblankOne =
+			0;
+		gSpideyTimingPresentVblankMulti =
+			0;
+		gSpideyTimingPresentVblankMaxDelta =
 			0;
 	}
 }
