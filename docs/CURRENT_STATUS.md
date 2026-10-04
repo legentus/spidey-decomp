@@ -46,6 +46,94 @@ During every continuation session:
 This protocol is a project requirement. The user explicitly wants the repo and documentation updated continually so interruptions do not erase progress.
 
 
+## RUNTIME CHECKPOINT — AIMED LOCOMOTION FIXED; MANUAL CAMERA STILL NOT TPS-STYLE (2026-10-04)
+
+Tested revision:
+- `759e58dc4e27f06cb7678a1a06e4ed3743463328`
+
+Runtime log:
+- `spidey-decomp(20261004-194202).log`
+
+### User-visible result
+
+**Success: movement while manual aiming now works.**
+
+The user can move Spider-Man around while manual aim remains active. The prior stand/run vibration/reset loop is gone.
+
+**Remaining issue: the actual gameplay camera still does not move the way a modern third-person shooter camera should while manual aiming.**
+
+Desired behavior is now explicit:
+- manual aim remains held;
+- mouse/right stick rotates/orbits the actual third-person gameplay camera;
+- Spider-Man can keep moving simultaneously;
+- reticle remains valid relative to that camera;
+- web direction continues to follow the reticle/camera aim rather than Spider-Man's facing.
+
+### Movement proof
+
+The re-entry guard is doing exactly what it was intended to do.
+
+Representative runtime sequence:
+- aim locomotion mask engages with `actual_aim_state=0`;
+- `CheckForwards` reaches run state;
+- `enter_suppressed` then rises rapidly while `raw_reclear=0`;
+- later samples show Spider-Man at substantially different world positions;
+- releasing movement restores the real aim flag cleanly.
+
+Examples observed in the runtime:
+- mask starts around movement call 102;
+- later `enter_suppressed=267` with body position already changed;
+- subsequent aimed movement sessions reach `enter_suppressed=343`, `377`, `416`, etc.;
+- body position and velocity both change during/after aimed movement.
+
+**Freeze this locomotion implementation unless a regression is demonstrated.**
+
+### Why the camera still fails conceptually
+
+The final publish hook does execute:
+- `modern_manual_camera event=publish` appears repeatedly;
+- manual aim angles change significantly while mouse input is moved.
+
+But the current architecture is the wrong model for the user's requested behavior.
+
+Current code has two camera spaces during manual aim:
+1. the ordinary mode-3 orbit camera keeps its own `gSpideyModernCameraYaw` / vertical orbit;
+2. manual aim diverts mouse/right-stick deltas into a separate `gSpideyManualAimViewYawOffset/PitchOffset`;
+3. that secondary free-view changes `camera->field_144` after CM_Normal;
+4. a final publish shim tries to orient the visible transform toward the free-view target.
+
+Runtime confirms this split:
+- `modern_manual_camera event=update` changes view yaw/pitch and focus;
+- ordinary `modern_camera event=update` keeps the underlying mode-3 orbit yaw separate;
+- user still experiences a fixed/non-TPS camera.
+
+This should not be extended further.
+
+### New target architecture — unified third-person shooter camera
+
+Manual aim should use the **same mode-3 orbit camera** as ordinary modern camera movement.
+
+While manual aim is active:
+- mouse/right stick updates `gSpideyModernCameraYaw` and `gSpideyModernCameraYDistance` exactly like normal mode-3 camera control;
+- CM_Normal remains responsible for camera position/collision/orbit;
+- no independent manual-view yaw/pitch accumulator should fight the orbit camera;
+- no manual post-CM focus rewrite should own the visible view;
+- no final `LoadIntoMikeCamera` quaternion override should be required;
+- manual reticle/web direction should be derived from the resulting camera ray.
+
+This matches a modern TPS control model:
+- one view orientation;
+- one orbit camera;
+- movement can happen underneath it;
+- reticle/web aim is camera-relative.
+
+First implementation should keep this narrow:
+- do not add shoulder offsets yet;
+- do not alter the now-working locomotion mask;
+- do not change hip-fire targeting;
+- do not resume shadow work.
+
+
 ## IMPLEMENTATION CHECKPOINT — FINAL MANUAL CAMERA PUBLISH + AIM RE-ENTRY GUARD + ELAPSED-TIME 60 HZ DISPATCH READY (2026-10-04)
 
 **Status: source implemented and committed; NOT runtime-tested yet.**
