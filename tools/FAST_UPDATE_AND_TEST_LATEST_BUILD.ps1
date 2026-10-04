@@ -34,6 +34,11 @@ Write-Host "============================================================"
 Write-Host ""
 
 $beforeRevision = Read-LocalRevision
+if ($env:SPIDEY_FAST_BOOTSTRAP_BEFORE_REV) {
+    $beforeRevision = $env:SPIDEY_FAST_BOOTSTRAP_BEFORE_REV.Trim()
+    Remove-Item Env:SPIDEY_FAST_BOOTSTRAP_BEFORE_REV -ErrorAction SilentlyContinue
+    Write-Host "[FAST] Preserved pre-bootstrap revision from launcher."
+}
 Write-Host ("[INFO] Before update: " + $(if ($beforeRevision) { $beforeRevision } else { "<unknown>" }))
 
 Write-Host ""
