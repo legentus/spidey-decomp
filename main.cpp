@@ -12369,6 +12369,35 @@ static int SpideyGetCurrentClientScreenRect(
 	return 1;
 }
 
+static int SpideyDiagnosticSurfaceReadbackEnabled()
+{
+	static int enabled =
+		-1;
+
+	if (enabled >= 0)
+		return enabled;
+
+	char value[16];
+	memset(
+		value,
+		0,
+		sizeof(value));
+
+	const DWORD length =
+		GetEnvironmentVariableA(
+			"SPIDEY_DIAG_SURFACE_READBACK",
+			value,
+			sizeof(value));
+
+	enabled =
+		length > 0 &&
+		value[0] != '0' ?
+			1 :
+			0;
+
+	return enabled;
+}
+
 static void SpideyLogSurfaceState(
 		FILE* f,
 		const char* label,
@@ -12417,6 +12446,20 @@ static void SpideyLogSurfaceState(
 			(unsigned long)desc.ddsCaps.dwCaps);
 	}
 
+	if (!SpideyDiagnosticSurfaceReadbackEnabled())
+	{
+		fprintf(
+			f,
+			" pixel_sample=disabled");
+		fputc(
+			'\n',
+			f);
+		return;
+	}
+
+	// GetDC + GetPixel against live DirectDraw surfaces can synchronize the
+	// CPU with the compatibility renderer. Keep this old validation path
+	// opt-in instead of stalling production gameplay every telemetry interval.
 	HDC dc = 0;
 	HRESULT dcHr =
 		surface->GetDC(&dc);
