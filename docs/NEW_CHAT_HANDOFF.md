@@ -1,3 +1,35 @@
+# NATIVE 60-HZ HANDOFF UPDATE — FULL AI/VENOM/PLAYER-PHYSICS CAPTURE READY (2026-10-04)
+
+Latest source:
+- `e4df3b156aeec6d81519697f7d9f158603dfc99e` — adds the true normal + crawling player physics retail blocks to the existing native-60 startup capture.
+- `54ef05c5e8595ff48989b7c786a95374c90cf316` — CURRENT_STATUS checkpoint for that source frontier.
+
+The next runtime should capture, in one startup-only batch:
+- `CAIProc_RotY_Block @ 0x00401060`, size `0x120`;
+- `CVenom_SynthesizeAnalogueInput_Block @ 0x004E9B00`, size `0x19A0`;
+- `CPlayer_DoPhysics_Real @ 0x00466CE0`, size `0x1040`;
+- `CPlayer_DoCrawlingPhysics @ 0x00467FD0`, size `0xD70`.
+
+Purpose:
+- prove the shared raw AI timing semantics before touching `CAIProc::Wait` / rotation;
+- reconstruct the known Venom automated-input/cutscene path;
+- identify any raw per-Logic player physics integration contributing to the user's slight 60-FPS speed-up;
+- compare normal vs crawling physics before patching either;
+- implement the first substantial native-60 correction batch after this one log.
+
+User requirement remains absolute:
+- native gameplay simulation must be correct at 60 Hz;
+- no global 20/30-Hz gameplay cap under a 60-Hz renderer;
+- >60 FPS later comes from decoupled presentation/interpolation over a maximum 60-Hz simulation.
+
+No hitch testing is needed; logging cleanup is validated and the hitch branch is closed.
+
+Expected next startup lines:
+- `high_fps_compat mysterio_laser=1 ...`;
+- four `high_fps_re_bytes_done ... valid=1` lines for the blocks above.
+
+---
+
 # NATIVE 60-HZ MASTER HANDOFF — TWO EXACT TIMING CAPTURES READY (2026-10-04)
 
 This supersedes the older high-FPS checkpoint below.
