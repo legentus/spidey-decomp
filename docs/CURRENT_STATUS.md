@@ -1,5 +1,72 @@
 # CURRENT STATUS
 
+## IMPLEMENTED — FIRST COMBINED NATIVE-60 PHYSICS + AI BATCH READY (2026-10-04)
+
+Current `dev` source frontier:
+- `6b56677c383331da12035109df59b165ae69a066` — player physics: split the retail two-vblank movement/force quantum for native 60 Hz;
+- `0741d1c82c81edbe0a94edcc180e93c7c87d7ca5` — declare native-60 RotY replacement;
+- `48b1a9d503f1646f508720eae0174a57617e9ed5` — implement native-60 `CAIProc_RotY::Execute`;
+- `e3109c1ee2e1f252ade18e72279c2d14b7e75ba8` — install RotY patch and retire the completed startup capture calls.
+
+RotY implementation details:
+- retail constructor remains untouched, preserving `field_20 = numFrames` and `field_24 = requestedAngle / numFrames`;
+- retail Execute at `0x00401110` is replaced through the normal `PATCH_PUSH_RET` patch path;
+- inherited `field_C`, unused by retail RotY and zero-initialized by `CClass::operator new`, stores one-bit half-step phase;
+- `field_80 == 1`: consume one 1/60 half of the authored angular step;
+- `field_80 == 2`: consume both halves and reproduce exactly one retail step/countdown;
+- odd/negative integer angular steps are split so both halves sum exactly to retail `field_24`;
+- `field_20` decrements only after the second half, preserving authored real-time duration;
+- completion flags and turn-direction flags preserve retail semantics;
+- elapsed `field_80 > 2` consumes additional half-ticks for real-time catch-up.
+
+Player physics in the same test build:
+- normal physics and crawling physics use the committed half-step acceleration/friction integrator when `field_80 == 1`;
+- displacement and fall motion are split for a 1/60 tick;
+- two 60-Hz velocity updates mathematically reproduce one original 30-Hz damping/acceleration update apart from fixed-point integer rounding;
+- swinging physics is reconstructed but is not force-scaled by this batch because its movement comes from the swinger object's transform/path rather than the same raw `mVel += mAcc; mVel %= mFric` path.
+
+Venom:
+- no Venom-specific 0.5 multiplier was added;
+- its captured synthesized-input timers/path progression already use `field_80`;
+- patch shared primitives first, then retest the real chase later.
+
+Generic `CAIProc::Wait`:
+- still a likely raw-frame candidate in reconstructed source;
+- retail symbol map shows no standalone named Wait routine because it is inlined;
+- leave it unchanged until exact constructor/countdown semantics can be grounded from a relevant retail call site/capture.
+
+Capture cleanup:
+- active startup dumps for RotY, Venom synthesized input, player physics and crawling physics are removed;
+- `SpideyLogHighFpsRetailBytes` helper remains available for future exact probes but has no current calls.
+
+Static source validation after the batch:
+- `ai.h`: balanced braces/parentheses;
+- `ai.cpp`: balanced braces/parentheses;
+- `main.cpp`: balanced braces/parentheses;
+- RotY declaration, implementation, patch site and `patch_ai()` install are all present;
+- completed startup probe labels have zero active occurrences in `main.cpp`.
+- GitHub Actions returned no visible workflow runs/statuses for this branch, so **do not claim CI-green**; the next local VC6 build is the compile/runtime validation.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` from the local project.
+
+Expected source revision:
+- `e3109c1ee2e1f252ade18e72279c2d14b7e75ba8` or a newer documentation-only descendant.
+
+Test one meaningful gameplay pass:
+1. ordinary walking/running/jumping and general traversal;
+2. compare subjective game speed against the previous 60-FPS build — movement should no longer feel globally accelerated if player physics was the dominant cause;
+3. crawl on walls/ceilings if convenient, because crawling has the same new half-step integration;
+4. normal enemy/AI behavior and turning for a few encounters, watching for rotations that are too slow/fast or state hangs;
+5. quick manual-aim regression sanity only; do not retune it;
+6. progress through an ordinary scripted/cutscene transition if convenient;
+7. no hitch reproduction testing is needed.
+
+Return the one consolidated `spidey-decomp.log` plus subjective notes on whether the game's pace now feels correct at 60.
+
+If the local build fails, return the compiler output and patch immediately before any runtime testing.
+
 ## RUNTIME RESULT — FOUR NATIVE-60 CAPTURES COMPLETE; MASTER CLOCK CORRECT (2026-10-04)
 
 Latest tested runtime:
