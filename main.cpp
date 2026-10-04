@@ -4760,6 +4760,10 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 	const int movementHeld =
 		player->field_E2D ||
 		player->field_E2E;
+	const CVector framedFocus =
+		SpideyModernAimFramedFocus(
+			player,
+			camera);
 	if (gSpideyModernAimLookaroundCalls <= 12 ||
 		(gSpideyModernAimLookaroundCalls % 60) == 0 ||
 		(movementHeld &&
