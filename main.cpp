@@ -4448,24 +4448,8 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	// Startup-only RE capture for the two remaining central timing seams.
-	// This is intentionally not in any gameplay/render hot path.
-	SpideyLogHighFpsRetailBytes(
-		"CAIProc_RotY_Block",
-		0x00401060,
-		0x120);
-	SpideyLogHighFpsRetailBytes(
-		"CVenom_SynthesizeAnalogueInput_Block",
-		0x004E9B00,
-		0x19A0);
-	SpideyLogHighFpsRetailBytes(
-		"CPlayer_DoPhysics_Real",
-		0x00466CE0,
-		0x1040);
-	SpideyLogHighFpsRetailBytes(
-		"CPlayer_DoCrawlingPhysics",
-		0x00467FD0,
-		0xD70);
+	// Current native-60 retail captures are recovered and analyzed.
+	// Keep normal startup logs compact until another exact RE seam is needed.
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
@@ -18408,6 +18392,7 @@ void game_patches(void)
 
 	patch_CItem();
 	patch_CBody();
+	patch_ai();
 	patch_physics();
 
 	patch_spool();
