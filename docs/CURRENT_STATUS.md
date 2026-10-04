@@ -1,5 +1,60 @@
 # CURRENT STATUS
 
+## LIVE FRONTIER — TARGETING SECOND PATH + WORLD-SPACE SHADOW PROBE (2026-10-04)
+
+Source commits:
+- `23260d11fb8a0b0533b9d0588cb96b927c8def44` — `gameplay: align CheckWebShot targeting to camera`
+- `62d8711b09eb633a3ddc8a5271aeff0f55a697c6` — `renderer: probe animated world-space shadow casters`
+- `0b72b0a340a3676f4678b8d0fc6888d24af242b7` — `renderer: harden world-space caster probe`
+
+### Web targeting
+The earlier camera-forward wrapper covered only the `SelectAutoAimTarget -> SelectTargetBaddy` call at `0x004C5B2F`. The user reported targeting was improved but still not complete.
+
+The same wrapper logic is now shared by both retail paths:
+- `0x004C5B2F -> 0x004C8410` — SelectAutoAimTarget path;
+- `0x004C09E2 -> 0x004C8410` — CheckWebShot path.
+
+Both preserve the untouched retail `SelectTargetBaddy` implementation and only swap the temporary scoring matrix while modern DEMO-camera control is active. Camera row 2 is negated so camera-forward maps to retail's negative-local-Z scoring convention. Telemetry now records `path=select_auto_aim` or `path=check_web_shot`.
+
+Both call-site installs go through `SpideyPatchDirectCall`, so an opcode/target mismatch fails closed instead of modifying an unexpected executable site.
+
+### Real-shadow groundwork
+The current Renderer11 replay still receives pretransformed `FVF 0x144 / XYZRHW` vertices, so a true light-space shadow pass cannot recover reliable world geometry from the existing replay alone.
+
+Historical M3D source in `thps2-stuff/m3d.mik` gives us a cleaner route:
+- `RenderSuperItem` has the live `CSuper` object transform;
+- each animated part has an `SMatrix` animation transform;
+- each part resolves an `SModel` with local `SVECTOR` vertices and face data;
+- the original engine combines the super transform + animation transform before the GTE projection stage.
+
+A guarded runtime probe is now wired into the camera telemetry cadence. Every 300 gameplay frames it inspects:
+- retail mech-list head through `G_MECHLIST`;
+- the current web-target body when different;
+- PSX region/super-model validity;
+- region name and part count;
+- model-0 vertex/normal/face counts and one local vertex sample;
+- `mpDecompressedFrame` / `mpPoseBuffer` pointers and one matrix sample;
+- actor world position;
+- the game's current ground-shadow contact position/normal/scale.
+
+All actor/model reads are inside SEH, and log output uses copied values only, so a stale target pointer cannot be dereferenced after the guard.
+
+Expected telemetry:
+`[SHADOW] world_space_probe ... label=mech_head ...`
+`[SHADOW] world_space_probe ... label=web_target ...`
+
+This is intentionally non-visual. Its purpose is to validate the exact animated world-space caster inputs before expanding the Renderer11 ABI and adding a depth-map pass.
+
+### Next combined runtime validation
+Use `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` after the current batch is complete, then validate in one session:
+1. pause/unpause repeatedly and enter/exit custom Options several times;
+2. test web shots with Spider-Man facing away from a target but the camera centered on it, then camera away while Spider-Man faces it;
+3. keep at least one NPC targetable for >5 seconds so both world-space probe labels can appear;
+4. return the consolidated `spidey-decomp*.log`.
+
+If the pause lifecycle hardening + both targeting call sites are good and the world-space probe shows valid animated model/pose data, next implementation step is the Renderer11 world-space caster submission + first directional shadow-map pass.
+
+
 ## LIVE FRONTIER — PAUSE BOX HEAP LIFECYCLE HARDENED (2026-10-04)
 
 Source commit:
