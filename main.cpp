@@ -9174,6 +9174,13 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		(SpideyRetailSelectTargetBaddyFn)0x004C8410;
 	SpideyRetailQToMFn retailQToM =
 		(SpideyRetailQToMFn)0x0047C7F0;
+	typedef int (__cdecl *SpideyRetailLineOfSightFn)(
+		CVector*,
+		CVector*,
+		CVector*,
+		int);
+	SpideyRetailLineOfSightFn retailLineOfSight =
+		(SpideyRetailLineOfSightFn)0x004E67A0;
 
 	if (!player)
 	{
@@ -9286,7 +9293,7 @@ static CBody* SpideyCameraSelectTargetBaddyCommon(
 		if (target)
 		{
 			cameraOriginPlayerLos =
-				Utils_LineOfSight(
+				retailLineOfSight(
 					&player->mPos,
 					&target->mPos,
 					0,
