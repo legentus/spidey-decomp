@@ -1,3 +1,71 @@
+# LATEST FRONTIER — CAMERA FOLLOW-UP BATCH READY FOR COMBINED TEST (2026-10-04)
+
+The first modern mode-3 orbit camera is runtime-validated by the user and considered a strong success.
+
+Current dev now includes three requested follow-ups:
+
+1. Persistent Camera Sensitivity in Pause -> Options
+   - 25..200 percent, 5 percent steps, default 100 percent;
+   - scales both relative mouse and Input11 right stick;
+   - saved under [Controls] CameraSensitivityPercent in spidey-modern-video.ini;
+   - custom pause submenu is now six rows: heading, UI Scale, Text Scale, Camera Sensitivity, Apply Settings, Back.
+
+2. Periodic hitch mitigation
+   - old DirectDraw GetDC/GetPixel diagnostic readback disabled by default;
+   - old Renderer11 staging texture + blocking D3D11_MAP_READ sample disabled by default;
+   - both had 120-frame cadence and are high-confidence causes of the user's large repeating freeze;
+   - opt-in env flags preserve diagnostics if needed:
+     SPIDEY_DIAG_SURFACE_READBACK=1
+     SPIDEY_RENDERER11_DIAG_READBACK=1
+   - do not declare all smaller hitching solved until runtime validation.
+
+3. Camera-forward web enemy targeting
+   - exact retail chain grounded:
+     CheckWebShot 0x004C0510
+     SelectAutoAimTarget 0x004C5AA0
+     FireWeb 0x004C5DD0
+     SelectTargetBaddy 0x004C8410
+     SelectTargetSwitch 0x004C8570
+   - SelectAutoAimTarget call 0x004C5B2F is the only patched targeting call;
+   - retail SelectTargetBaddy normally scores candidate centeredness through player + 0x89C;
+   - wrapper temporarily supplies the active mode-3 camera orientation, generated from camera field_214 through retail QToM @ 0x0047C7F0;
+   - retail candidate filtering, range weighting, LOS and result handling remain untouched;
+   - Spider-Man's original field_89C matrix is restored immediately after selection;
+   - other SelectTargetBaddy callers remain unchanged.
+
+Implementation commits in this batch:
+- 61419a368c7a7e962673a74f7052fe55465254ff — perf: disable periodic DX11 diagnostic readback
+- 6cb305796f272043654ed3819bb92e7c6c53249a — perf: disable periodic DirectDraw pixel sampling
+- 2ca650606bf1c851859c699be7e019b131f69e5b — input: add persistent camera sensitivity state
+- fdfe39ec6000856c655dbf137bf90c66d9c59aa8 — input: persist camera sensitivity setting
+- f6fcaa31edb7ae5cc8ea8cb8df2091ecfd302413 — pause: add camera sensitivity option
+- fa0f7e230c210019d8c6066076585fb84144b8ee — pause: wire camera sensitivity controls
+- fde069d43a284c27ca385ef427a6751f3b5bd06f — camera: apply configurable sensitivity
+- 954882bb63a86c39011bbc3996104f905b8559aa — gameplay: aim web auto-targeting from camera
+- 1313b3840b8aaa0696783d6fe0d6baadee9b20b2 — docs: checkpoint camera sensitivity and web targeting
+- 9ad45941f8c772933733973f00356195a8fe862f — docs: checkpoint camera follow-up batch
+
+Runtime evidence from prior revision 5ec06e...:
+- modern camera installed and acquired successfully;
+- user reported no camera-control complaints;
+- sampled modern updates retained requested yaw with retail_overrode_yaw=0;
+- timing windows are often normal ~59-61 Hz but intermittently fall into the mid-40 Hz range.
+
+Canonical targeting RE confidence:
+- retained Git function blobs for SelectAutoAimTarget, SelectTargetBaddy, SelectTargetSwitch, CheckWebShot and FireWeb were independently matched byte-for-byte against the materialized same-build executable by Git blob SHA.
+
+NEXT AUTHORITATIVE STEP:
+Run FAST_UPDATE_AND_TEST_LATEST_BUILD.bat once and perform one combined test:
+- Camera Sensitivity at 50 percent then optionally 150 percent; Apply and verify persistence.
+- Observe whether the old every-several-seconds major freeze is gone; separately note smaller hitching.
+- Face Spider-Man away from an enemy, center enemy with camera, fire enemy-targeting web; camera should choose the target.
+- Brief movement/swing/camera regression check.
+- Upload the single consolidated spidey-decomp.log.
+
+If web targeting is mirrored/behind/vertically wrong, do not guess: use camera_web_target telemetry plus the exact transform convention RE before changing axes.
+
+---
+
 # LATEST FRONTIER — MODERN MODE-3 ORBIT CAMERA PROTOTYPE UNDER TEST (2026-10-04)
 
 Pause Options/UI scale milestone is closed. User confirmed keyboard Enter now works for Options, Apply Settings and Back, with mouse behavior preserved.
