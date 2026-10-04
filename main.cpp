@@ -3199,11 +3199,56 @@ static void __fastcall SpideyPauseMenuUpdate(
 		{
 			SpideyRetailMenuAddEntryFn retailAdd =
 				(SpideyRetailMenuAddEntryFn)0x0043FFF0;
+			const unsigned int oldRows =
+				(unsigned int)menu->mNumLines;
+			const unsigned int oldLine =
+				(unsigned int)menu->mLine;
+			const char* oldLastLabel =
+				oldRows ?
+					menu->mEntry[oldRows - 1].name :
+					0;
 
 			retailAdd(
 				menu,
 				0,
 				gSpideyPauseOptionsLabel);
+
+			int optionsRow =
+				(int)oldRows;
+			int quitRow =
+				-1;
+
+			// Retail keeps Quit as the final pause row. AddEntry can only append,
+			// so move our new Options entry one slot upward and keep the previous
+			// final retail row at the bottom. Move the complete SEntry so all
+			// colors/scales/flags travel with their original labels.
+			if (oldRows > 0)
+			{
+				SEntry optionsEntry =
+					menu->mEntry[oldRows];
+				menu->mEntry[oldRows] =
+					menu->mEntry[oldRows - 1];
+				menu->mEntry[oldRows - 1] =
+					optionsEntry;
+
+				optionsRow =
+					(int)oldRows - 1;
+				quitRow =
+					(int)oldRows;
+
+				// If the player happened to be highlighting the old final row
+				// while the pause menu was first decorated, follow that retail row
+				// to its new bottom index instead of moving selection to Options.
+				if (oldLine == oldRows - 1)
+				{
+					SpideyRetailMenuSetLineFn setLine =
+						(SpideyRetailMenuSetLineFn)0x0043FF80;
+					setLine(
+						menu,
+						0,
+						(char)oldRows);
+				}
+			}
 
 			// One added row: preserve approximately the retail visual center.
 			menu->mY -=
@@ -3216,8 +3261,11 @@ static void __fastcall SpideyPauseMenuUpdate(
 			{
 				fprintf(
 					f,
-					"pause_options_entry rows_added=1 rows=%u y=%d line_sep=%d parent_only=1 retail_options_invoked=0\n",
+					"pause_options_entry rows_added=1 rows=%u options_row=%d quit_row=%d previous_last=%s y=%d line_sep=%d parent_only=1 retail_options_invoked=0\n",
 					(unsigned int)menu->mNumLines,
+					optionsRow,
+					quitRow,
+					oldLastLabel ? oldLastLabel : "(none)",
 					menu->mY,
 					menu->mLineSep);
 				fclose(f);
@@ -3347,26 +3395,55 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 
 	RetailCheckTriggersFn retail =
 		(RetailCheckTriggersFn)0x0050C180;
-	const u8 triggered =
+	u8 triggered =
 		retail(
 			mask,
 			option2,
 			option3);
+	int confirmActionTriggered =
+		0;
+
+	CMenu* menu =
+		gSpideyPauseMenuOwner;
+	const char* selected =
+		0;
+	if (menu &&
+		menu->mLine < menu->mNumLines &&
+		menu->mEntry[menu->mLine].name)
+	{
+		selected =
+			menu->mEntry[menu->mLine].name;
+	}
+
+	// The pause call patched at 0x00441606 services the mouse-oriented
+	// trigger path (runtime-observed mask 0x00000100). Keyboard/controller
+	// confirm is retail action 0x00001000; the default keyboard mapping for
+	// that action is DIK_RETURN (0x1C). Only probe it while one of our custom
+	// rows owns the selection so normal retail pause commands are untouched.
+	if (!triggered &&
+		selected &&
+		(gSpideyPauseOptionsActive ||
+		 !strcmp(
+			 selected,
+			 gSpideyPauseOptionsLabel)))
+	{
+		triggered =
+			retail(
+				0x00001000,
+				option2,
+				option3);
+		confirmActionTriggered =
+			triggered ? 1 : 0;
+	}
 
 	if (!triggered)
 		return triggered;
 
-	CMenu* menu =
-		gSpideyPauseMenuOwner;
 	if (!menu ||
-		menu->mLine >= menu->mNumLines ||
-		!menu->mEntry[menu->mLine].name)
+		!selected)
 	{
 		return triggered;
 	}
-
-	const char* selected =
-		menu->mEntry[menu->mLine].name;
 
 	if (!gSpideyPauseOptionsActive &&
 		!strcmp(
@@ -3384,9 +3461,12 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 		{
 			fprintf(
 				f,
-				"pause_options_confirm action=open entered=%d mask=0x%08lX\n",
+				"pause_options_confirm action=open entered=%d mask=0x%08lX source=%s\n",
 				entered,
-				(unsigned long)mask);
+				(unsigned long)mask,
+				confirmActionTriggered ?
+					"confirm_action_0x1000" :
+					"retail_call_mask");
 			fclose(f);
 		}
 		return 0;
@@ -3408,10 +3488,13 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 		{
 			fprintf(
 				f,
-				"pause_options_confirm action=apply line=%u rows=%u mask=0x%08lX gameplay=%d text=%d\n",
+				"pause_options_confirm action=apply line=%u rows=%u mask=0x%08lX source=%s gameplay=%d text=%d\n",
 				(unsigned int)menu->mLine,
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
+				confirmActionTriggered ?
+					"confirm_action_0x1000" :
+					"retail_call_mask",
 				gSpideyGameplayUiScalePercent,
 				gSpideyMenuTextScalePercent);
 			fclose(f);
