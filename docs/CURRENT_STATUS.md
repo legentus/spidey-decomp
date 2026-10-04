@@ -9198,3 +9198,43 @@ Runtime validation required:
 2. Keep the NPC stationary and orbit the camera around them.
 3. The blob should remain under the NPC instead of sliding with camera angle.
 4. Also watch other world-space QuadBit effects briefly for regression because the correction restores the camera basis for the entire QuadBit list, which is what the retail projector expects.
+
+
+## Pause Options dynamic container sizing (2026-10-04)
+
+User screenshot showed the six-row custom Pause -> Options list extending below its purple expanding-box container: `Back` was visibly outside the box.
+
+Root cause:
+- the custom submenu intentionally reuses the live retail `CMenu`;
+- parent state is snapshotted from offset +8 onward, leaving the live `CExpandingBox* ptr_to` at +4 outside the snapshot;
+- the submenu rows were replaced, but the existing expanding box was still sized for the previous menu shape.
+
+Canonical retail menu behavior:
+- `CMenu::Zoom @ 0x0043FC60`;
+- retail Zoom deletes the old expanding box and creates a replacement using the menu's current `GetMenuHeight()`;
+- `GetMenuHeight()` derives height from the currently active rows, per-entry extra spacing, and `mLineSep`.
+
+Implemented commit:
+- `dd35f977e54e963d0deaede43c895cd7a8d2a95e` — `pause: resize menu box to current rows`
+
+Implementation:
+- added `SpideyPauseRefreshMenuBox`, which calls untouched retail `CMenu::Zoom` with the menu's existing `mZoomBoxType`;
+- after the six custom Options rows are authored, rebuild the box from that exact row list;
+- after Back restores the parent CMenu snapshot, rebuild the box again from the restored parent rows;
+- when the one-time Options row is injected into the parent pause menu, rebuild the parent box too;
+- no hard-coded submenu height was introduced, so future row additions/removals naturally resize the container through retail `GetMenuHeight()`;
+- invalid zoom types are guarded rather than passed to retail.
+
+Telemetry:
+- `pause_menu_box_refresh reason=enter_options refreshed=1 ...`
+- `pause_menu_box_refresh reason=back refreshed=1 ...`
+- `pause_menu_box_refresh reason=add_options_parent refreshed=1 ...`
+
+Static post-edit structure check:
+- main.cpp braces: 909 / 909
+- parentheses: 4503 / 4503
+- brackets: 323 / 323
+
+Runtime validation can be folded into the already-pending web-target + blob-shadow test:
+- open Pause -> Options and confirm the purple container encloses all six rows through Back;
+- press Back and verify the parent pause container still encloses Options and Quit.
