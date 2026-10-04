@@ -101,6 +101,7 @@
 #include "pcdcPad.h"
 #include "vram.h"
 #include "m3dzone.h"
+#include "physics.h"
 #include "PRE.h"
 #include "dcfileio.h"
 #include "PCMovie.h"
