@@ -2770,6 +2770,48 @@ static int SpideyStepPendingUiScale(
 }
 
 // @Ok
+static int SpideyStepPendingCameraSensitivity(
+		int row,
+		int delta)
+{
+	if (!delta)
+		return 0;
+
+	const int before =
+		gSpideyPendingCameraSensitivityPercent;
+	gSpideyPendingCameraSensitivityPercent =
+		SpideyClampCameraSensitivityPercent(
+			gSpideyPendingCameraSensitivityPercent +
+			delta *
+				kSpideyCameraSensitivityStepPercent);
+
+	if (gSpideyPendingCameraSensitivityPercent ==
+		before)
+	{
+		return 0;
+	}
+
+	SpideyUpdateUiScaleMenuLabels();
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (f)
+	{
+		fprintf(
+			f,
+			"pause_pending_camera_sensitivity row=%d direction=%s percent=%d committed=%d\n",
+			row,
+			delta > 0 ? "next" : "prev",
+			gSpideyPendingCameraSensitivityPercent,
+			gSpideyCameraSensitivityPercent);
+		fclose(f);
+	}
+
+	return 1;
+}
+
+// @Ok
 static void __fastcall SpideyDisplayMenuUpdate(
 		CMenu* menu,
 		void*)
@@ -3409,6 +3451,15 @@ static void __fastcall SpideyPauseMenuUpdate(
 		kind =
 			"menu_text";
 	}
+	else if (!strcmp(
+			selected,
+			gSpideyPauseCameraSensitivityMenuLabel))
+	{
+		percent =
+			&gSpideyPendingCameraSensitivityPercent;
+		kind =
+			"camera_sensitivity";
+	}
 	else
 	{
 		return;
@@ -3439,11 +3490,16 @@ static void __fastcall SpideyPauseMenuUpdate(
 	if (delta)
 	{
 		const int changed =
-			SpideyStepPendingUiScale(
-				(int)menu->mLine,
-				percent,
-				kind,
-				delta);
+			percent ==
+				&gSpideyPendingCameraSensitivityPercent ?
+				SpideyStepPendingCameraSensitivity(
+					(int)menu->mLine,
+					delta) :
+				SpideyStepPendingUiScale(
+					(int)menu->mLine,
+					percent,
+					kind,
+					delta);
 
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -3452,14 +3508,15 @@ static void __fastcall SpideyPauseMenuUpdate(
 		{
 			fprintf(
 				f,
-				"pause_options_adjust kind=%s line=%u direction=%s changed=%d percent=%d pending_gameplay=%d pending_text=%d\n",
+				"pause_options_adjust kind=%s line=%u direction=%s changed=%d percent=%d pending_gameplay=%d pending_text=%d pending_camera_sensitivity=%d\n",
 				kind,
 				(unsigned int)menu->mLine,
 				delta > 0 ? "next" : "prev",
 				changed,
 				*percent,
 				gSpideyPendingGameplayUiScalePercent,
-				gSpideyPendingMenuTextScalePercent);
+				gSpideyPendingMenuTextScalePercent,
+				gSpideyPendingCameraSensitivityPercent);
 			fclose(f);
 		}
 	}
@@ -3626,7 +3683,7 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 		{
 			fprintf(
 				f,
-				"pause_options_confirm action=apply line=%u rows=%u mask=0x%08lX source=%s gameplay=%d text=%d\n",
+				"pause_options_confirm action=apply line=%u rows=%u mask=0x%08lX source=%s gameplay=%d text=%d camera_sensitivity=%d\n",
 				(unsigned int)menu->mLine,
 				(unsigned int)menu->mNumLines,
 				(unsigned long)mask,
@@ -3634,7 +3691,8 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 					"raw_directinput_enter_edge" :
 					"retail_call_mask",
 				gSpideyGameplayUiScalePercent,
-				gSpideyMenuTextScalePercent);
+				gSpideyMenuTextScalePercent,
+				gSpideyCameraSensitivityPercent);
 			fclose(f);
 		}
 		return 0;
@@ -3673,7 +3731,10 @@ static u8 __cdecl SpideyPauseConfirmTrigger(
 			gSpideyPauseGameplayUiScaleMenuLabel) ||
 		!strcmp(
 			selected,
-			gSpideyPauseMenuTextScaleMenuLabel))
+			gSpideyPauseMenuTextScaleMenuLabel) ||
+		!strcmp(
+			selected,
+			gSpideyPauseCameraSensitivityMenuLabel))
 	{
 		// Scale rows are adjusted only with left/right. Confirm is consumed
 		// so retail never dispatches our custom labels as pause commands.
