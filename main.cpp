@@ -8130,6 +8130,24 @@ static i32 gSpideyFrameMouseDeltaY = 0;
 static unsigned long gSpideyFrameMousePollCount = 0;
 static unsigned long gSpideyCameraTelemetryLastIntentFrame = 0;
 
+// Stage-A modern camera ownership. Retail still owns every camera mode except
+// mode 3 (ordinary gameplay in this PC build), and even mode 3 remains retail
+// until the player provides explicit mouse/right-stick camera intent.
+static CCamera* gSpideyModernCameraOwner = 0;
+static int gSpideyModernCameraActive = 0;
+static int gSpideyModernCameraYaw = 0;
+static int gSpideyModernCameraYDistance = -150;
+static unsigned long gSpideyModernCameraInputSequence = 0;
+static unsigned long gSpideyModernCameraLastConsumedSequence = 0xFFFFFFFFUL;
+static unsigned long gSpideyModernCameraLastLogSequence = 0;
+
+static const int kSpideyModernCameraMouseYawScale = 3;
+static const int kSpideyModernCameraMousePitchScale = 2;
+static const int kSpideyModernCameraStickYawPerFrame = 32;
+static const int kSpideyModernCameraStickPitchPerFrame = 7;
+static const int kSpideyModernCameraMinYDistance = -480;
+static const int kSpideyModernCameraMaxYDistance = 260;
+
 static const char* SpideyCameraModeName(
 		int mode)
 {
@@ -8163,6 +8181,333 @@ static const char* SpideyCameraModeName(
 	}
 }
 
+static int SpideyClampModernCameraYDistance(
+		int distance)
+{
+	if (distance <
+		kSpideyModernCameraMinYDistance)
+	{
+		return kSpideyModernCameraMinYDistance;
+	}
+
+	if (distance >
+		kSpideyModernCameraMaxYDistance)
+	{
+		return kSpideyModernCameraMaxYDistance;
+	}
+
+	return distance;
+}
+
+static int SpideyModernCameraHasIntent(
+		int mouseX,
+		int mouseY,
+		const SpideyInput11LegacyState* input)
+{
+	if (mouseX ||
+		mouseY)
+	{
+		return 1;
+	}
+
+	if (!input ||
+		!input->connected)
+	{
+		return 0;
+	}
+
+	return
+		input->cameraX > 0.05f ||
+		input->cameraX < -0.05f ||
+		input->cameraY > 0.05f ||
+		input->cameraY < -0.05f;
+}
+
+static void SpideyModernCameraRelease(
+		const char* reason,
+		CCamera* camera,
+		int mode)
+{
+	if (!gSpideyModernCameraActive &&
+		!gSpideyModernCameraOwner)
+	{
+		return;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"CAMERA");
+	if (f)
+	{
+		fprintf(
+			f,
+			"modern_camera event=release reason=%s camera=0x%08lX mode=%d yaw=%d y_dist=%d\n",
+			reason ? reason : "unknown",
+			(unsigned long)camera,
+			mode,
+			gSpideyModernCameraYaw,
+			gSpideyModernCameraYDistance);
+		fclose(f);
+	}
+
+	gSpideyModernCameraOwner =
+		0;
+	gSpideyModernCameraActive =
+		0;
+	gSpideyModernCameraLastConsumedSequence =
+		0xFFFFFFFFUL;
+}
+
+typedef void (__fastcall *SpideyRetailMode3CameraFn)(
+		CCamera*,
+		void*);
+
+// Stage A: keep retail's normal mode-3 camera generator and everything after
+// it (collision/orientation/shake/final publish), but replace the yaw and
+// vertical orbit inputs immediately before CM_Normal consumes them.
+static void __fastcall SpideyModernMode3Camera(
+		CCamera* camera,
+		void*)
+{
+	SpideyRetailMode3CameraFn retail =
+		(SpideyRetailMode3CameraFn)0x00418E00;
+
+	if (!camera)
+	{
+		return;
+	}
+
+	if (camera->mCameraMode !=
+		CAMERAMODE_DEMO)
+	{
+		retail(
+			camera,
+			0);
+		return;
+	}
+
+	const SpideyInput11LegacyState* input =
+		SpideyInput11GetState();
+
+	const int newInputFrame =
+		gSpideyModernCameraLastConsumedSequence !=
+			gSpideyModernCameraInputSequence;
+	const int mouseX =
+		newInputFrame ?
+			gSpideyFrameMouseDeltaX :
+			0;
+	const int mouseY =
+		newInputFrame ?
+			gSpideyFrameMouseDeltaY :
+			0;
+	const float stickX =
+		newInputFrame &&
+		input &&
+		input->connected ?
+			input->cameraX :
+			0.0f;
+	const float stickY =
+		newInputFrame &&
+		input &&
+		input->connected ?
+			input->cameraY :
+			0.0f;
+	const int hasIntent =
+		newInputFrame &&
+		SpideyModernCameraHasIntent(
+			mouseX,
+			mouseY,
+			input);
+
+	if (gSpideyModernCameraOwner !=
+		camera)
+	{
+		gSpideyModernCameraOwner =
+			camera;
+		gSpideyModernCameraActive =
+			0;
+		gSpideyModernCameraLastConsumedSequence =
+			0xFFFFFFFFUL;
+	}
+
+	if (!gSpideyModernCameraActive &&
+		hasIntent)
+	{
+		gSpideyModernCameraYaw =
+			(int)camera->field_236 &
+			0x0FFF;
+		gSpideyModernCameraYDistance =
+			SpideyClampModernCameraYDistance(
+				*(int*)0x00548864);
+		gSpideyModernCameraActive =
+			1;
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"modern_camera event=acquire camera=0x%08lX mode=3 seed_yaw=%d seed_y_dist=%d mouse=%d,%d stick=%.4f,%.4f ownership=mode3_only\n",
+				(unsigned long)camera,
+				gSpideyModernCameraYaw,
+				gSpideyModernCameraYDistance,
+				mouseX,
+				mouseY,
+				(double)stickX,
+				(double)stickY);
+			fclose(f);
+		}
+	}
+
+	if (newInputFrame)
+	{
+		gSpideyModernCameraLastConsumedSequence =
+			gSpideyModernCameraInputSequence;
+	}
+
+	if (!gSpideyModernCameraActive)
+	{
+		retail(
+			camera,
+			0);
+		return;
+	}
+
+	if (newInputFrame)
+	{
+		const int yawDelta =
+			mouseX *
+				kSpideyModernCameraMouseYawScale +
+			(int)(
+				stickX *
+				(float)kSpideyModernCameraStickYawPerFrame);
+		const int pitchDelta =
+			(-mouseY) *
+				kSpideyModernCameraMousePitchScale +
+			(int)(
+				stickY *
+				(float)kSpideyModernCameraStickPitchPerFrame);
+
+		gSpideyModernCameraYaw =
+			(gSpideyModernCameraYaw +
+			 yawDelta) &
+			0x0FFF;
+		gSpideyModernCameraYDistance =
+			SpideyClampModernCameraYDistance(
+				gSpideyModernCameraYDistance +
+				pitchDelta);
+	}
+
+	const int xzDistance =
+		*(int*)0x00548860;
+	const int yDistance =
+		gSpideyModernCameraYDistance;
+	const int distanceSquared =
+		xzDistance * xzDistance +
+		yDistance * yDistance;
+	const int radialDistance =
+		M3dMaths_SquareRoot0(
+			distanceSquared);
+	const int verticalAngle =
+		ratan2(
+			-yDistance,
+			xzDistance);
+
+	camera->field_236 =
+		(i16)(
+			gSpideyModernCameraYaw &
+			0x0FFF);
+
+	// CM_Normal reads 0x548858/0x54885C directly. Keep the companion Y
+	// distance coherent as well so the retail collision/orientation stage
+	// after CM_Normal sees the same modern vertical orbit request.
+	*(int*)0x00548864 =
+		yDistance;
+	*(int*)0x0054885C =
+		radialDistance;
+	*(int*)0x00548858 =
+		verticalAngle;
+
+	const int requestedYaw =
+		gSpideyModernCameraYaw;
+
+	retail(
+		camera,
+		0);
+
+	const int retailResultYaw =
+		(int)camera->field_236 &
+		0x0FFF;
+
+	const int shouldLog =
+		hasIntent &&
+		(gSpideyModernCameraLastLogSequence == 0 ||
+		 gSpideyModernCameraInputSequence -
+			gSpideyModernCameraLastLogSequence >= 10);
+
+	if (shouldLog ||
+		retailResultYaw !=
+			requestedYaw)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"modern_camera event=update camera=0x%08lX mode=3 input_seq=%lu yaw=%d retail_yaw=%d y_dist=%d xz_dist=%d vertical_angle=%d radius=%d mouse=%d,%d stick=%.4f,%.4f retail_overrode_yaw=%d\n",
+				(unsigned long)camera,
+				gSpideyModernCameraInputSequence,
+				requestedYaw,
+				retailResultYaw,
+				yDistance,
+				xzDistance,
+				verticalAngle,
+				radialDistance,
+				mouseX,
+				mouseY,
+				(double)stickX,
+				(double)stickY,
+				retailResultYaw !=
+					requestedYaw ? 1 : 0);
+			fclose(f);
+		}
+
+		if (shouldLog)
+		{
+			gSpideyModernCameraLastLogSequence =
+				gSpideyModernCameraInputSequence;
+		}
+	}
+}
+
+static void SpideyInstallModernCameraCompat()
+{
+	const int installed =
+		SpideyPatchDirectCall(
+			0x00418414,
+			0x00418E00,
+			(void*)&SpideyModernMode3Camera,
+			"modern_camera_mode3");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"CAMERA");
+	if (f)
+	{
+		fprintf(
+			f,
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right pitch_y_dist=%d..%d collision=retail_after_mode3\n",
+			installed,
+			kSpideyModernCameraMinYDistance,
+			kSpideyModernCameraMaxYDistance);
+		fclose(f);
+	}
+}
+
 static void SpideyCameraPassivePoll(
 		unsigned long frame)
 {
@@ -8181,6 +8526,7 @@ static void SpideyCameraPassivePoll(
 		0;
 	gSpideyRawMousePollCount =
 		0;
+	++gSpideyModernCameraInputSequence;
 
 	// 0x0056F3B8 is the retail active-camera pointer used by
 	// CPlayer::PutCameraBehind. Read only; Phase 0 camera work must not
@@ -8290,6 +8636,18 @@ static void SpideyCameraPassivePoll(
 		gSpideyCameraTelemetryLastCamera =
 			camera;
 		return;
+	}
+
+	if (gSpideyModernCameraActive &&
+		(camera != gSpideyModernCameraOwner ||
+		 mode != CAMERAMODE_DEMO))
+	{
+		SpideyModernCameraRelease(
+			camera != gSpideyModernCameraOwner ?
+				"camera_changed" :
+				"retail_mode_changed",
+			camera,
+			mode);
 	}
 
 	const int cameraChanged =
@@ -13938,6 +14296,7 @@ void game_patches(void)
 	SpideyInstallMoviePresentCompat();
 	SpideyInstallMovieStopCompat();
 	SpideyInstallRetailInputCompat();
+	SpideyInstallModernCameraCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();
 	SpideyInstallGameplayUiScaleCompat();
