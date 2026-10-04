@@ -12522,12 +12522,18 @@ static int SpideyPatchMainImport(
 			continue;
 		}
 
+		// Fail closed for a bound import without a name thunk. Treating the
+		// resolved FirstThunk function pointers as IMAGE_IMPORT_BY_NAME RVAs
+		// would be unsafe.
+		if (!descriptor->OriginalFirstThunk)
+		{
+			return 0;
+		}
+
 		IMAGE_THUNK_DATA* nameThunk =
 			(IMAGE_THUNK_DATA*)(
 				base +
-				(descriptor->OriginalFirstThunk ?
-				 descriptor->OriginalFirstThunk :
-				 descriptor->FirstThunk));
+				descriptor->OriginalFirstThunk);
 		IMAGE_THUNK_DATA* addressThunk =
 			(IMAGE_THUNK_DATA*)(
 				base +
@@ -12982,12 +12988,9 @@ static int SpideyInstallModernTimerPacing()
 	void* originalKill =
 		0;
 
-	const int setInstalled =
-		SpideyPatchMainImport(
-			"WINMM.dll",
-			"timeSetEvent",
-			(void*)&SpideyCompatTimeSetEvent,
-			&originalSet);
+	// Cleanup must be interceptable before we are allowed to hand PCTIMER_Init
+	// a synthetic timer ID. If timeKillEvent cannot be hooked, do not hook
+	// timeSetEvent at all; retail timing remains completely untouched.
 	const int killInstalled =
 		SpideyPatchMainImport(
 			"WINMM.dll",
@@ -12995,15 +12998,25 @@ static int SpideyInstallModernTimerPacing()
 			(void*)&SpideyCompatTimeKillEvent,
 			&originalKill);
 
-	if (setInstalled)
-	{
-		gSpideyOriginalTimeSetEvent =
-			(SpideyTimeSetEventFn)originalSet;
-	}
 	if (killInstalled)
 	{
 		gSpideyOriginalTimeKillEvent =
 			(SpideyTimeKillEventFn)originalKill;
+	}
+
+	const int setInstalled =
+		killInstalled ?
+			SpideyPatchMainImport(
+				"WINMM.dll",
+				"timeSetEvent",
+				(void*)&SpideyCompatTimeSetEvent,
+				&originalSet) :
+			0;
+
+	if (setInstalled)
+	{
+		gSpideyOriginalTimeSetEvent =
+			(SpideyTimeSetEventFn)originalSet;
 	}
 
 	FILE* f =
@@ -13013,7 +13026,7 @@ static int SpideyInstallModernTimerPacing()
 	{
 		fprintf(
 			f,
-			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX retail_match=16ms_periodic_main_exe policy=chained_16_17ms_exact_60hz_phase fallback=retail\n",
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX retail_match=16ms_periodic_main_exe policy=chained_16_17ms_exact_60hz_phase install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
 			setInstalled,
 			killInstalled,
 			(unsigned long)gSpideyOriginalTimeSetEvent,
