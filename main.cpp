@@ -4550,7 +4550,7 @@ static void SpideyInstallDisplayAspectCompat()
 	{
 		fprintf(
 			f,
-			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_custom_options=1 pause_parent_rows_added=1 pause_parent_insert=before_last pause_submenu_rows=5 pause_retail_options_invoked=0 pause_update=%d pause_confirm=%d pause_confirm_action=0x1000 range=%d-%d step=%d defaults=%d,%d\n",
+			"display_menu_mod retail=0x0050D9B0 rows=7 row1=Aspect_Ratio row3=Gameplay_UI_Scale row4=Menu_Text_Scale row5=Display_Mode row6=Apply label=%d resfmt=%d aspectfmt=%d aspectprev=%d aspectnext=%d compatnext=%d compatprev=%d resprev=%d resnext=%d applyentry=%d applyconfirm=%d modeupdate=%d scaledraw=%d pause_custom_options=1 pause_parent_rows_added=1 pause_parent_insert=before_last pause_submenu_rows=5 pause_retail_options_invoked=0 pause_update=%d pause_confirm=%d pause_keyboard_source=raw_directinput_dik_0x1c range=%d-%d step=%d defaults=%d,%d\n",
 			labelInstalled,
 			resolutionFormatInstalled,
 			aspectFormatInstalled,
