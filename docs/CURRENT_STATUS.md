@@ -1,5 +1,33 @@
 # CURRENT STATUS
 
+## RUNTIME RESULT — RETAIL PHYSICS RESTORATION VALIDATED; SCRIPTED SPAWN FIXED (2026-10-04)
+
+Latest tested runtime:
+- revision `0b4d314341a516ed694f8ba15ada53389adb4dcb`;
+- user confirmed the first pre-render -> in-engine cutscene transition now succeeds;
+- Spider-Man remains alive at the scripted spawn instead of falling into the yellow void/death trigger;
+- user continued into normal gameplay successfully;
+- session exits normally with `exit_code=0`.
+
+Runtime evidence from `spidey-decomp(20261004-225452).log`:
+- frame 900 player body = `-78886624,15695872,-158920544`;
+- frame 900 shadow = `-78886624,16089088,-158920544`;
+- shadow normal = `0,-4096,0`, confirming the retail ground path is again keeping the player on the intended floor band;
+- frame 1200 remains on the same valid ground band and the session continues into ordinary gameplay;
+- timer pacing shutdown reports `dispatched_callbacks=4902`, `virtual_ticks=4902`, `unexpected_vblank_delta=1`, `last_interval_ms=17`;
+- this continues to support an essentially 60-Hz canonical master tick rather than an accidentally over-fast timer source.
+
+Conclusion:
+- the retail-physics restoration is validated and the scripted-spawn regression is closed;
+- do not reinstall the whole reconstructed `CPlayer::DoPhysics` replacement;
+- native-60 work can now proceed through narrow retail-preserving hooks around authored 30-Hz integration/countdown primitives.
+
+Immediate next implementation target:
+- preserve retail collision/landing/spawn/platform behavior;
+- hook only the normal/crawling force + damping integration seams around `0x00466D79/0x00466D84/0x00466D8B` and `0x00468012/0x0046801D/0x00468024`;
+- reuse the already-derived half-step fixed-point math so two 60-Hz updates reproduce one retail two-vblank/30-Hz velocity quantum;
+- keep displacement/collision ownership in retail until a narrower displacement seam is independently grounded.
+
 ## IMPLEMENTED — RETAIL PLAYER PHYSICS RESTORED; NATIVE-60 REWORK MOVES TO NARROW HOOKS (2026-10-04)
 
 Source:
