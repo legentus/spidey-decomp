@@ -1,3 +1,97 @@
+# LIVE FRONTIER — AIMED MOVEMENT FIXED; UNIFIED TPS MANUAL-AIM CAMERA READY (2026-10-04)
+
+## LATEST TESTED RUNTIME
+
+Revision:
+- `759e58dc4e27f06cb7678a1a06e4ed3743463328`
+
+Log:
+- `spidey-decomp(20261004-194202).log`
+
+Validated user result:
+- manual-aim locomotion now works;
+- Spider-Man no longer vibrates/resets in place;
+- camera still did not behave like a modern TPS while manual aim was held.
+
+Runtime proof:
+- locomotion mask reaches `actual_aim_state=0`;
+- `enter_suppressed` climbs into the hundreds;
+- body position/velocity change significantly during aimed movement;
+- movement release restores normal aim state.
+
+Freeze the movement/re-entry solution unless a regression is observed.
+
+## TIMER STATUS
+
+The elapsed-time periodic source is now behaving much better:
+- repeated settled windows at exactly `60.000 Hz`;
+- `vblank_one=60`, `vblank_multi=0`;
+- timer callbacks and virtual ticks stay matched;
+- source callbacks and elapsed source milliseconds stay matched.
+
+The prior steady 58–59 Hz one-shot drift is gone. There are still isolated stalls/transitions; do not touch timing again unless the user still perceives a recurring hitch.
+
+## NEW UNTESTED SOURCE
+
+Gameplay source:
+- `44dbfec52838fdadbd5b82556b15ced208297220` — `gameplay: unify manual aim with TPS orbit camera`
+
+Docs:
+- `b506a0d0a640c5bac80a7bf1d257b91849bc302d` — CURRENT_STATUS implementation checkpoint
+
+### New camera model
+
+Old manual-aim design used two competing camera spaces:
+- real mode-3 orbit yaw/pitch;
+- independent manual free-view yaw/pitch + final publish override.
+
+That is now removed from the active path.
+
+While manual aim is held:
+- mouse/right stick updates the real `gSpideyModernCameraYaw`;
+- pitch updates the real `gSpideyModernCameraYDistance`;
+- retail CM_Normal owns orbit position/collision/focus;
+- no post-CM `field_144` free-view rewrite;
+- no final LoadIntoMikeCamera quaternion override;
+- reticle/web aim follows the resulting camera ray;
+- locomotion re-entry guard remains untouched.
+
+This is meant to behave like a modern third-person shooter:
+- camera moves with look input;
+- movement continues underneath it;
+- reticle/web direction is camera-relative.
+
+No shoulder offset is implemented yet. If the camera works but reticle placement overlaps Spider-Man or feels too centered, next step is an over-the-shoulder offset—not reintroducing the old free-view cursor camera.
+
+Expected startup:
+- `modern_camera_install ... manual_aim_free_view=0 manual_tps_unified=1 ... manual_publish=0 ...`
+
+Expected runtime:
+- `modern_manual_camera event=tps_orbit ... reticle_policy=camera_ray`
+
+## EXACT NEXT ACTION
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`44dbfec5...` or newer**.
+
+Test:
+1. hold manual aim and move mouse/right stick left/right/up/down;
+2. actual camera should now orbit/tilt;
+3. move W/A/S/D + diagonals while aiming and rotating camera;
+4. fire webs while aim + move + camera rotation are simultaneous;
+5. report reticle placement/accuracy, especially whether it overlaps Spider-Man;
+6. release aim and confirm normal camera resumes cleanly;
+7. quick hip-fire sanity;
+8. report whether any periodic hitch remains perceptible.
+
+Return one consolidated log.
+
+Do not resume real-shadow work until this camera test is evaluated.
+
+---
+
 # LIVE FRONTIER — FINAL MANUAL-CAMERA PUBLISH + AIM RE-ENTRY GUARD + ELAPSED 60 HZ TIMER READY (2026-10-04)
 
 ## LATEST TESTED RUNTIME
