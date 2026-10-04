@@ -723,3 +723,19 @@ Validate in one session:
 
 Provide the single consolidated spidey-decomp.log after the run.
 
+
+
+### Runtime diagnostic traffic reduction
+
+After the first successful orbit-camera test, camera input telemetry was reduced to avoid unnecessary synchronous log-file churn during active mouse movement.
+
+Commit:
+- c71240e223884de59665e63c1b8984b606301845 — perf: throttle validated camera telemetry.
+
+The modern camera still logs:
+- acquisition/release;
+- mode/camera changes;
+- web target changes;
+- periodic/input samples at a much lower cadence.
+
+This does not alter camera behavior or sensitivity.
