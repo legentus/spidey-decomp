@@ -8422,3 +8422,52 @@ Fast-launcher bootstrap hardening:
 - `27cc5a7f63b332cf1ffc29a8e427170731db2d3c` — consume that preserved revision in the fast PowerShell workflow.
 
 This prevents the first use of the new BAT from incorrectly treating an old built DLL as current after the bootstrap updater advances `LOCAL_DEV_REVISION.txt`.
+
+
+## Fast update/test launcher self-overwrite fix (2026-10-03)
+
+User's first run of `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` failed after the normal updater refreshed the project from:
+
+- local: `aa7fa6ace33e3784c196a3ed25a31d16f82cd0d2`
+- remote: `717049a7ef915330352cf8415bdfd9a68bb2e1f9`
+
+Observed console tail:
+
+`'D_TEST_LATEST_BUILD.ps1" (' is not recognized as an internal or external command`
+
+followed by:
+
+`[ERROR] Fast workflow was not found after updating.`
+
+### Root cause
+
+The BAT was executing from the project root while `UPDATE_SPIDEY_PROJECT.ps1` performed a `robocopy /MIR` refresh of that same project tree.
+
+The update replaced `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` while `cmd.exe` was still reading it. When control returned from the updater, CMD resumed at the old byte offset in the newly replaced BAT and landed in the middle of a command line. That produced the mangled `'D_TEST_LATEST_BUILD.ps1" ('` command.
+
+The fast PowerShell workflow itself **was** present in live `dev`; the apparent "not found" result came from the corrupted BAT control flow.
+
+### Fix
+
+Commit:
+
+- `c81b2073b456bcdd065c0a5215b5df73a8bee34a` — **fix: make fast launcher update-safe**
+
+New launcher architecture:
+
+1. the project-root BAT immediately copies itself to a unique BAT under `%TEMP%`;
+2. the project-root BAT calls that temporary copy;
+3. the temporary copy receives the original project root explicitly;
+4. all update/build/test work runs from the temporary BAT;
+5. if the fast PowerShell workflow is not installed yet, the temporary runner invokes `tools\UPDATE_SPIDEY_PROJECT.ps1 -NoPause` directly;
+6. after bootstrap/update, it invokes `tools\FAST_UPDATE_AND_TEST_LATEST_BUILD.ps1` from the refreshed project.
+
+The project-root BAT keeps the temporary `CALL` and its immediate `EXIT /B` on the same physical command line so CMD parses the continuation before the project copy can be replaced.
+
+### User recovery
+
+Because the failed bootstrap already successfully refreshed the project to `717049a7...`, the supporting fast PowerShell files should now exist locally.
+
+Replace the old downloaded `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` with the corrected version from commit `c81b2073...` and run it again.
+
+No source/gameplay code changed as part of this launcher repair.
