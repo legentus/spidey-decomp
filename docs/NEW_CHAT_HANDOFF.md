@@ -1,3 +1,95 @@
+# LIVE FRONTIER — RETICLE DRAG FIX + HITCH PHASE PROBE READY (2026-10-04)
+
+## LATEST TESTED RUNTIME
+
+Revision:
+- `2ec405d96253df7332d5fe6609729fb4f310b720`
+
+Log:
+- `spidey-decomp(20261004-200625).log`
+
+User result:
+- 96-unit manual-aim vertical framing is much better;
+- aimed locomotion remains fixed;
+- actual manual-aim camera movement remains fixed;
+- remaining manual-aim refinement: reticle/cursor visibly lags behind during fast look input;
+- toward end user fired a web after each perceived hitch.
+
+Validated hitch correlation:
+- FireWeb timestamps trail the major stalls instead of preceding them;
+- examples include stall frame 3961 -> shot frame 3970 and stall frame 4484 -> shot frame 4499;
+- FireWeb is therefore not the hitch trigger.
+
+## NEW UNTESTED SOURCE
+
+- `f3f25d9f3b134f4b7bd8d6a15f5d98ca8f9f3bf1` — same-frame post-camera manual reticle update
+- `ca2af74d4238b3fe4255a2d8c45cff3766c91bc0` — in-memory slow-frame presenter phase partition
+- `3fce9e0edacdd16ae3d66cf2975eeef587d01327` — CURRENT_STATUS checkpoint
+
+### Reticle fix
+
+Root cause:
+- SpideyAI0/SetupLookaroundCamera calculates field_DC0 before the current frame's CCamera::AI orbit update;
+- camera then moves later in the same frame;
+- fast look input therefore renders a reticle ray derived from stale camera state.
+
+Fix:
+- existing 0x00418458 -> 0x00416B10 framing wrapper still applies 96-unit elevated focus and calls retail;
+- after retail returns, it recomputes field_DC0 from the final current-frame camera position -> framed focus;
+- field_DE4 remains active;
+- early SetupLookaroundCamera point remains only as a fallback.
+
+Expected:
+- `modern_manual_camera event=framing ... post_camera_reticle=1 reticle_point=...`
+- no cursor drag/chase on fast mouse sweeps.
+
+Do not tune sensitivity or the 96-unit framing unless user explicitly asks after this test.
+
+### Hitch phase probe
+
+Existing slow-event timing only says the interval between presenter entries was late.
+
+New in-memory fields:
+- `present_work_us`
+- `outside_present_us`
+- `record_timing_us`
+- `transient_us`
+- `shadow_end_us`
+- `draw_probe_us`
+- `present_shadow_us`
+- `other_present_us`
+
+All phase measurements use QPC in memory. No new per-frame file I/O.
+
+Interpretation:
+- large present_shadow_us = actual DX11 present/GPU wait;
+- large shadow_end_us = replay/end-frame;
+- large transient_us = transient surface processing;
+- large draw_probe_us = draw capture flush;
+- large other_present_us = another presenter-side operation;
+- large outside_present_us with small presenter values = hitch is in game/update/render code before presenter.
+
+## EXACT NEXT ACTION
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Required source:
+- **`ca2af74d...` or newer**.
+
+Test:
+1. manual aim and perform fast mouse sweeps;
+2. check whether reticle remains snappy/no-drag;
+3. verify framing and aimed locomotion still work;
+4. fire while aiming/moving/turning;
+5. wait for several hitches;
+6. optional: shoot once after each hitch again;
+7. quick hip-fire sanity;
+8. return one consolidated log.
+
+Do not resume real-shadow work until this camera/hitch test is evaluated.
+
+---
+
 # LIVE FRONTIER — TPS CAMERA MOVES; VERTICAL AIM FRAMING READY (2026-10-04)
 
 ## LATEST TESTED RUNTIME
