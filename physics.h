@@ -9,4 +9,11 @@
 EXPORT void Physics_SetGravity(CVector *);
 void patch_physics(void);
 
+#ifdef _WIN32
+CVector* __fastcall SpideyPhysicsFriction60(
+		CVector* velocity,
+		void*,
+		const CFriction& friction);
+#endif
+
 #endif
