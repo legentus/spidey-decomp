@@ -1,5 +1,78 @@
 # CURRENT STATUS
 
+## IMPLEMENTED — FIRST NARROW RETAIL-PRESERVING PLAYER NATIVE-60 BATCH READY (2026-10-04)
+
+Source chain:
+- `091ff54415df063c2b545cad6a81061b7130b855` — declare the narrow player friction hook;
+- `7c31e955b362a76e23798e4b442b9e93bd4b6ee4` — implement half-step force/damping inside the retail friction seam;
+- `5d0c2585c9f1437fb4677cf99c1d013c1e754383` — install the two retail friction call hooks plus displacement/fall threshold edits;
+- `9235eb1db0a64ed479f3bcde6356ea42b3b86f96` — preserve the retail zero-tick path by changing comparison thresholds instead of branch opcodes.
+
+Runtime ownership:
+- retail `CPlayer::DoPhysics @ 0x00466CE0` still owns the complete normal-physics function;
+- retail `CPlayer::DoCrawlingPhysics @ 0x00467FD0` still owns the complete crawl-physics function;
+- retail `CPlayer::DoSwingingPhysics @ 0x00467D20` remains untouched;
+- global `patch_physics()` remains disabled;
+- custom code owns only two friction CALL sites plus five one-byte elapsed-vblank thresholds.
+
+Force/damping hooks:
+- `0x00466D84 -> CVector::operator%=(mFric) @ 0x004E76B0`;
+- `0x0046801D -> CVector::operator%=(mFric) @ 0x004E76B0`.
+- Retail has already executed `mVel += mAcc` when the wrapper is entered.
+- For `field_80 == 1`, the wrapper subtracts `mAcc` to recover start-of-tick velocity and applies the previously derived fixed-point half-step acceleration/damping factors.
+- Retail `KillSmall()` executes immediately afterward as before.
+- All other `field_80` values fall through to the retail friction operator.
+
+Displacement/fall threshold edits:
+- special no-collision movement threshold immediate: `0x00466DC9: 02 -> 00`;
+- normal movement threshold immediate: `0x00466E22: 02 -> 00`;
+- post-collision velocity reconstruction threshold immediate: `0x00467592: 02 -> 00`;
+- fall displacement threshold immediate: `0x004677ED: 02 -> 00`;
+- crawling movement threshold immediate: `0x00468056: 02 -> 00`.
+
+Why the threshold is changed from 2 to 0:
+- retail `CBody::EveryFrame` derives `field_80 = gTimerRelated - field_7C`, asserts it is non-negative, and caps it at 6;
+- keeping the existing `JLE` while changing `cmp ...,2` to `cmp ...,0` preserves the original direct shortcut for a zero-tick update;
+- `field_80 == 1` now uses retail's already-existing general elapsed-vblank expression, yielding approximately half displacement/fall for a native 60-Hz tick;
+- `field_80 == 2` also uses the general path but its extra term is zero, reproducing the original full displacement;
+- `field_80 > 2` continues to use the same retail catch-up path it always used.
+- For odd fixed-point movement values, the retail general expression can differ from a plain arithmetic half by at most one fixed-point unit.
+
+Retail-byte grounding:
+- captured normal-physics bytes confirm both friction CALL sites target `0x004E76B0`;
+- all five threshold immediate bytes are exactly `0x02` in the known retail capture;
+- patch installation validates expected CALL targets/bytes before writing anything.
+
+Static validation at `9235eb1...`:
+- `physics.cpp` braces/parentheses balanced;
+- `main.cpp` braces/parentheses balanced;
+- one friction-hook declaration and one definition;
+- one installer and one installer call;
+- zero live `patch_physics();` calls;
+- all five threshold sites present exactly once in the installer.
+- This batch has **not yet been compiled or runtime-tested** under the local matching VC6 toolchain.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected revision:
+- `9235eb1db0a64ed479f3bcde6356ea42b3b86f96` or a newer documentation-only descendant.
+
+First confirm startup telemetry contains:
+- `player_physics_60_install normal_friction=1 crawl_friction=1 special_move=1 normal_move=1 velocity_restore=1 fall=1 crawl_move=1`.
+
+Then do one meaningful pass:
+1. New Game -> difficulty -> first Doc Ock pre-render -> following live/in-engine cutscene;
+2. confirm Spider-Man is still correctly grounded/alive at the scripted spawn;
+3. continue into ordinary gameplay and judge walking/running/jumping/falling pace at 60;
+4. test wall/ceiling crawling if convenient;
+5. fight/move around enemies briefly so the already-active native-60 RotY path is exercised too;
+6. quick manual-aim/camera sanity only; do not retune those frozen systems;
+7. return the single consolidated `spidey-decomp.log` and note whether game/player pace now feels materially closer to correct 60-Hz timing.
+
+If this gate passes, continue the native-60 audit outward from player physics into the next proven raw-frame/countdown primitives. Do not broaden timing patches from guesswork.
+
 ## RUNTIME RESULT — RETAIL PHYSICS RESTORATION VALIDATED; SCRIPTED SPAWN FIXED (2026-10-04)
 
 Latest tested runtime:
