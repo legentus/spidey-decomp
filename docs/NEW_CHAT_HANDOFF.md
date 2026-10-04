@@ -1,3 +1,57 @@
+# NATIVE 60-HZ HANDOFF UPDATE — FIRST PHYSICS + AI CONVERSION BATCH READY (2026-10-04)
+
+Latest tested runtime:
+- `21ced52bc9c8e5903fe66cc939e4114804c248fb`;
+- log `spidey-decomp(20261004-220426).log`.
+
+That runtime proved:
+- Mysterio elapsed-time laser patch installs successfully;
+- master timer cadence is essentially 60 Hz, so remaining speed-up is downstream legacy per-update logic;
+- all four requested retail captures completed cleanly;
+- retail `CAIProc_RotY::Execute @ 0x00401110` is a raw authored-frame primitive;
+- player normal/crawling physics use a two-vblank/30-Hz base quantum in important paths;
+- `CVenom::SynthesizeAnalogueInput` already advances its obvious timers/path indices with `field_80`, so no blind Venom 0.5 scaler is justified.
+
+Current implemented source:
+- `6b56677c383331da12035109df59b165ae69a066` — native-60 player physics half-step integration;
+- `48b1a9d503f1646f508720eae0174a57617e9ed5` — native-60 RotY half-step Execute;
+- `e3109c1ee2e1f252ade18e72279c2d14b7e75ba8` — install RotY and retire completed startup dumps;
+- `bb1cfe03abc61d7445dd0cf6f9eb5edfa7001b64` — CURRENT_STATUS test-frontier checkpoint.
+
+Architecture remains:
+- native gameplay simulation must be correct at 60 Hz;
+- continuous legacy two-vblank physics/rotation is split across two 1/60 ticks;
+- already elapsed-aware `field_80` paths stay elapsed-aware;
+- event/state counters are not scaled;
+- >60 FPS later comes from decoupled rendering/interpolation while simulation stays capped to canonical 60-Hz advancement.
+
+RotY exact scheme:
+- preserve retail constructor/division;
+- use otherwise-unused zeroed `CAIProc::field_C` as half-step phase;
+- two 60-Hz angular halves sum exactly to one retail `field_24` step;
+- decrement retail `field_20` only after both halves;
+- `field_80==2` reproduces one old retail step in one call;
+- `field_80==1` produces smooth native-60 turning over two calls.
+
+Do not patch yet:
+- generic `CAIProc::Wait` — reconstructed source is suspicious, but retail implementation is inlined and exact countdown setup still needs grounding;
+- Venom synthesized input — capture shows its obvious timing is already `field_80`-based.
+
+Next test:
+1. run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. test normal traversal, jump/fall, and crawl if convenient;
+3. watch enemy/AI rotations/state transitions;
+4. compare subjective overall game speed to the previous 60-FPS runtime;
+5. quick manual-aim sanity only;
+6. ordinary scripted/cutscene progression if convenient;
+7. no hitch reproduction work;
+8. return consolidated `spidey-decomp.log` plus subjective pace notes.
+
+If build fails, fix compiler errors before runtime testing.
+Do not claim CI-green: GitHub returned no visible workflow runs/statuses for this branch.
+
+---
+
 # NATIVE 60-HZ HANDOFF UPDATE — FULL AI/VENOM/PLAYER-PHYSICS CAPTURE READY (2026-10-04)
 
 Latest source:
