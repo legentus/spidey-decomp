@@ -1,5 +1,63 @@
 # CURRENT STATUS
 
+## RUNTIME CHECKPOINT — MANUAL AIM VALIDATED; HITCH SOURCES RESOLVED; HIGH-FPS TIMING FRONTIER (2026-10-04)
+
+Tested runtime:
+- revision `091c2345ef1d4c927878d6ec47c2c54efaadf9ce`
+- log `spidey-decomp(20261004-203738).log`
+
+User-visible result:
+- manual aiming is now **perfect for now**;
+- same-frame post-camera reticle update is validated;
+- 96-unit vertical framing is accepted;
+- aimed movement, camera orbit, and firing remain working;
+- **freeze manual-aim work unless a future regression appears**.
+
+Hitch result:
+- the phase probe successfully separated multiple causes;
+- several very large stalls are self-inflicted synchronous diagnostic/logging work, not gameplay or DX11 presentation:
+  - frame 3347: 132.884 ms interval, 130.390 ms in `logic_telemetry_us`;
+  - frame 3580: 234.599 ms interval, 232.152 ms in `logic_telemetry_us`;
+  - frame 3807: 327.935 ms interval, 325.286 ms in `logic_telemetry_us`;
+  - frame 4437: 177.980 ms interval, 175.496 ms in `logic_telemetry_us`;
+  - additional stalls at frames 1982/2630/2864/3956/4592/8357/8586 are dominated by `record_timing_us`, which includes the synchronous timing-window write.
+- genuine non-logging stalls also remain:
+  - frame 961: 466.948 ms interval, 462.087 ms in `shadow_end_us`;
+  - frame 1681: 384.864 ms interval, 381.378 ms in `shadow_end_us`;
+  - frame 7184 and frame 7801 are dominated by unpartitioned presenter remainder (`other_present_us`);
+  - frame 7417: 209.395 ms interval, 205.362 ms inside untouched retail gameplay logic `0x00455400`;
+  - frame 7657: 168.557 ms interval, 165.241 ms in retail gameplay logic;
+  - frame 8977: 327.539 ms interval, 324.503 ms in retail gameplay logic.
+- web shots still trail the hitch events and remain a user marker, not the trigger.
+
+New priority requested by user:
+- pause real-shadow work;
+- fix the engine's high-FPS timing architecture before returning to shadows;
+- research and implement a proper render/simulation decoupling rather than merely forcing the old frame loop to 60 Hz.
+
+Current static timing evidence:
+- `PCTimer.cpp` maintains an engine clock in nominal **60 vblank units per second**: `field_4 * 60 / 1000`, accumulated into `gTimerVblankRelated`, then advanced through `MyVSync()`.
+- `CBody::EveryFrame` derives per-object elapsed ticks in `field_80 = gTimerRelated - field_7C`, clamps it to 6, and seeds first update with `field_80=2`.
+- `CSuper::UpdateFrame` advances animation by `field_80 * mAnimSpeed / 2`, with a fallback `field_80=2`.
+- those two values strongly support a native nominal gameplay update quantum of **2 vblank ticks = 1/30 second**, while real-time clocks remain 60-unit based.
+- some systems are already elapsed-tick aware (movement paths use `field_80`), while others are still update-count based (for example `CAIProc::Wait` decrements by one per Execute call).
+
+Working architecture hypothesis:
+1. keep the canonical engine clock in real 60-Hz vblank units;
+2. run gameplay simulation on a fixed 30-Hz step (2 vblank ticks);
+3. allow rendering/input/presentation at 60 Hz or higher;
+4. later add render interpolation between simulation states for truly smooth uncapped output;
+5. audit and migrate frame-count timers/state machines that bypass `field_80`;
+6. retain a compatibility path for known sequences that historically require 20 FPS until their timing is individually repaired.
+
+Do not implement a blind global variable-delta multiplier. The existing engine already has a partial elapsed-tick model; the correct first task is to identify the authoritative gameplay-loop gate and `gTimerRelated` writer, then decouple simulation from presentation at that boundary.
+
+Exact next RE:
+- map/decompile retail gameplay function `0x00455400` and caller at `0x00455A8B`;
+- locate every writer of `gTimerRelated`, `Vblanks`, and `TTime`;
+- distinguish whole-simulation dispatch from per-subsystem logic before adding a fixed-step gate;
+- remove/quiet synchronous timing diagnostics once the required evidence is safely documented.
+
 ## CHAT-LIMIT HANDOFF CHECKPOINT — RETICLE NO-DRAG + HITCH PHASE TEST READY (2026-10-04)
 
 The chat reached its maximum length immediately after the reticle-lag/hitch investigation.
