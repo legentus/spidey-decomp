@@ -1,5 +1,44 @@
 # CURRENT STATUS
 
+## RUNTIME REGRESSION — PRE-RENDER -> LIVE CUTSCENE HANDOFF CRASH (2026-10-04)
+
+Latest tested runtime:
+- revision `f7bd7cbe5075554f61043cd3a6dfc8ed0bda0261`;
+- build succeeds under the matching VC6 toolchain;
+- process exits with `0xC0000005` access violation.
+
+Exact user repro:
+1. New Game;
+2. select difficulty;
+3. first pre-rendered Doc Ock/Octavius cutscene plays;
+4. that movie ends successfully;
+5. the next sequence should be an **in-game/live-engine cutscene**;
+6. that live sequence never appears: transition freezes, then crashes.
+
+Crash-tail facts:
+- `movie_surface_release reason=stop_call ... remaining_refs=0` is logged immediately before the fault, so the movie surface itself shuts down;
+- first access violation:
+  - proxy address `0x1003E338`;
+  - read target `0xFB4BC000`;
+  - `EDI=0xFB4BC000`;
+- stack retains retail return addresses including:
+  - `0x004526EC`, inside retail `M3dColij_InitLineInfo @ 0x004524C0`;
+  - `0x004E68EB`, inside retail `Utils_GetGroundHeight @ 0x004E6840`;
+- this places the failure after movie shutdown, during live-world collision/ground-placement work.
+
+Primary root-cause candidate found in the newly reconstructed `CPlayer::DoPhysics`:
+- local `SLineInfo lineInfo` intentionally preserved a retail uninitialized-`pItem` defect;
+- if the player's computed movement length is zero, the movement sweep loop is skipped;
+- `lineInfo.pItem` is then tested without ever passing through `M3dColij_InitLineInfo`;
+- in the original executable this depended on accidental stack contents;
+- in the recompiled proxy the stack layout is different, so a stationary player at live-cutscene startup can turn that garbage pointer into an invalid collision object dereference;
+- this exactly matches the user clarification that the failing next sequence is an in-engine cutscene where Spider-Man can begin stationary.
+
+Immediate fix:
+- explicitly initialize the local `lineInfo.pItem = 0` before the zero-movement branch can inspect it;
+- this removes undefined behavior in the recompiled replacement without changing any successful collision path;
+- keep the native-60 physics and RotY conversions otherwise unchanged.
+
 ## BUILD FIX — FIRST NATIVE-60 BATCH NOW COMPILES PAST REPORTED SOURCE ERRORS (2026-10-04)
 
 User build attempt:
