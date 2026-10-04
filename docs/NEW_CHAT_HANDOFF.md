@@ -1,3 +1,75 @@
+# LIVE FRONTIER — FREE MANUAL AIM + AIMED LOCOMOTION + 60 HZ TIMER PHASE BUILD READY (2026-10-04)
+
+## READ THIS FIRST
+
+Latest **tested** runtime:
+- `spidey-decomp(20261004-182002).log`
+- tested revision: `8958de0676dda897b5c8dc346493276d4c5ffffd`
+
+Latest source is newer and **UNTESTED**:
+- `edf6dcc169efce90f9655f8038eeda9337278902` — phased 60 Hz timer source
+- `af820d29ebf2344bf087860a4287df0c6307c85d` — free manual-aim view + locomotion aim-state sidecar
+- `a50f64b3afb22b55c30d508619e2d09691542f38` — timer hook fail-closed/atomic cleanup hardening
+- `c7c20392e10c354c4b292810af4feb8dd229e54a` — manual-aim ownership/mode-transition hardening
+- `d47b2000b0554df5d09c8272863e1f5c6106164a` — CURRENT_STATUS test-frontier checkpoint
+
+### What the latest tested runtime proved
+
+- Hip-fire remains effectively fixed. Do not change its selector without a demonstrated regression.
+- Manual web direction is now correct: where the user could aim, webs consistently traveled in that direction.
+- The remaining camera issue was that retail mode 3 still published Spider-Man's body as `camera.field_144`, so the view remained centered on him.
+- Manual locomotion still failed even though CheckForwards entered run state; a later manual-aim reset returned the player to stand with zero position/velocity.
+- The small hitch is phase-locked to roughly every 24 presented frames / 0.4 s, matching the retail 16 ms (62.5 Hz) multimedia timer beating against the 60 Hz virtual-vblank clock.
+- Runtime shadow probe confirms `G_MECHLIST @ 0x006A9038` head is the Spider-Man actor (`region=spidey`), so it is valid as the current-player identity for the camera wrapper.
+
+### New untested behavior
+
+**Manual aim camera**
+- seeds independent yaw/pitch from the current visible camera ray;
+- retail mode 3 still owns camera position/collision;
+- mouse/right stick changes the independent manual view;
+- after retail camera position generation, `camera.field_144` becomes a forward free-aim focus rather than Spider-Man's body;
+- field_DC0/web direction continues to consume that same camera ray.
+
+**Manual aim movement**
+- while aim + movement are both held, retail `field_8EA` is masked across locomotion;
+- a sidecar preserves effective manual-aim state for modern camera/reticle logic;
+- release/mode/player ownership transitions restore the real aim flag;
+- present-time validation is the fail-safe.
+
+**Timer**
+- keeps retail TimerCallback/MyVSync/pause/accumulator;
+- replaces only the fixed 16 ms periodic source with chained one-shot 16/17 ms 60 Hz phase timing;
+- timeKillEvent is hooked before timeSetEvent so synthetic IDs are impossible without cleanup ownership;
+- hook failure leaves retail timing untouched.
+
+## EXACT NEXT USER TEST
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Verify the loaded session is **`c7c20392...` or newer** (documentation commits after it are expected).
+
+Test:
+1. manual aim left/right/up/down — can the view now aim away from Spider-Man, and does the web/reticle follow?
+2. while aiming, W/A/S/D + diagonals — does Spider-Man actually translate?
+3. aim + move + camera + fire simultaneously;
+4. release aim while moving — verify clean exit/no stuck state;
+5. quick pause/camera-mode regression;
+6. play long enough to judge whether the regular ~0.4 s micro-hitch is gone/reduced/unchanged/worse;
+7. quick hip-fire sanity only;
+8. return the single consolidated `spidey-decomp.log`.
+
+Expected markers:
+- `timer_pacing_install ... atomic_cleanup=1 ...`
+- `timer_pacing event=intercept ...`
+- `timing_present ... timer_active=1 ... timer_unexpected_delta=0 ...`
+- `modern_manual_camera event=acquire/update ...`
+- `modern_manual_aim event=movement ... aim_state=1 actual_aim_state=0 locomotion_mask=1 ...`
+
+Do not resume real-shadow work until this runtime is evaluated.
+
+---
+
 # LIVE FRONTIER — HIP-FIRE VALIDATED; CAMERA-RAY MANUAL-AIM DIAGNOSTIC BUILD READY (2026-10-04)
 
 ## READ THIS FIRST
