@@ -1,5 +1,46 @@
 # CURRENT STATUS
 
+## CHASE VENOM HIGH-FPS FAILURE CONFIRMED; PLAYER SYNTHESIZED-INPUT RETAIL CAPTURE ADDED (2026-10-05)
+
+Latest tested runtime:
+- revision `82d2f966f2691010f5e60af1c1d6cdd6cebdbc0a`;
+- consolidated log: `spidey-decomp(20261005-073554).log`;
+- user reproduced the known Chase Venom cutscene/path failure at the current native-60 cadence;
+- the already-validated player native-60 physics hooks all install successfully in this run, so do not roll them back as a workaround.
+
+External symptom match:
+- PCGamingWiki documents the end-of-building Chase Venom cutscene bug: after Venom exits the building, Spider-Man follows an improper path / turns into the wall, falls too far behind, and can trigger game over;
+- the community workaround is a temporary 20-FPS cap for this sequence.
+
+Current RE conclusion:
+- previous exact retail capture of `CVenom_SynthesizeAnalogueInput @ 0x004E9B00` showed its main command timers/path progression already consume `field_80`; do not apply a blind Venom-wide 0.5/0.333 scaler;
+- the visible failing actor is Spider-Man while the game owns his controls during the scripted chase;
+- retail has an unreconstructed `CPlayer::SwitchToSynthesizedInput @ 0x004BC1A0` and `CPlayer::SynthesizeAnalogueInput @ 0x004BC300` path, making that the highest-value unresolved seam;
+- `CVenom_FollowDirections @ 0x004EB530` remains the compact dispatcher coordinating the chase/script and is captured alongside the player routines.
+
+New source:
+- `78ac212e09baa7e3090d4945b156f99c4d97eaeb` — one-shot startup capture for the Chase Venom synthesized-input path.
+
+Startup-only captures added:
+- `CPlayer_SwitchToSynthesizedInput_Block @ 0x004BC1A0`, size `0x140`;
+- `CPlayer_SynthesizeAnalogueInput_Block @ 0x004BC300`, size `0x11B0`;
+- `CVenom_FollowDirections_Block @ 0x004EB530`, size `0x160`.
+
+Logging policy:
+- these are startup byte dumps only;
+- no synchronous per-frame Chase Venom telemetry was added, specifically to avoid reintroducing the logging-induced hitches previously eliminated;
+- the three blocks are immutable retail code, so the next run does **not** need to reproduce the chase bug to collect them.
+
+Exact next step:
+1. run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+2. merely reach the game/menu and exit once the startup log is written;
+3. return the single consolidated `spidey-decomp.log`;
+4. reconstruct the player synthesized-input command parser and compare it with the already-recovered Venom command semantics;
+5. if a raw 20/30-FPS-authored step/countdown is proven, patch only that seam to canonical 60-Hz elapsed-time / substep semantics;
+6. only add level-specific in-memory runtime tracing if the static retail reconstruction still leaves multiple plausible active branches.
+
+Do not solve this by globally reducing Logic to 20 FPS or by changing the validated native-60 player physics path.
+
 ## RUNTIME VALIDATED — NARROW PLAYER NATIVE-60 BATCH FIXES PERCEIVED SPEED WITHOUT REGRESSING GROUNDING (2026-10-05)
 
 Latest tested runtime:
