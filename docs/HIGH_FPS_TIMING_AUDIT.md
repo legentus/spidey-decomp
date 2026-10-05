@@ -287,3 +287,81 @@ The next capture exists specifically to avoid changing `CAIProc::Wait` or player
 4. Revisit generic AI waits only after Ob_AI cadence is proven.
 5. Continue source classification of raw gameplay counters.
 6. Only after 60-Hz behavior is robust, patch PlayAway into separate fixed-simulation and high-refresh render scheduling.
+
+
+## Chase Venom scripted steering — camera-relative controller RE (2026-10-05)
+
+The Chase route failure has now been pushed below the generic scheduler layer.
+
+Detailed reconstruction:
+- `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`
+
+### Proven retail chain
+
+`CPlayer::SynthesizeAnalogueInput @ 0x004BC300`:
+- main script clock `field_1B0 += field_80` is already elapsed-tick-aware;
+- active worker list head is at `+0x1BC`;
+- route worker type 2 is the relevant automated movement producer.
+
+Type-2 worker:
+- reads target X/Z from `worker+0x08/+0x0C`;
+- checks target distance against `0x40`;
+- computes target direction from current Spider-Man X/Z;
+- subtracts `CCamera+0x23A`;
+- emits camera-relative signed analogue axes into `field_E2D/E2E`.
+
+`CPlayer::ReadAnalogueInput @ 0x004BD510`:
+- calls retail synth at `0x004BD572` while synthesized mode is active;
+- contains the confirmed raw per-call `field_8F0 += 0x20` ramp;
+- derives `field_E32 = (field_E34 - ratan2(-axisX, axisY) + 0x400) & 0xFFF`.
+
+`CPlayer::CheckForwards @ 0x004BF8A0`:
+- when `field_8E8 == 0`, consumes `(field_E32 + camera->field_23A) & 0xFFF` as the desired movement heading;
+- compares it with `GetEffectiveHeading`;
+- calls `SetTargetTorsoAngle(desiredHeading, true)` on the forward-turn path.
+
+`CCamera+0x23A` is transform-derived:
+- `CCamera::LoadIntoMikeCamera` calculates it from the actual camera matrix;
+- it is not simply the requested `field_236` camera angle.
+
+### Consequence for the first 20-Hz sample/hold experiment
+
+Holding the type-2 analogue axes for two native-60 frames is not equivalent to a true 20-Hz control update:
+- the held axes are camera-relative;
+- the camera transform keeps updating at 60 Hz;
+- `CheckForwards` uses the current camera transform heading;
+- therefore the same held axes can resolve to a changing world desired heading.
+
+This is a real cross-cadence feedback bug, not a cutscene frame cap.
+
+### Current fix
+
+Source:
+- `f2f46b7ff37332cbcb2179ac5f8d0b2991dc9a0e`
+
+Policy:
+- keep render/camera/physics/collision/animation at 60 Hz;
+- keep Chase synthesized controller sampling at a 20-Hz equivalent;
+- on a fresh type-2 sample, capture the effective world desired heading after retail ReadAnalogueInput;
+- on held frames, compensate `field_E32` against the current `camera+0x23A`;
+- CheckForwards then sees the same sampled world heading across the three 60-Hz simulation frames.
+
+Telemetry:
+- `heading_samples`;
+- `heading_corrections`;
+- `heading_max_pre_correction_drift`;
+- per-sample camera heading, E34 basis, E32 relative heading and reconstructed world heading.
+
+### Remaining unknown: E34
+
+`field_E34` is read by ReadAnalogueInput as a heading basis but its writer/update order is not yet identified.
+
+Source:
+- `e1c8a369a80b8dfd14ed79655c00110ac1b2c546`
+
+The next runtime performs startup-only xref scans over `SpideyAI0 @ 0x004B13F0 + 0x73A0` for:
+- `+0xE32`;
+- `+0xE34`;
+- `+0x23A`.
+
+This remains consistent with the project rule: do not globally scale the engine. Convert only proven cross-cadence behavior at the narrowest ownership seam.
