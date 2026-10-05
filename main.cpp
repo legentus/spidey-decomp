@@ -5685,6 +5685,28 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
+	// One startup-only xref batch for the remaining Chase steering basis.
+	// Retail type-2 synth uses camera+0x23A, ReadAnalogueInput writes E32
+	// from E34, and CheckForwards consumes E32. Recover every E32/E34 and
+	// camera-heading displacement in SpideyAI0 so the next runtime tells us
+	// exactly who owns E34 and whether its update order is another 60-Hz
+	// dependency. This is static byte scanning only; no per-frame I/O.
+	SpideyLogRetailFieldXrefs(
+		"SpideyAI0_E32",
+		0x004B13F0,
+		0x73A0,
+		0x0E32);
+	SpideyLogRetailFieldXrefs(
+		"SpideyAI0_E34",
+		0x004B13F0,
+		0x73A0,
+		0x0E34);
+	SpideyLogRetailFieldXrefs(
+		"SpideyAI0_CameraHeading23A",
+		0x004B13F0,
+		0x73A0,
+		0x023A);
+
 	SpideyInstallChaseSynth20HzCompat();
 }
 
