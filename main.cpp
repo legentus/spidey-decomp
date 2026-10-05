@@ -4626,16 +4626,12 @@ static int gSpideyChaseBodyCadenceInstalled = 0;
 
 static int SpideyChaseVenomCadenceActive()
 {
-	if (Trig_GetLevelID() != 0x501)
-		return 0;
-
-	CPlayer* player =
-		*(CPlayer**)0x006A9038;
-	if (!player)
-		return 0;
-
+	// Validation build: match the known external fix for the entire Chase
+	// Venom level first. Once runtime proves this is the correct layer, we can
+	// narrow the activation window without guessing which synthesized-input
+	// transition owns the broken path.
 	return
-		player->field_1AC != 0;
+		Trig_GetLevelID() == 0x501;
 }
 
 static void __fastcall SpideyChaseVenomEveryFrameCompat(
@@ -4757,7 +4753,7 @@ static int SpideyInstallChaseVenomBodyCadenceCompat()
 	{
 		fprintf(
 			f,
-			"chase_venom_body_cadence_install calls=%d expected=5 retail_every_frame=0x00460ED0 level=0x501 activation=player_synthesized_input minimum_delta=2 scope=scripted_sequence_only source=kellog_frame_limiter_adapted\\n",
+			"chase_venom_body_cadence_install calls=%d expected=5 retail_every_frame=0x00460ED0 level=0x501 activation=level_0x501 minimum_delta=2 scope=chase_venom_level_only source=kellog_frame_limiter_adapted\\n",
 			installed);
 		fclose(f);
 	}
@@ -4775,7 +4771,7 @@ static void SpideyLogChaseVenomBodyCadenceStats()
 
 	fprintf(
 		f,
-		"chase_venom_body_cadence_stats installed=%d calls=%lu active_calls=%lu waits=%lu special_bypass=%lu updater_bypass=%lu max_delta=%lu policy=retail_minimum_two_tick_body_cadence_during_level_0x501_synthesized_input\\n",
+		"chase_venom_body_cadence_stats installed=%d calls=%lu active_calls=%lu waits=%lu special_bypass=%lu updater_bypass=%lu max_delta=%lu policy=retail_minimum_two_tick_body_cadence_during_level_0x501\\n",
 		gSpideyChaseBodyCadenceInstalled,
 		gSpideyChaseBodyCadenceCalls,
 		gSpideyChaseBodyCadenceActiveCalls,
