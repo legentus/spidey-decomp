@@ -1,5 +1,142 @@
 # CURRENT STATUS
 
+## CUTSCENE TARGET RESET — ALL IN-ENGINE CUTSCENES MUST RUN AT 60 FPS (2026-10-05)
+
+User requirement:
+- all real-time / in-engine cutscenes should run at 60 FPS, consistent with gameplay;
+- do **not** solve Chase Venom by retaining a 20- or 30-FPS cutscene cap;
+- prerecorded FMV playback is a separate subsystem and is not what this requirement refers to.
+
+Latest tested runtime:
+- revision `358423b58434c46898827083d2354b16e27e251c`;
+- log `spidey-decomp(20261005-230438).log`;
+- Chase Venom still failed at the end-of-building sequence;
+- user observed the in-engine cutscene itself visibly locks to ~30 FPS.
+
+### Historical CBody limiter is now definitively insufficient
+
+The corrected retail-level gate **did activate** in this runtime:
+
+`chase_venom_body_cadence_stats installed=5 calls=54638 active_calls=54638 waits=2867 special_bypass=112 updater_bypass=132 max_delta=6391 last_retail_level=0x501 level_0x501_checks=54638`
+
+Therefore:
+- retail level ID `0x501` is correct even when entered through Level Select;
+- Level Select does not prevent this detection path from activating;
+- the historical minimum-two-tick `CBody::EveryFrame` limiter by itself does not repair Chase Venom under the current native-60 architecture.
+
+Do not keep stacking fixes underneath that limiter.
+
+### New interpretation
+
+The user's observed 30-FPS drop during the in-engine cutscene is now a first-class suspect.
+
+Current project target:
+1. remove the retail/inherited 30-FPS real-time cutscene presentation/scheduler restriction;
+2. run in-engine cutscenes at the same 60-Hz cadence as gameplay;
+3. separately convert any remaining Chase Venom authored logic that assumes 20/30 update cadence to elapsed canonical ticks;
+4. never depend on lowering presentation/simulation FPS to make a scripted sequence work.
+
+PCGamingWiki corroborates the legacy behavior:
+- the PC port is generally 30-FPS-oriented;
+- some in-game cutscenes still require a 20-FPS cap in stock/compatibility setups;
+- Chase Venom specifically breaks above 20 FPS.
+This is treated as evidence about old authored timing, not as the desired solution.
+
+### Failed body-level compatibility removed
+
+Source commit:
+- `117dae2359cbdf6c3db0dccf20c0b387b3f79c98` — `timing: capture 60hz cutscene scheduler path`.
+
+Changes:
+- removes the entire Chase-Venom-only `CBody::EveryFrame` cadence wrapper;
+- removes all five compatibility call-site hooks;
+- removes its shutdown stats path;
+- normal native-60 body scheduling is restored for the next run.
+
+### Scheduler capture added
+
+Startup-only byte captures:
+- `Logic @ 0x00455400`, size `0x1A0`;
+- `Display @ 0x004555A0`, size `0x430`;
+- `PlayAway @ 0x004559D0`, size `0x2C0`;
+- `SpideyMain @ 0x00455C90`, size `0x610`.
+
+Startup xref scans are also added for each range against:
+- `0x005FAE98` — first historical frame-updater global;
+- `0x0060CFB0` — second historical frame-updater global;
+- `0x006B4CA0` — `Vblanks`;
+- `0x006B4CA8` — `gTimerRelated` / canonical body timer.
+
+Purpose:
+- reconstruct the exact retail scheduler branch that causes real-time cinematics to present at ~30 FPS;
+- determine whether Logic, Display or both are deliberately interleaved/skipped;
+- identify the meaning of the two updater globals the historical frame limiter exempts.
+
+### In-memory-only Chase scheduler telemetry
+
+No synchronous per-frame file writes are added.
+
+While retail level ID is `0x501`, the runtime accumulates:
+- Logic-call count;
+- Logic vblank delta histogram: <=0 / 1 / 2 / 3+;
+- Logic calls while either frame-updater global is nonzero;
+- Present-call count;
+- Present vblank delta histogram: <=0 / 1 / 2 / 3+;
+- Present calls while either frame-updater global is nonzero;
+- longest consecutive run of `present delta == 2`.
+
+Shutdown emits one summary line:
+
+`chase_scheduler_stats ...`
+
+This is designed to distinguish:
+- genuine 60-Hz logic + 30-Hz presentation;
+- 30-Hz logic + 30-Hz presentation;
+- a mixed scheduler state controlled by the updater globals.
+
+### Static sanity
+
+At source `117dae235...`:
+- `main.cpp` braces 1141/1141;
+- parentheses 5247/5247;
+- old Chase body cadence install marker count: 0;
+- old Chase body wrapper count: 0;
+- one PlayAway byte capture exists;
+- scheduler Logic/Present record hooks are each installed once.
+
+### Exact next test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `117dae2359cbdf6c3db0dccf20c0b387b3f79c98` or a newer documentation-only descendant.
+
+Use Level Select as before.
+
+Test:
+1. enter Chase Venom;
+2. observe normal gameplay FPS before the in-engine chase cutscene;
+3. observe whether the in-game cutscene still visibly drops to ~30 FPS;
+4. let the broken end-of-building route reproduce once;
+5. exit cleanly;
+6. return the one consolidated log.
+
+Expected startup evidence:
+- `Logic_Block`;
+- `Display_Block`;
+- `PlayAway_Block`;
+- `SpideyMain_Block`;
+- xref summaries for the two updater globals and Vblank/timer globals.
+
+Expected shutdown:
+- `chase_scheduler_stats ...`.
+
+After that log:
+1. reconstruct `PlayAway` / scheduler state exactly;
+2. remove the real-time cutscene 30-FPS restriction globally so in-engine cutscenes run at 60;
+3. re-test Chase Venom at true 60;
+4. if the path still fails, convert the specific remaining Chase scripted primitive rather than lowering cutscene FPS.
+
 ## TEST CONTEXT NOTE — CHASE VENOM IS BEING ENTERED THROUGH LEVEL SELECT (2026-10-05)
 
 User clarified that current Chase Venom reproductions are launched through the game's Level Select rather than reached naturally through story progression.
