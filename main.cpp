@@ -4836,6 +4836,591 @@ static void SpideyCaptureRetailScheduler()
 	}
 }
 
+// Chase Venom scripted steering compatibility.
+//
+// Runtime now proves the level and in-engine cutscene itself are running at
+// the intended 60-Hz cadence. The remaining failure is the authored player
+// route: CPlayer::SynthesizeAnalogueInput recalculates its target-steering
+// output every Logic call. At 60 Hz that feedback loop reacts three times as
+// often as a 20-Hz-authored Chase Venom sequence.
+//
+// Keep rendering, physics, animation and ordinary gameplay at 60 Hz. Only the
+// Chase Venom synthesized-input producer is sampled at a 20-Hz equivalent:
+// execute retail synth once per 3 canonical ticks, advance its internal timers
+// by the full elapsed tick count, and hold the last synthesized axes on the
+// intervening 60-Hz updates. ReadAnalogueInput still consumes those held axes
+// every frame, so movement remains visually smooth.
+//
+// The same level-scoped ReadAnalogueInput wrapper also restores the proven
+// raw field_8F0 input ramp to its 20-Hz real-time rate while synthesized input
+// is active. That ramp change alone was previously insufficient, but it is
+// part of faithfully reproducing the scripted control producer's authored
+// cadence while leaving manual controls untouched.
+typedef void (__fastcall *SpideyRetailPlayerSynthInputFn)(
+		CPlayer*,
+		void*);
+typedef void (__fastcall *SpideyRetailReadAnalogueInputFn)(
+		CPlayer*,
+		void*);
+
+#define SPIDEY_CHASE_SYNTH_TRACE_CAPACITY 2048
+
+struct SpideyChaseSynthTraceSample
+{
+	unsigned long tick;
+	int elapsed;
+	int field80Before;
+	int scriptClock;
+	unsigned int scriptActive;
+	unsigned int synthMode;
+	int axisX;
+	int axisY;
+	int ramp;
+	unsigned long state;
+	int posX;
+	int posY;
+	int posZ;
+	int angleY;
+	unsigned int wall;
+	unsigned int ceiling;
+	int headBeforeType;
+	int headBeforeSize;
+	int headBefore2;
+	int headBefore3;
+	int headAfterType;
+	int headAfterSize;
+	int headAfter2;
+	int headAfter3;
+};
+
+static SpideyChaseSynthTraceSample
+	gSpideyChaseSynthTrace[
+		SPIDEY_CHASE_SYNTH_TRACE_CAPACITY];
+static unsigned long gSpideyChaseSynthTraceCount = 0;
+static unsigned long gSpideyChaseSynthTraceDropped = 0;
+
+static CPlayer* gSpideyChaseSynthPlayer = 0;
+static long gSpideyChaseSynthLastTick = 0;
+static int gSpideyChaseSynthTickValid = 0;
+static int gSpideyChaseSynthAccumulatedTicks = 0;
+static signed char gSpideyChaseSynthHeldX = 0;
+static signed char gSpideyChaseSynthHeldY = 0;
+static int gSpideyChaseSynthHeldValid = 0;
+static unsigned long gSpideyChaseSynthCalls = 0;
+static unsigned long gSpideyChaseSynthActiveCalls = 0;
+static unsigned long gSpideyChaseSynthRetailUpdates = 0;
+static unsigned long gSpideyChaseSynthHeldCalls = 0;
+static unsigned long gSpideyChaseSynthMaxElapsed = 0;
+static int gSpideyChaseSynthInstalled = 0;
+
+static CPlayer* gSpideyChaseRampPlayer = 0;
+static int gSpideyChaseRampRemainder = 0;
+static unsigned long gSpideyChaseRampCalls = 0;
+static unsigned long gSpideyChaseRampCorrections = 0;
+static unsigned long gSpideyChaseRampUnexpected = 0;
+static int gSpideyChaseRampInstalled = 0;
+
+static void SpideyChaseReadWorkerHead(
+		CPlayer* player,
+		int* type,
+		int* size,
+		int* data2,
+		int* data3)
+{
+	if (type)
+		*type = -1;
+	if (size)
+		*size = 0;
+	if (data2)
+		*data2 = 0;
+	if (data3)
+		*data3 = 0;
+
+	if (!player)
+		return;
+
+	__try
+	{
+		unsigned char* raw =
+			(unsigned char*)player;
+		int* block =
+			*(int**)(raw + 0x1BC);
+		if (!block)
+			return;
+
+		if (type)
+			*type = block[0];
+		if (size)
+			*size = block[1];
+		if (data2 &&
+			block[1] > 2)
+		{
+			*data2 = block[2];
+		}
+		if (data3 &&
+			block[1] > 3)
+		{
+			*data3 = block[3];
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+}
+
+static void SpideyRecordChaseSynthTrace(
+		CPlayer* player,
+		unsigned long tick,
+		int elapsed,
+		int field80Before,
+		int headBeforeType,
+		int headBeforeSize,
+		int headBefore2,
+		int headBefore3)
+{
+	if (!player)
+		return;
+
+	if (gSpideyChaseSynthTraceCount >=
+		SPIDEY_CHASE_SYNTH_TRACE_CAPACITY)
+	{
+		++gSpideyChaseSynthTraceDropped;
+		return;
+	}
+
+	SpideyChaseSynthTraceSample* sample =
+		&gSpideyChaseSynthTrace[
+			gSpideyChaseSynthTraceCount];
+	memset(
+		sample,
+		0,
+		sizeof(*sample));
+
+	sample->tick =
+		tick;
+	sample->elapsed =
+		elapsed;
+	sample->field80Before =
+		field80Before;
+	sample->headBeforeType =
+		headBeforeType;
+	sample->headBeforeSize =
+		headBeforeSize;
+	sample->headBefore2 =
+		headBefore2;
+	sample->headBefore3 =
+		headBefore3;
+
+	__try
+	{
+		unsigned char* raw =
+			(unsigned char*)player;
+		sample->scriptClock =
+			*(int*)(raw + 0x1B0);
+		sample->scriptActive =
+			(unsigned int)*(raw + 0x1B4);
+		sample->synthMode =
+			(unsigned int)*(raw + 0x1AC);
+		sample->axisX =
+			(int)(signed char)*(raw + 0xE2D);
+		sample->axisY =
+			(int)(signed char)*(raw + 0xE2E);
+		sample->ramp =
+			*(int*)(raw + 0x8F0);
+		sample->state =
+			(unsigned long)*(unsigned long*)(raw + 0xE1C);
+		sample->posX =
+			player->mPos.vx;
+		sample->posY =
+			player->mPos.vy;
+		sample->posZ =
+			player->mPos.vz;
+		sample->angleY =
+			(int)player->mAngles.vy;
+		sample->wall =
+			(unsigned int)*(raw + 0x8E8);
+		sample->ceiling =
+			(unsigned int)*(raw + 0x8E9);
+		SpideyChaseReadWorkerHead(
+			player,
+			&sample->headAfterType,
+			&sample->headAfterSize,
+			&sample->headAfter2,
+			&sample->headAfter3);
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+
+	++gSpideyChaseSynthTraceCount;
+}
+
+static void SpideyResetChaseSynthState(
+		CPlayer* player)
+{
+	gSpideyChaseSynthPlayer =
+		player;
+	gSpideyChaseSynthLastTick =
+		0;
+	gSpideyChaseSynthTickValid =
+		0;
+	gSpideyChaseSynthAccumulatedTicks =
+		0;
+	gSpideyChaseSynthHeldX =
+		0;
+	gSpideyChaseSynthHeldY =
+		0;
+	gSpideyChaseSynthHeldValid =
+		0;
+}
+
+static void __fastcall SpideyChaseVenomSynth20Hz(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailPlayerSynthInputFn retail =
+		(SpideyRetailPlayerSynthInputFn)0x004BC300;
+
+	++gSpideyChaseSynthCalls;
+
+	if (!player ||
+		SpideyRetailGetLevelId() != 0x501 ||
+		!player->field_1AC)
+	{
+		if (gSpideyChaseSynthPlayer != player ||
+			gSpideyChaseSynthTickValid)
+		{
+			SpideyResetChaseSynthState(
+				player);
+		}
+		retail(
+			player,
+			0);
+		return;
+	}
+
+	++gSpideyChaseSynthActiveCalls;
+
+	if (gSpideyChaseSynthPlayer != player)
+	{
+		SpideyResetChaseSynthState(
+			player);
+	}
+
+	const long currentTick =
+		*(volatile long*)0x006B4CA8;
+	int elapsedSinceCall =
+		0;
+
+	if (!gSpideyChaseSynthTickValid)
+	{
+		gSpideyChaseSynthLastTick =
+			currentTick;
+		gSpideyChaseSynthTickValid =
+			1;
+	}
+	else
+	{
+		elapsedSinceCall =
+			(int)(
+				currentTick -
+				gSpideyChaseSynthLastTick);
+		gSpideyChaseSynthLastTick =
+			currentTick;
+
+		if (elapsedSinceCall < 0)
+			elapsedSinceCall = 0;
+		if (elapsedSinceCall > 6)
+			elapsedSinceCall = 6;
+
+		gSpideyChaseSynthAccumulatedTicks +=
+			elapsedSinceCall;
+	}
+
+	const int firstUpdate =
+		!gSpideyChaseSynthHeldValid;
+
+	if (!firstUpdate &&
+		gSpideyChaseSynthAccumulatedTicks < 3)
+	{
+		unsigned char* raw =
+			(unsigned char*)player;
+		*(signed char*)(raw + 0xE2D) =
+			gSpideyChaseSynthHeldX;
+		*(signed char*)(raw + 0xE2E) =
+			gSpideyChaseSynthHeldY;
+		++gSpideyChaseSynthHeldCalls;
+		return;
+	}
+
+	int synthElapsed =
+		firstUpdate ?
+			player->field_80 :
+			gSpideyChaseSynthAccumulatedTicks;
+	if (synthElapsed < 1)
+		synthElapsed = 1;
+	if (synthElapsed > 6)
+		synthElapsed = 6;
+
+	int headBeforeType = -1;
+	int headBeforeSize = 0;
+	int headBefore2 = 0;
+	int headBefore3 = 0;
+	SpideyChaseReadWorkerHead(
+		player,
+		&headBeforeType,
+		&headBeforeSize,
+		&headBefore2,
+		&headBefore3);
+
+	const int originalField80 =
+		player->field_80;
+	player->field_80 =
+		synthElapsed;
+
+	retail(
+		player,
+		0);
+
+	player->field_80 =
+		originalField80;
+	gSpideyChaseSynthAccumulatedTicks =
+		0;
+	gSpideyChaseSynthHeldX =
+		*(signed char*)(
+			((unsigned char*)player) +
+			0xE2D);
+	gSpideyChaseSynthHeldY =
+		*(signed char*)(
+			((unsigned char*)player) +
+			0xE2E);
+	gSpideyChaseSynthHeldValid =
+		1;
+	++gSpideyChaseSynthRetailUpdates;
+
+	if ((unsigned long)synthElapsed >
+		gSpideyChaseSynthMaxElapsed)
+	{
+		gSpideyChaseSynthMaxElapsed =
+			(unsigned long)synthElapsed;
+	}
+
+	SpideyRecordChaseSynthTrace(
+		player,
+		(unsigned long)currentTick,
+		synthElapsed,
+		originalField80,
+		headBeforeType,
+		headBeforeSize,
+		headBefore2,
+		headBefore3);
+}
+
+static void __fastcall SpideyChaseVenomReadAnalogue20HzRamp(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailReadAnalogueInputFn retail =
+		(SpideyRetailReadAnalogueInputFn)0x004BD510;
+
+	++gSpideyChaseRampCalls;
+
+	if (!player ||
+		SpideyRetailGetLevelId() != 0x501 ||
+		!player->field_1AC)
+	{
+		if (gSpideyChaseRampPlayer != player)
+		{
+			gSpideyChaseRampPlayer =
+				player;
+		}
+		gSpideyChaseRampRemainder =
+			0;
+		retail(
+			player,
+			0);
+		return;
+	}
+
+	if (gSpideyChaseRampPlayer != player)
+	{
+		gSpideyChaseRampPlayer =
+			player;
+		gSpideyChaseRampRemainder =
+			0;
+	}
+
+	unsigned char* raw =
+		(unsigned char*)player;
+	const int oldRamp =
+		*(int*)(raw + 0x8F0);
+	int elapsedTicks =
+		player->field_80;
+	if (elapsedTicks < 0)
+		elapsedTicks = 0;
+	if (elapsedTicks > 6)
+		elapsedTicks = 6;
+
+	retail(
+		player,
+		0);
+
+	const int axesActive =
+		*(signed char*)(raw + 0xE2D) != 0 ||
+		*(signed char*)(raw + 0xE2E) != 0;
+	if (!axesActive)
+	{
+		gSpideyChaseRampRemainder =
+			0;
+		return;
+	}
+
+	const int retailRamp =
+		*(int*)(raw + 0x8F0);
+	int expectedRetail =
+		oldRamp + 0x20;
+	if (expectedRetail > 0x100)
+		expectedRetail = 0x100;
+
+	if (oldRamp < 0 ||
+		oldRamp > 0x100 ||
+		retailRamp != expectedRetail)
+	{
+		++gSpideyChaseRampUnexpected;
+		gSpideyChaseRampRemainder =
+			0;
+		return;
+	}
+
+	const int numerator =
+		(0x20 * elapsedTicks) +
+		gSpideyChaseRampRemainder;
+	const int increment =
+		numerator / 3;
+	gSpideyChaseRampRemainder =
+		numerator % 3;
+
+	int correctedRamp =
+		oldRamp + increment;
+	if (correctedRamp > 0x100)
+		correctedRamp = 0x100;
+	*(int*)(raw + 0x8F0) =
+		correctedRamp;
+	++gSpideyChaseRampCorrections;
+}
+
+static void SpideyLogChaseSynthStats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3\\n",
+		gSpideyChaseSynthInstalled,
+		gSpideyChaseSynthCalls,
+		gSpideyChaseSynthActiveCalls,
+		gSpideyChaseSynthRetailUpdates,
+		gSpideyChaseSynthHeldCalls,
+		gSpideyChaseSynthMaxElapsed,
+		gSpideyChaseRampInstalled,
+		gSpideyChaseRampCalls,
+		gSpideyChaseRampCorrections,
+		gSpideyChaseRampUnexpected,
+		gSpideyChaseSynthTraceCount,
+		gSpideyChaseSynthTraceDropped);
+	fclose(f);
+}
+
+static void SpideyDumpChaseSynthTrace()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	for (unsigned long i = 0;
+		 i < gSpideyChaseSynthTraceCount;
+		 ++i)
+	{
+		const SpideyChaseSynthTraceSample* sample =
+			&gSpideyChaseSynthTrace[i];
+		fprintf(
+			f,
+			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d wall=%u ceiling=%u head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
+			i,
+			sample->tick,
+			sample->elapsed,
+			sample->field80Before,
+			sample->synthMode,
+			sample->scriptActive,
+			sample->scriptClock,
+			sample->axisX,
+			sample->axisY,
+			sample->ramp,
+			sample->state,
+			sample->posX,
+			sample->posY,
+			sample->posZ,
+			sample->angleY,
+			sample->wall,
+			sample->ceiling,
+			sample->headBeforeType,
+			sample->headBeforeSize,
+			sample->headBefore2,
+			sample->headBefore3,
+			sample->headAfterType,
+			sample->headAfterSize,
+			sample->headAfter2,
+			sample->headAfter3);
+	}
+
+	fclose(f);
+}
+
+static int SpideyInstallChaseSynth20HzCompat()
+{
+	const int synthInstalled =
+		SpideyPatchDirectCall(
+			0x004BD572,
+			0x004BC300,
+			(void*)&SpideyChaseVenomSynth20Hz,
+			"chase_venom_synth_sample_hold");
+	const int rampInstalled =
+		SpideyPatchDirectCallsToTargetInRange(
+			0x00401000,
+			0x0053B000,
+			0x004BD510,
+			(void*)&SpideyChaseVenomReadAnalogue20HzRamp,
+			"chase_venom_read_analogue_ramp");
+
+	gSpideyChaseSynthInstalled =
+		synthInstalled;
+	gSpideyChaseRampInstalled =
+		rampInstalled;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"chase_synth_20hz_install synth=%d synth_call=0x004BD572 synth_retail=0x004BC300 ramp_calls=%d ramp_retail=0x004BD510 level=0x501 policy=60hz_render_physics_20hz_scripted_control_sample_hold cadence_ticks=3 manual_input=untouched\\n",
+			synthInstalled,
+			rampInstalled);
+		fclose(f);
+	}
+
+	return
+		synthInstalled &&
+		rampInstalled > 0;
+}
+
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
@@ -4902,7 +5487,7 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	SpideyCaptureRetailScheduler();
+	SpideyInstallChaseSynth20HzCompat();
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
@@ -13889,6 +14474,8 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 				0;
 		}
 
+		SpideyLogChaseSynthStats();
+		SpideyDumpChaseSynthTrace();
 		SpideyLogChaseSchedulerStats();
 
 		FILE* f =
