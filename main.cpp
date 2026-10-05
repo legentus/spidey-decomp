@@ -4562,8 +4562,24 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	// Current native-60 retail captures are recovered and analyzed.
-	// Keep normal startup logs compact until another exact RE seam is needed.
+	// Chase Venom is a documented 20-FPS-sensitive sequence.  The current
+	// native-60 runtime proves the failure still exists, but the active path is
+	// Spider-Man's synthesized-input controller rather than Venom's already
+	// elapsed-tick-aware command dispatcher.  Capture these retail blocks once
+	// at startup so we can reconstruct the exact command/timing semantics without
+	// adding synchronous per-frame logging to the chase itself.
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_SwitchToSynthesizedInput_Block",
+		0x004BC1A0,
+		0x140);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_SynthesizeAnalogueInput_Block",
+		0x004BC300,
+		0x11B0);
+	SpideyLogHighFpsRetailBytes(
+		"CVenom_FollowDirections_Block",
+		0x004EB530,
+		0x160);
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
