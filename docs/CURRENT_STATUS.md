@@ -1,5 +1,173 @@
 # CURRENT STATUS
 
+## CHASE VENOM — CUTSCENE CONFIRMED 60 FPS; SCRIPTED STEERING SAMPLE/HOLD FIX READY (2026-10-05)
+
+Latest tested runtime:
+- revision `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`;
+- consolidated log: `spidey-decomp(20261005-232014).log`;
+- entered through Level Select as in prior tests;
+- user confirms the in-engine cutscene now remains at 60 FPS;
+- Chase Venom route failure is unchanged: Spider-Man still fails to follow Venom through/into the building and takes the wrong course into the wall.
+
+### Scheduler result
+
+The current run proves the Chase level is overwhelmingly executing at one canonical 60-Hz tick per Logic/Present call:
+
+`chase_scheduler_stats logic_calls=5254 logic_delta0=0 logic_delta1=5242 logic_delta2=0 logic_delta3plus=11 logic_updater_active=125 present_calls=5288 present_delta0=0 present_delta1=5242 present_delta2=30 present_delta3plus=15 present_updater_active=125 present_delta2_max_run=30 retail_level=0x501 ...`
+
+Interpretation:
+- the current broken route is **not** caused by the cutscene still being globally capped to 30 FPS;
+- the prior observed ~30-FPS cutscene occurred while the experimental level-wide `CBody::EveryFrame` minimum-two-tick gate was installed;
+- that body gate was removed in `117dae2359cbdf6c3db0dccf20c0b387b3f79c98`;
+- after removing it, the cutscene returned to 60 FPS while the route bug remained;
+- therefore do not add another global/cutscene FPS limiter.
+
+User requirement remains:
+- real-time/in-engine cutscenes must stay at 60 FPS, consistent with gameplay.
+
+### New root hypothesis
+
+The remaining high-value mismatch is the **feedback cadence of the synthesized steering producer**, not global simulation cadence.
+
+Retail path:
+- `CPlayer::ReadAnalogueInput @ 0x004BD510` clears the live analogue axes each update;
+- when `field_1AC != 0`, it calls `CPlayer::SynthesizeAnalogueInput @ 0x004BC300` at call site `0x004BD572`;
+- the Chase route's type-2 synthesized worker computes analogue steering from Spider-Man's current position to a target every time synth runs;
+- at native 60 Hz that steering feedback is recomputed three times as often as a 20-Hz-authored sequence;
+- even when elapsed timers are correct, a higher-frequency closed-loop steering controller can follow a materially different trajectory around collision geometry.
+
+This fits the observed failure better than the earlier timer hypotheses:
+- target/script timing can be correct;
+- player physics can be real-time correct;
+- but recalculating steering every 16.7 ms instead of every 50 ms can curve Spider-Man differently enough to hit the wall/opening boundary.
+
+### New implementation — 60-Hz cutscene + 20-Hz scripted steering producer
+
+Source commit:
+- `6c40ef8ff321bc9efd3a4862a6b7e09a70ffc20f` — `timing: sample Chase Venom scripted steering at 20hz`.
+
+Scope:
+- only retail level ID `0x501`;
+- only while Spider-Man synthesized input is active;
+- manual controls untouched;
+- rendering remains 60 Hz;
+- physics remains 60 Hz;
+- animation remains 60 Hz;
+- camera remains 60 Hz;
+- ordinary game Logic remains 60 Hz.
+
+Synth wrapper:
+- patches the direct retail synth call at `0x004BD572 -> 0x004BC300`;
+- first scripted sample executes immediately;
+- thereafter accumulates canonical `gTimerRelated @ 0x006B4CA8` ticks;
+- executes retail synth when 3 ticks have accumulated;
+- temporarily gives retail synth the full accumulated elapsed tick count through player `field_80`, then restores the normal one-tick body value before downstream physics;
+- on the intervening two 60-Hz calls, restores/holds the most recent synthesized analogue axes instead of recomputing steering.
+
+This is sample-and-hold control:
+- script/control producer: 20-Hz-equivalent;
+- movement/physics/render consumer: 60 Hz.
+
+### Chase-only input-ramp correction restored as part of the producer model
+
+The previously proven raw `field_8F0 += 0x20` input ramp was not sufficient by itself to fix Chase Venom, so the old broad experiment remained retired.
+
+For this candidate it is reintroduced **only as part of the Chase-Venom synthesized-control model**:
+- retail `ReadAnalogueInput` still runs every 60-Hz frame;
+- when level `0x501` + synthesized input are active, the wrapper converts the raw ramp to `+0x20 per 3 canonical ticks`;
+- remainder accumulation preserves exact real-time rate;
+- manual/non-synthesized input remains untouched.
+
+Reason:
+- at stock 20-Hz authored cadence, the steering sample and input-strength ramp advanced together;
+- holding steering at 20 Hz while leaving the ramp at 60 Hz would not faithfully reproduce that controller.
+
+### Built-in route trace for this validation
+
+This build also records the route state **in memory only** on actual 20-Hz synth updates.
+
+Capacity:
+- 2048 samples (over 100 seconds at 20 Hz);
+- no synchronous gameplay file I/O;
+- dumps only at clean shutdown.
+
+Each sample records:
+- canonical tick;
+- elapsed synth ticks;
+- normal body `field_80`;
+- script clock / script-active / synth mode;
+- output axes;
+- input ramp;
+- player state;
+- player XYZ;
+- heading;
+- wall / ceiling flags;
+- worker head before and after synth:
+  - type;
+  - block size;
+  - data2;
+  - data3.
+
+For type-2 target steering specifically:
+- head type `2`;
+- block size is normally `5`;
+- data2/data3 are the target X/Z values recovered from the retail worker layout.
+
+This means the next runtime is both a fix test and a useful diagnostic if the fix fails.
+
+Expected startup:
+`chase_synth_20hz_install synth=1 synth_call=0x004BD572 synth_retail=0x004BC300 ramp_calls=>0 ramp_retail=0x004BD510 level=0x501 policy=60hz_render_physics_20hz_scripted_control_sample_hold cadence_ticks=3 manual_input=untouched`
+
+Expected shutdown:
+`chase_synth_20hz_stats synth_installed=1 ... active_calls>0 retail_updates>0 held_calls>0 ... ramp_corrections>0 ramp_unexpected=0 ...`
+
+Then:
+`chase_synth_trace ...`
+
+### Completed scheduler capture retired
+
+The large startup byte/xref dump from `117dae...` served its purpose and is no longer called in the new source.
+
+The small in-memory `chase_scheduler_stats` counter remains for one more validation so the next log can simultaneously confirm that the cutscene stayed 60 Hz while the scripted producer ran at the intended sample/hold cadence.
+
+### Static sanity
+
+At source `6c40ef8...`:
+- `main.cpp` braces: 1171/1171;
+- parentheses: 5383/5383;
+- one synth-install log marker;
+- one synth-stats marker;
+- one synth-trace format;
+- completed scheduler startup capture call count: 0;
+- synth call-site address `0x004BD572` appears in implementation/logging;
+- one shutdown route-trace dump call.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `6c40ef8ff321bc9efd3a4862a6b7e09a70ffc20f` or a newer documentation-only descendant.
+
+Use Level Select as before.
+
+Test only Chase Venom:
+1. verify the in-engine cutscene still visually remains at 60 FPS;
+2. watch the exact end-of-building route where Spider-Man previously ran into the wall instead of following Venom;
+3. report whether the route is fixed, improved, unchanged, or worse;
+4. continue far enough to know whether the chase remains playable;
+5. exit cleanly so the in-memory route trace is dumped;
+6. return the single consolidated log.
+
+If fixed:
+- retain sample/hold as a narrow compatibility primitive for this 20-Hz-authored scripted controller;
+- consider generalizing only to other proven scripted sequences, never manual gameplay.
+
+If unchanged:
+- inspect the emitted type-2 target/position trajectory and wall-state transition;
+- determine whether the target data itself is wrong under Level Select or whether a downstream collision/surface transition consumes the held route incorrectly;
+- do not lower the cutscene FPS.
+
 ## CUTSCENE TARGET RESET — ALL IN-ENGINE CUTSCENES MUST RUN AT 60 FPS (2026-10-05)
 
 User requirement:
