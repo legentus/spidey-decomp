@@ -1,5 +1,113 @@
 # CURRENT STATUS
 
+## CHASE VENOM RE — SCRIPT INTERPRETER CLEARED; LOCOMOTION CONSUMER TRACE READY (2026-10-05)
+
+Latest capture runtime:
+- revision `d7a5ca0c2af706fbc59d1fd902a7df907c0905b9`;
+- consolidated log: `spidey-decomp(20261005-074910).log`;
+- all requested retail blocks captured successfully:
+  - `CPlayer::SwitchToSynthesizedInput @ 0x004BC1A0`;
+  - `CPlayer::SynthesizeAnalogueInput @ 0x004BC300`;
+  - `CVenom::FollowDirections @ 0x004EB530`.
+- the validated native-60 player physics hooks still install successfully in the same runtime.
+
+### Player synthesized-input timing result
+
+The simple hypothesis that the Chase Venom script interpreter advances 3x too fast at 60 Hz is now disproven.
+
+Retail `CPlayer::SynthesizeAnalogueInput`:
+- reads player `field_80` on entry;
+- advances the top-level script clock at player offset `+0x1B0` by `field_80`;
+- schedules/dispatches script entries against that elapsed-tick clock rather than one unit per Logic call;
+- maintains active command blocks through the linked list at player offset `+0x1BC`.
+
+Recovered worker timing:
+- command types 3, 6, 7, 8 and 9 decrement their active timers by `field_80`, not by one raw update;
+- command type 2 is a geometric target-steering worker: it repeatedly computes direction from Spider-Man's current position to its target and synthesizes analogue input instead of directly integrating a fixed per-frame position;
+- no justification exists for globally scaling `CPlayer::SynthesizeAnalogueInput` by 1/2 or 1/3.
+
+This is encouraging for other scripted sequences: the shared script scheduler is already canonical elapsed-time aware and should remain untouched.
+
+### Chase Venom coordinator result
+
+Retail `CVenom::FollowDirections @ 0x004EB530` contains the level-0x501 chase-distance/failure coordination:
+- it measures the Venom-to-Spider-Man separation;
+- when Spider-Man becomes too far behind, it sets the chase failure state and pulses the relevant level node;
+- this matches the observed eventual game-over after Spider-Man takes the bad path.
+
+Therefore:
+- do not increase the chase-distance threshold as the primary fix;
+- that would hide the symptom instead of fixing why Spider-Man turns into/climbs the wall.
+
+### New primary suspect
+
+The remaining high-value seam is downstream of synthesized input:
+- `CPlayer::CheckForwards @ 0x004BF8A0`;
+- `CPlayer::CheckRunIntoWall @ 0x004BFBC0`;
+- `CPlayer::CheckStickToCeiling @ 0x004BFCE0`;
+- `CPlayer::CheckStickToWall @ 0x004BFEC0`;
+- `CPlayer::AI @ 0x004C65C0`;
+- `CPlayer::SetTargetTorsoAngle @ 0x004C6970`;
+- `CPlayer::GetEffectiveHeading @ 0x004C6AA0`.
+
+These routines consume the synthesized axes and decide locomotion, heading and wall/ceiling transitions. A legacy cadence assumption here naturally explains the actual symptom: the scripted target direction can be correct while Spider-Man turns into the building and enters wall-crawl state.
+
+### New diagnostic source
+
+Source commit:
+- `3d54949ff8fbe636aeca6501a8fe06ab38a4ea11` — `timing: trace Chase Venom locomotion consumer`.
+
+Startup-only retail captures now gather:
+- `CPlayer_AI_Block @ 0x004C65C0`, size `0x2E0`;
+- `CPlayer_CheckForwards_Block @ 0x004BF8A0`, size `0x320`;
+- `CPlayer_CheckRunIntoWall_Block @ 0x004BFBC0`, size `0x120`;
+- `CPlayer_CheckStickToCeiling_Block @ 0x004BFCE0`, size `0x1E0`;
+- `CPlayer_CheckStickToWall_Block @ 0x004BFEC0`, size `0x1F0`;
+- `CPlayer_SetTargetTorsoAngle_Block @ 0x004C6970`, size `0x130`;
+- `CPlayer_GetEffectiveHeading_Block @ 0x004C6AA0`, size `0x130`.
+
+A Chase-Venom-only post-synth trace is also installed:
+- active only when level ID is `0x501` and Spider-Man is in synthesized-input mode;
+- records entirely in memory during gameplay; **no per-frame disk I/O**;
+- records canonical tick / `field_80`, script clock and next command, active worker block types, synthesized axes, player state, position/velocity, Venom delta, heading, collision, animation, wall/ceiling flags and ignore-input state;
+- writes the accumulated trace only during normal timer/session shutdown;
+- capacity is 4096 samples; dropped-sample count is reported.
+
+Static source sanity at `3d54949...`:
+- `main.cpp` braces: 1126 open / 1126 close;
+- parentheses: 5236 open / 5236 close;
+- completed first-pass `CPlayer_SynthesizeAnalogueInput_Block` capture label removed;
+- exactly one new trace installer marker and one shutdown dump call are present.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `3d54949ff8fbe636aeca6501a8fe06ab38a4ea11` or a newer documentation-only descendant.
+
+This time **reproduce Chase Venom once**:
+1. play the end-of-building scripted chase where Spider-Man takes the bad route;
+2. let the wrong turn/wall-climb happen far enough to make the failure obvious;
+3. then exit the game cleanly so `timeKillEvent` can dump the in-memory trace;
+4. return the single consolidated `spidey-decomp.log` and note approximately where the visible wrong turn occurred.
+
+Expected startup evidence:
+- seven `high_fps_re_bytes_done ... valid=1` lines for the player locomotion/heading blocks;
+- `chase_venom_trace_install calls=...`.
+
+Expected shutdown evidence:
+- `chase_venom_trace_summary ... samples=... dropped=...`;
+- followed by `chase_venom_trace ...` samples.
+
+After that log:
+1. reconstruct the seven consumer routines;
+2. correlate the exact sample where heading/state/wall flags diverge with the active synthesized command type;
+3. patch the smallest shared timing/locomotion primitive that causes the bad turn;
+4. prefer a reusable native-60 fix over any level-specific 20-FPS throttle.
+
+Do not alter the validated player physics hooks, master 60-Hz timer, or Chase Venom distance threshold while this consumer path is being isolated.
+
 ## CHASE VENOM HIGH-FPS FAILURE CONFIRMED; PLAYER SYNTHESIZED-INPUT RETAIL CAPTURE ADDED (2026-10-05)
 
 Latest tested runtime:
