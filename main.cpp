@@ -4608,10 +4608,9 @@ static void SpideyLogRetailFieldXrefs(
 //
 // Do NOT apply that limiter globally here: this project intentionally runs
 // normal gameplay at native 60 Hz and already has a validated one-tick player
-// physics path.  Instead, reproduce the proven retail invariant only while the
-// level-0x501 Chase Venom sequence owns Spider-Man through synthesized input
-// (field_1AC != 0).  This keeps ordinary gameplay, manual input, and the rest
-// of the native-60 conversion untouched.
+// physics path.  Reproduce the proven retail invariant only while retail says
+// the current level is 0x501 (Chase Venom).  This keeps every other level on
+// the native-60 path.
 typedef void (__fastcall *SpideyRetailBodyEveryFrameFn)(
 		CBody*,
 		void*);
@@ -4624,14 +4623,30 @@ static unsigned long gSpideyChaseBodyCadenceUpdaterBypass = 0;
 static unsigned long gSpideyChaseBodyCadenceMaxObservedDelta = 0;
 static int gSpideyChaseBodyCadenceInstalled = 0;
 
+typedef int (__cdecl *SpideyRetailTrigGetLevelIdFn)();
+
+static unsigned long gSpideyChaseBodyCadenceLastLevelId = 0xFFFFFFFFUL;
+static unsigned long gSpideyChaseBodyCadenceLevel501Checks = 0;
+
 static int SpideyChaseVenomCadenceActive()
 {
-	// Validation build: match the known external fix for the entire Chase
-	// Venom level first. Once runtime proves this is the correct layer, we can
-	// narrow the activation window without guessing which synthesized-input
-	// transition owns the broken path.
-	return
-		Trig_GetLevelID() == 0x501;
+	// Do not call the reconstructed Trig_GetLevelID() here: trig.cpp still
+	// contains a placeholder implementation that returns 0x686868.  Call the
+	// retail executable directly instead.
+	SpideyRetailTrigGetLevelIdFn retailGetLevelId =
+		(SpideyRetailTrigGetLevelIdFn)0x004DE770;
+	const int levelId =
+		retailGetLevelId();
+
+	gSpideyChaseBodyCadenceLastLevelId =
+		(unsigned long)levelId;
+	if (levelId == 0x501)
+	{
+		++gSpideyChaseBodyCadenceLevel501Checks;
+		return 1;
+	}
+
+	return 0;
 }
 
 static void __fastcall SpideyChaseVenomEveryFrameCompat(
@@ -4753,7 +4768,7 @@ static int SpideyInstallChaseVenomBodyCadenceCompat()
 	{
 		fprintf(
 			f,
-			"chase_venom_body_cadence_install calls=%d expected=5 retail_every_frame=0x00460ED0 level=0x501 activation=level_0x501 minimum_delta=2 scope=chase_venom_level_only source=kellog_frame_limiter_adapted\\n",
+			"chase_venom_body_cadence_install calls=%d expected=5 retail_every_frame=0x00460ED0 retail_get_level_id=0x004DE770 level=0x501 activation=retail_level_0x501 minimum_delta=2 scope=chase_venom_level_only source=kellog_frame_limiter_adapted\\n",
 			installed);
 		fclose(f);
 	}
@@ -4771,14 +4786,16 @@ static void SpideyLogChaseVenomBodyCadenceStats()
 
 	fprintf(
 		f,
-		"chase_venom_body_cadence_stats installed=%d calls=%lu active_calls=%lu waits=%lu special_bypass=%lu updater_bypass=%lu max_delta=%lu policy=retail_minimum_two_tick_body_cadence_during_level_0x501\\n",
+		"chase_venom_body_cadence_stats installed=%d calls=%lu active_calls=%lu waits=%lu special_bypass=%lu updater_bypass=%lu max_delta=%lu last_retail_level=0x%lX level_0x501_checks=%lu policy=retail_minimum_two_tick_body_cadence_during_level_0x501\\n",
 		gSpideyChaseBodyCadenceInstalled,
 		gSpideyChaseBodyCadenceCalls,
 		gSpideyChaseBodyCadenceActiveCalls,
 		gSpideyChaseBodyCadenceWaits,
 		gSpideyChaseBodyCadenceBypassSpecial,
 		gSpideyChaseBodyCadenceUpdaterBypass,
-		gSpideyChaseBodyCadenceMaxObservedDelta);
+		gSpideyChaseBodyCadenceMaxObservedDelta,
+		gSpideyChaseBodyCadenceLastLevelId,
+		gSpideyChaseBodyCadenceLevel501Checks);
 	fclose(f);
 }
 
