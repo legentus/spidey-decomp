@@ -4597,134 +4597,157 @@ static void SpideyLogRetailFieldXrefs(
 	fclose(f);
 }
 
-// Retail ReadAnalogueInput ramps field_8F0 by a fixed 0x20 once per player
-// update whenever analogue input is non-zero.  That ramp is not scaled by
-// field_80.  Scripted/synthesized Spider-Man movement (field_1AC != 0) is the
-// path used by Chase Venom, whose authored cutscene behavior is only stable at
-// 20 FPS.  Preserve the retail 20-Hz ramp rate on the canonical 60-Hz clock
-// without touching manual player input:
+// Chase Venom high-FPS compatibility.
 //
-//     +0x20 per 3 elapsed 60-Hz ticks
+// A known external fix for the retail PC executable ("Kellog's Frame Limiter"
+// in krystalgamer/spidey-tools) fixes the Chase Venom path bug by intercepting
+// the five retail CBody::EveryFrame call sites and refusing to let body AI
+// proceed while the elapsed body tick delta is below 2.  That establishes an
+// important retail invariant: scripted body AI was authored around a minimum
+// two-vblank quantum even though rendering may run faster.
 //
-// The remainder sidecar makes this exact over time (10,11,11 at field_80=1)
-// and naturally preserves real-time behavior when rendering drops below 60.
-typedef void (__fastcall *SpideyRetailReadAnalogueInputFn)(
-		CPlayer*,
+// Do NOT apply that limiter globally here: this project intentionally runs
+// normal gameplay at native 60 Hz and already has a validated one-tick player
+// physics path.  Instead, reproduce the proven retail invariant only while the
+// level-0x501 Chase Venom sequence owns Spider-Man through synthesized input
+// (field_1AC != 0).  This keeps ordinary gameplay, manual input, and the rest
+// of the native-60 conversion untouched.
+typedef void (__fastcall *SpideyRetailBodyEveryFrameFn)(
+		CBody*,
 		void*);
 
-static CPlayer* gSpideySynthRampPlayer = 0;
-static int gSpideySynthRampRemainder = 0;
-static unsigned long gSpideySynthRampCalls = 0;
-static unsigned long gSpideySynthRampScriptedCalls = 0;
-static unsigned long gSpideySynthRampCorrections = 0;
-static unsigned long gSpideySynthRampUnexpected = 0;
-static int gSpideySynthRampInstalled = 0;
+static unsigned long gSpideyChaseBodyCadenceCalls = 0;
+static unsigned long gSpideyChaseBodyCadenceActiveCalls = 0;
+static unsigned long gSpideyChaseBodyCadenceWaits = 0;
+static unsigned long gSpideyChaseBodyCadenceBypassSpecial = 0;
+static unsigned long gSpideyChaseBodyCadenceUpdaterBypass = 0;
+static unsigned long gSpideyChaseBodyCadenceMaxObservedDelta = 0;
+static int gSpideyChaseBodyCadenceInstalled = 0;
 
-static void __fastcall SpideyReadAnalogueInputScripted20Hz(
-		CPlayer* player,
+static int SpideyChaseVenomCadenceActive()
+{
+	if (Trig_GetLevelID() != 0x501)
+		return 0;
+
+	CPlayer* player =
+		*(CPlayer**)0x006A9038;
+	if (!player)
+		return 0;
+
+	return
+		player->field_1AC != 0;
+}
+
+static void __fastcall SpideyChaseVenomEveryFrameCompat(
+		CBody* body,
 		void*)
 {
-	SpideyRetailReadAnalogueInputFn retail =
-		(SpideyRetailReadAnalogueInputFn)0x004BD510;
+	SpideyRetailBodyEveryFrameFn retail =
+		(SpideyRetailBodyEveryFrameFn)0x00460ED0;
 
-	++gSpideySynthRampCalls;
-	if (!player)
+	++gSpideyChaseBodyCadenceCalls;
+
+	if (body &&
+		SpideyChaseVenomCadenceActive())
 	{
-		retail(
-			player,
-			0);
-		return;
-	}
+		++gSpideyChaseBodyCadenceActiveCalls;
 
-	unsigned char* raw =
-		(unsigned char*)player;
-	const int scriptedBefore =
-		player->field_1AC != 0;
-	const int oldRamp =
-		*(int*)(raw + 0x8F0);
-	int elapsedTicks =
-		player->field_80;
-	if (elapsedTicks < 0)
-		elapsedTicks = 0;
-	if (elapsedTicks > 6)
-		elapsedTicks = 6;
+		// Retail EveryFrame itself forces field_80=2 when this bit is set,
+		// so the historical limiter intentionally bypasses these objects.
+		if (body->mCBodyFlags & 4)
+		{
+			++gSpideyChaseBodyCadenceBypassSpecial;
+		}
+		else
+		{
+			const long previousTick =
+				body->field_7C;
+			volatile long* currentTick =
+				(volatile long*)0x006B4CA8;
+			volatile long* firstUpdater =
+				(volatile long*)0x005FAE98;
+			volatile long* secondUpdater =
+				(volatile long*)0x0060CFB0;
 
-	if (gSpideySynthRampPlayer != player)
-	{
-		gSpideySynthRampPlayer =
-			player;
-		gSpideySynthRampRemainder =
-			0;
+			long delta =
+				*currentTick - previousTick;
+
+			if (delta < 2 &&
+				!*firstUpdater &&
+				!*secondUpdater)
+			{
+				++gSpideyChaseBodyCadenceWaits;
+
+				// Match the proven external fix: wait only until the canonical
+				// vblank clock supplies the second tick.  This is intentionally
+				// scoped to the automated Chase Venom sequence.
+				do
+				{
+					delta =
+						*currentTick - previousTick;
+					body->field_80 =
+						delta;
+				}
+				while (delta < 2 &&
+					!*firstUpdater &&
+					!*secondUpdater);
+			}
+			else if (delta < 2)
+			{
+				++gSpideyChaseBodyCadenceUpdaterBypass;
+			}
+
+			if ((unsigned long)delta >
+				gSpideyChaseBodyCadenceMaxObservedDelta)
+			{
+				gSpideyChaseBodyCadenceMaxObservedDelta =
+					(unsigned long)delta;
+			}
+		}
 	}
 
 	retail(
-		player,
+		body,
 		0);
-
-	if (!scriptedBefore)
-	{
-		gSpideySynthRampRemainder =
-			0;
-		return;
-	}
-
-	++gSpideySynthRampScriptedCalls;
-	const int axesActive =
-		player->field_E2D != 0 ||
-		player->field_E2E != 0;
-	if (!axesActive)
-	{
-		gSpideySynthRampRemainder =
-			0;
-		return;
-	}
-
-	const int retailRamp =
-		*(int*)(raw + 0x8F0);
-	int expectedRetail =
-		oldRamp + 0x20;
-	if (expectedRetail > 0x100)
-		expectedRetail = 0x100;
-
-	// Only replace the exact fixed +0x20 retail ramp.  If another branch
-	// changed field_8F0, leave it alone rather than guessing.
-	if (oldRamp < 0 ||
-		oldRamp > 0x100 ||
-		retailRamp != expectedRetail)
-	{
-		++gSpideySynthRampUnexpected;
-		gSpideySynthRampRemainder =
-			0;
-		return;
-	}
-
-	const int numerator =
-		(0x20 * elapsedTicks) +
-		gSpideySynthRampRemainder;
-	const int increment =
-		numerator / 3;
-	gSpideySynthRampRemainder =
-		numerator % 3;
-
-	int correctedRamp =
-		oldRamp + increment;
-	if (correctedRamp > 0x100)
-		correctedRamp = 0x100;
-	*(int*)(raw + 0x8F0) =
-		correctedRamp;
-	++gSpideySynthRampCorrections;
 }
 
-static int SpideyInstallScriptedInputRamp20Hz()
+static int SpideyInstallChaseVenomBodyCadenceCompat()
 {
-	const int installed =
-		SpideyPatchDirectCallsToTargetInRange(
-			0x00401000,
-			0x0053B000,
-			0x004BD510,
-			(void*)&SpideyReadAnalogueInputScripted20Hz,
-			"timing_scripted_input_ramp_20hz");
-	gSpideySynthRampInstalled =
+	int installed =
+		0;
+
+	installed +=
+		SpideyPatchDirectCall(
+			0x00460F99,
+			0x00460ED0,
+			(void*)&SpideyChaseVenomEveryFrameCompat,
+			"chase_venom_cbody_interleave_radial");
+	installed +=
+		SpideyPatchDirectCall(
+			0x00460FAE,
+			0x00460ED0,
+			(void*)&SpideyChaseVenomEveryFrameCompat,
+			"chase_venom_cbody_interleave_normal");
+	installed +=
+		SpideyPatchDirectCall(
+			0x00461111,
+			0x00460ED0,
+			(void*)&SpideyChaseVenomEveryFrameCompat,
+			"chase_venom_ob_ai_radial");
+	installed +=
+		SpideyPatchDirectCall(
+			0x00461126,
+			0x00460ED0,
+			(void*)&SpideyChaseVenomEveryFrameCompat,
+			"chase_venom_ob_ai_normal");
+	installed +=
+		SpideyPatchDirectCall(
+			0x004F6C19,
+			0x00460ED0,
+			(void*)&SpideyChaseVenomEveryFrameCompat,
+			"chase_venom_web_ai");
+
+	gSpideyChaseBodyCadenceInstalled =
 		installed;
 
 	FILE* f =
@@ -4734,7 +4757,7 @@ static int SpideyInstallScriptedInputRamp20Hz()
 	{
 		fprintf(
 			f,
-			"scripted_input_ramp_install calls=%d retail=0x004BD510 field=0x08F0 scope=player_synthesized_only basis=20hz canonical_clock=60hz rate=32_per_3_ticks manual_input=untouched\\n",
+			"chase_venom_body_cadence_install calls=%d expected=5 retail_every_frame=0x00460ED0 level=0x501 activation=player_synthesized_input minimum_delta=2 scope=scripted_sequence_only source=kellog_frame_limiter_adapted\\n",
 			installed);
 		fclose(f);
 	}
@@ -4742,7 +4765,7 @@ static int SpideyInstallScriptedInputRamp20Hz()
 	return installed;
 }
 
-static void SpideyLogScriptedInputRampStats()
+static void SpideyLogChaseVenomBodyCadenceStats()
 {
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -4752,13 +4775,14 @@ static void SpideyLogScriptedInputRampStats()
 
 	fprintf(
 		f,
-		"scripted_input_ramp_stats installed=%d calls=%lu scripted_calls=%lu corrections=%lu unexpected=%lu remainder=%d policy=20hz_scripted_ramp_on_60hz_clock\\n",
-		gSpideySynthRampInstalled,
-		gSpideySynthRampCalls,
-		gSpideySynthRampScriptedCalls,
-		gSpideySynthRampCorrections,
-		gSpideySynthRampUnexpected,
-		gSpideySynthRampRemainder);
+		"chase_venom_body_cadence_stats installed=%d calls=%lu active_calls=%lu waits=%lu special_bypass=%lu updater_bypass=%lu max_delta=%lu policy=retail_minimum_two_tick_body_cadence_during_level_0x501_synthesized_input\\n",
+		gSpideyChaseBodyCadenceInstalled,
+		gSpideyChaseBodyCadenceCalls,
+		gSpideyChaseBodyCadenceActiveCalls,
+		gSpideyChaseBodyCadenceWaits,
+		gSpideyChaseBodyCadenceBypassSpecial,
+		gSpideyChaseBodyCadenceUpdaterBypass,
+		gSpideyChaseBodyCadenceMaxObservedDelta);
 	fclose(f);
 }
 
@@ -4828,11 +4852,10 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	// Chase Venom RE proved DF4/DF8 heading interpolation already multiplies
-	// and decrements by field_80.  The remaining proven raw-cadence seam in
-	// this chain is ReadAnalogueInput's fixed +0x20 field_8F0 ramp.
-	SpideyInstallScriptedInputRamp20Hz();
 
+
+
+	SpideyInstallChaseVenomBodyCadenceCompat();
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
@@ -13819,7 +13842,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 				0;
 		}
 
-		SpideyLogScriptedInputRampStats();
+		SpideyLogChaseVenomBodyCadenceStats();
 
 		FILE* f =
 			SpideyOpenConsolidatedLog(
