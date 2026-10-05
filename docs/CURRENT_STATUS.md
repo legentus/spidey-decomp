@@ -1,5 +1,107 @@
 # CURRENT STATUS
 
+## CHASE VENOM — INTERRUPTED SESSION RECOVERED; RETAIL LEVEL-ID GATE FIXED (2026-10-05)
+
+Latest runtime tested before the disconnect:
+- revision `e3875c8e1cce218c4e2b2ba86874830ef0a8a7ed`;
+- consolidated log: `spidey-decomp(20261005-090809).log`;
+- user confirmed Spider-Man still ran into the wall at the end of the Chase Venom cutscene;
+- user also reported Venom's tentacle effect appearing detached/camera-relative, but explicitly asked to defer that and focus on the chase path.
+
+### Critical runtime result
+
+All five historical `CBody::EveryFrame` cadence hooks installed:
+
+- `0x00460F99`;
+- `0x00460FAE`;
+- `0x00461111`;
+- `0x00461126`;
+- `0x004F6C19`.
+
+However shutdown telemetry was:
+
+`chase_venom_body_cadence_stats installed=5 calls=92968 active_calls=0 waits=0 special_bypass=0 updater_bypass=0 max_delta=0`
+
+Therefore the previous run **did not test the historical cadence mechanism at all**. No body update was ever gated.
+
+### Root cause of zero activation
+
+The compatibility code used:
+
+`Trig_GetLevelID() == 0x501`
+
+But the reconstructed `trig.cpp` implementation is still a placeholder:
+
+`int Trig_GetLevelID(void) { return 0x686868; }`
+
+Thus any DLL-side call resolving to that reconstructed function can never report the real retail level ID.
+
+`tools/names.json` identifies the original executable function as:
+
+- `?Trig_GetLevelId@@YAHXZ`;
+- address `0x004DE770`.
+
+The Venom reconstruction's existing level check uses decimal `1281`, which is `0x501`, so the Chase Venom level constant itself remains consistent; the broken piece was the function implementation used by our gate.
+
+### Source correction
+
+Source commit:
+- `88934f3a183c36a2e7ed65a3111a596b034f7570` — `timing: call retail level id for Chase Venom gate`.
+
+Changes:
+- added an explicit `__cdecl` retail function pointer to `0x004DE770`;
+- `SpideyChaseVenomCadenceActive()` now calls the retail EXE directly;
+- it no longer calls the unfinished decomp `Trig_GetLevelID()` stub;
+- tracks the last retail level ID seen;
+- counts successful `0x501` checks in memory;
+- startup logging now records `retail_get_level_id=0x004DE770`;
+- shutdown cadence stats now include:
+  - `last_retail_level=0x...`;
+  - `level_0x501_checks=...`.
+
+Static sanity at `88934f3...`:
+- `main.cpp` braces: 1131/1131;
+- parentheses: 5244/5244;
+- two textual occurrences of `0x004DE770` (pointer + startup description);
+- the only `Trig_GetLevelID()` textual occurrence in this compatibility area is the explanatory comment; no active call remains;
+- cadence install/stats markers each occur once.
+
+### Interpretation
+
+The failed `e3875c8...` test does **not** falsify Kellog's body-cadence fix.
+
+It only proves:
+1. the five call-site hooks themselves installed correctly;
+2. our level activation predicate was permanently false because it used a placeholder decomp function;
+3. the actual minimum-two-tick wait path never ran.
+
+The next runtime is therefore the **first real validation** of the adapted historical fix.
+
+### Exact next test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `88934f3a183c36a2e7ed65a3111a596b034f7570` or a newer documentation-only descendant.
+
+Test:
+1. replay Chase Venom;
+2. reach the end-of-building automated chase;
+3. observe whether Spider-Man now follows Venom through/out of the building instead of turning into the wall;
+4. continue far enough to verify the chase no longer fails from separation;
+5. exit cleanly and return the single consolidated log.
+
+Expected startup:
+`chase_venom_body_cadence_install ... retail_get_level_id=0x004DE770 ...`
+
+Expected shutdown if activation is finally correct:
+- `active_calls > 0`;
+- `level_0x501_checks > 0`;
+- normally `waits > 0`;
+- `last_retail_level` should reflect the final level/menu state at shutdown and is not itself required to remain `0x501`.
+
+If `active_calls > 0` and the chase is still broken, then the historical fix truly fails under this project's 60-Hz architecture and the next step is to compare its timer/updater assumptions against our synthetic 60-Hz callback rather than continue patching unrelated locomotion counters.
+
 ## CHASE VENOM — FAILED RAMP PATCH RETIRED; PROVEN CBODY CADENCE FIX ADAPTED (2026-10-05)
 
 Latest failed runtime:
