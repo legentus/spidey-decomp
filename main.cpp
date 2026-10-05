@@ -4496,6 +4496,307 @@ static void SpideyLogHighFpsRetailBytes(
 	fclose(f);
 }
 
+#define SPIDEY_CHASE_VENOM_TRACE_CAPACITY 4096
+
+struct SpideyChaseVenomTraceSample
+{
+	unsigned long tick;
+	int field80;
+	int scriptClock;
+	int nextDelay;
+	int nextCommand;
+	int blockType0;
+	int blockType1;
+	int blockType2;
+	int blockType3;
+	int axisX;
+	int axisY;
+	unsigned long state;
+	int posX;
+	int posY;
+	int posZ;
+	int velX;
+	int velY;
+	int velZ;
+	int venomDx;
+	int venomDy;
+	int venomDz;
+	int angleY;
+	unsigned long collision;
+	unsigned long flags194;
+	unsigned int anim;
+	int animFrame;
+	unsigned int animFinished;
+	unsigned int synthMode;
+	unsigned int scriptActive;
+	unsigned int wall;
+	unsigned int ceiling;
+	int ignoreInput;
+};
+
+static SpideyChaseVenomTraceSample
+	gSpideyChaseVenomTrace[
+		SPIDEY_CHASE_VENOM_TRACE_CAPACITY];
+static unsigned long gSpideyChaseVenomTraceCount = 0;
+static unsigned long gSpideyChaseVenomTraceDropped = 0;
+static int gSpideyChaseVenomTraceInstalled = 0;
+
+static void SpideyCollectChaseVenomTrace(
+		CPlayer* player)
+{
+	if (!player ||
+		Trig_GetLevelID() != 0x501 ||
+		!player->field_1AC)
+	{
+		return;
+	}
+
+	if (gSpideyChaseVenomTraceCount >=
+		SPIDEY_CHASE_VENOM_TRACE_CAPACITY)
+	{
+		++gSpideyChaseVenomTraceDropped;
+		return;
+	}
+
+	SpideyChaseVenomTraceSample* sample =
+		&gSpideyChaseVenomTrace[
+			gSpideyChaseVenomTraceCount];
+	memset(
+		sample,
+		0,
+		sizeof(*sample));
+
+	sample->nextDelay =
+		-32768;
+	sample->nextCommand =
+		-1;
+	sample->blockType0 =
+		-1;
+	sample->blockType1 =
+		-1;
+	sample->blockType2 =
+		-1;
+	sample->blockType3 =
+		-1;
+
+	__try
+	{
+		unsigned char* raw =
+			(unsigned char*)player;
+		sample->tick =
+			(unsigned long)*(volatile long*)0x006B4CA8;
+		sample->field80 =
+			player->field_80;
+		sample->scriptClock =
+			*(int*)(raw + 0x1B0);
+		sample->scriptActive =
+			(unsigned int)*(raw + 0x1B4);
+
+		short* script =
+			*(short**)(raw + 0x1B8);
+		if (script)
+		{
+			sample->nextDelay =
+				(int)script[0];
+			sample->nextCommand =
+				(int)script[1];
+		}
+
+		int* block =
+			*(int**)(raw + 0x1BC);
+		int* blockTypes[4] =
+		{
+			&sample->blockType0,
+			&sample->blockType1,
+			&sample->blockType2,
+			&sample->blockType3
+		};
+		for (int i = 0;
+			 i < 4 && block;
+			 ++i)
+		{
+			*blockTypes[i] =
+				block[0];
+			const int words =
+				block[1];
+			if (words < 2 ||
+				words > 64)
+			{
+				break;
+			}
+			block =
+				(int*)block[words - 1];
+		}
+
+		sample->axisX =
+			(int)player->field_E2D;
+		sample->axisY =
+			(int)player->field_E2E;
+		sample->state =
+			(unsigned long)player->field_E1C;
+		sample->posX =
+			player->mPos.vx;
+		sample->posY =
+			player->mPos.vy;
+		sample->posZ =
+			player->mPos.vz;
+		sample->velX =
+			player->mVel.vx;
+		sample->velY =
+			player->mVel.vy;
+		sample->velZ =
+			player->mVel.vz;
+		sample->angleY =
+			(int)player->mAngles.vy;
+		sample->collision =
+			(unsigned long)player->mCollision;
+		sample->flags194 =
+			(unsigned long)player->field_194;
+		sample->anim =
+			(unsigned int)player->mAnim;
+		sample->animFrame =
+			(int)player->mFrame;
+		sample->animFinished =
+			(unsigned int)player->mAnimFinished;
+		sample->synthMode =
+			(unsigned int)player->field_1AC;
+		sample->wall =
+			(unsigned int)player->field_8E8;
+		sample->ceiling =
+			(unsigned int)player->field_8E9;
+		sample->ignoreInput =
+			player->field_E18;
+
+		CBaddy* venom =
+			FindBaddyOfType(313);
+		if (venom)
+		{
+			sample->venomDx =
+				venom->mPos.vx -
+				player->mPos.vx;
+			sample->venomDy =
+				venom->mPos.vy -
+				player->mPos.vy;
+			sample->venomDz =
+				venom->mPos.vz -
+				player->mPos.vz;
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		return;
+	}
+
+	++gSpideyChaseVenomTraceCount;
+}
+
+typedef void (__fastcall *SpideyRetailPlayerSynthInputFn)(
+		CPlayer*,
+		void*);
+
+static void __fastcall SpideyTracePlayerSynthInput(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailPlayerSynthInputFn retail =
+		(SpideyRetailPlayerSynthInputFn)0x004BC300;
+	retail(
+		player,
+		0);
+	SpideyCollectChaseVenomTrace(
+		player);
+}
+
+static void SpideyDumpChaseVenomTrace()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"chase_venom_trace_summary installed=%d samples=%lu dropped=%lu level=0x501 policy=in_memory_post_synth_no_gameplay_io\\n",
+		gSpideyChaseVenomTraceInstalled,
+		gSpideyChaseVenomTraceCount,
+		gSpideyChaseVenomTraceDropped);
+
+	for (unsigned long i = 0;
+		 i < gSpideyChaseVenomTraceCount;
+		 ++i)
+	{
+		const SpideyChaseVenomTraceSample* sample =
+			&gSpideyChaseVenomTrace[i];
+		fprintf(
+			f,
+			"chase_venom_trace i=%lu tick=%lu field80=%d synth=%u script_active=%u script_clock=%d next_delay=%d next_cmd=%d blocks=%d,%d,%d,%d axes=%d,%d state=0x%08lX pos=%d,%d,%d vel=%d,%d,%d venom_delta=%d,%d,%d angle_y=%d collision=0x%04lX flags194=0x%08lX anim=%u anim_frame=%d anim_finished=%u wall=%u ceiling=%u ignore_input=%d\\n",
+			i,
+			sample->tick,
+			sample->field80,
+			sample->synthMode,
+			sample->scriptActive,
+			sample->scriptClock,
+			sample->nextDelay,
+			sample->nextCommand,
+			sample->blockType0,
+			sample->blockType1,
+			sample->blockType2,
+			sample->blockType3,
+			sample->axisX,
+			sample->axisY,
+			sample->state,
+			sample->posX,
+			sample->posY,
+			sample->posZ,
+			sample->velX,
+			sample->velY,
+			sample->velZ,
+			sample->venomDx,
+			sample->venomDy,
+			sample->venomDz,
+			sample->angleY,
+			sample->collision,
+			sample->flags194,
+			sample->anim,
+			sample->animFrame,
+			sample->animFinished,
+			sample->wall,
+			sample->ceiling,
+			sample->ignoreInput);
+	}
+
+	fclose(f);
+}
+
+static int SpideyInstallChaseVenomTrace()
+{
+	const int installed =
+		SpideyPatchDirectCallsToTargetInRange(
+			0x00401000,
+			0x0053B000,
+			0x004BC300,
+			(void*)&SpideyTracePlayerSynthInput,
+			"chase_venom_player_synth_trace");
+	gSpideyChaseVenomTraceInstalled =
+		installed;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"chase_venom_trace_install calls=%d target=0x004BC300 level=0x501 capture=in_memory_only dump=session_shutdown capacity=%u\\n",
+			installed,
+			(unsigned int)SPIDEY_CHASE_VENOM_TRACE_CAPACITY);
+		fclose(f);
+	}
+
+	return installed;
+}
+
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
@@ -4562,24 +4863,40 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	// Chase Venom is a documented 20-FPS-sensitive sequence.  The current
-	// native-60 runtime proves the failure still exists, but the active path is
-	// Spider-Man's synthesized-input controller rather than Venom's already
-	// elapsed-tick-aware command dispatcher.  Capture these retail blocks once
-	// at startup so we can reconstruct the exact command/timing semantics without
-	// adding synchronous per-frame logging to the chase itself.
+	// The first Chase Venom capture proved the generic player synthesized-input
+	// scheduler and its time-based worker blocks already consume field_80.  The
+	// remaining high-value seam is the locomotion/surface-transition consumer
+	// that turns correct synthesized stick input into player movement.
 	SpideyLogHighFpsRetailBytes(
-		"CPlayer_SwitchToSynthesizedInput_Block",
-		0x004BC1A0,
-		0x140);
+		"CPlayer_AI_Block",
+		0x004C65C0,
+		0x2E0);
 	SpideyLogHighFpsRetailBytes(
-		"CPlayer_SynthesizeAnalogueInput_Block",
-		0x004BC300,
-		0x11B0);
+		"CPlayer_CheckForwards_Block",
+		0x004BF8A0,
+		0x320);
 	SpideyLogHighFpsRetailBytes(
-		"CVenom_FollowDirections_Block",
-		0x004EB530,
-		0x160);
+		"CPlayer_CheckRunIntoWall_Block",
+		0x004BFBC0,
+		0x120);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_CheckStickToCeiling_Block",
+		0x004BFCE0,
+		0x1E0);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_CheckStickToWall_Block",
+		0x004BFEC0,
+		0x1F0);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_SetTargetTorsoAngle_Block",
+		0x004C6970,
+		0x130);
+	SpideyLogHighFpsRetailBytes(
+		"CPlayer_GetEffectiveHeading_Block",
+		0x004C6AA0,
+		0x130);
+
+	SpideyInstallChaseVenomTrace();
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
@@ -13565,6 +13882,8 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 			gSpideyPacingBeginPeriodOne =
 				0;
 		}
+
+		SpideyDumpChaseVenomTrace();
 
 		FILE* f =
 			SpideyOpenConsolidatedLog(
