@@ -1,5 +1,66 @@
 # CURRENT STATUS
 
+## CHASE VENOM — SYNTH WORKER TIMING CLASSIFIED; GENERALIZED WORLD-HEADING HOLD READY (2026-10-05)
+
+Latest tested runtime is still `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`:
+- cutscene itself is confirmed 60 FPS;
+- Spider-Man still misses the intended building-entry route;
+- the supplied `spidey-decomp(20261005-233411).log` is the same runtime revision, not a test of the new Chase compatibility code.
+
+### Additional assembly -> C result
+
+Retail `CPlayer::SynthesizeAnalogueInput @ 0x004BC300` worker jump table is now classified far enough for timing:
+
+- type 2: X/Z route steering, camera-relative axes;
+- type 3: timed synthesized action/direction;
+- type 5: spatial/target-vector worker;
+- type 6: timed animation/action;
+- type 7: timed player state;
+- type 8: timed `field_E00`;
+- type 9: timed wait/parser resume;
+- type 15: conditional state/animation;
+- 4 and 10..14 route to the invalid/unhandled body.
+
+Every timed worker inspected (3, 6, 7, 8, 9) subtracts `player->field_80`, so their durations are already canonical elapsed-time based. No new raw one-call timer family was found.
+
+This further isolates the Chase bug to **controller feedback cadence / heading-basis update order**, not worker countdown speed.
+
+Detailed reconstruction:
+- `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`.
+
+### Correction to world-heading compatibility scope
+
+The prior camera compensation assumed the active route worker would be the linked-list head. That is not guaranteed because multiple synthesized workers can coexist.
+
+Current behavior source:
+- `0ab2efb34c841814b2313aa74301e5eb3789a7ad` — `timing: preserve all synthesized Chase steering samples`.
+
+It now:
+- captures/preserves the effective sampled world heading for **any active synthesized analogue movement** during Chase;
+- no longer depends on worker type 2 being the list head;
+- keeps render/camera/physics/collision/animation at 60 Hz;
+- keeps the synthesized controller at the narrow 20-Hz-equivalent sample cadence;
+- records `worker_mask_before` / `worker_mask_after` so the next log identifies every concurrent worker type at the doorway.
+
+The startup-only `E32/E34/camera+0x23A` ownership scan from `e1c8a369...` remains installed.
+
+Documentation source:
+- `2f6e0dcbb8dec436350b523bd6de59e87be25977`.
+
+### Next runtime validation
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`, then Level Select -> Chase Venom.
+
+Observe:
+1. cutscene remains 60 FPS;
+2. whether Spider-Man now takes the doorway/building-entry turn correctly;
+3. if not, whether the miss is improved, unchanged, or worse;
+4. continue long enough to establish whether later chase movement remains valid;
+5. exit cleanly and return the single consolidated `spidey-decomp.log`.
+
+The next log is intentionally high-value: it should reveal synthesized cadence, world-heading compensation/drift, the full active worker mix, and all E32/E34/+0x23A static xrefs in one run.
+
+
 ## CHASE VENOM — CAMERA-RELATIVE STEERING PIPELINE RECONSTRUCTED; WORLD-HEADING HOLD READY (2026-10-05)
 
 Latest tested runtime remains:
