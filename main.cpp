@@ -4888,6 +4888,8 @@ struct SpideyChaseSynthTraceSample
 	int desiredWorldHeading;
 	unsigned int wall;
 	unsigned int ceiling;
+	unsigned long workerMaskBefore;
+	unsigned long workerMaskAfter;
 	int headBeforeType;
 	int headBeforeSize;
 	int headBefore2;
@@ -4912,7 +4914,6 @@ static signed char gSpideyChaseSynthHeldX = 0;
 static signed char gSpideyChaseSynthHeldY = 0;
 static int gSpideyChaseSynthHeldValid = 0;
 static int gSpideyChaseSynthFreshThisCall = 0;
-static int gSpideyChaseSynthSampleType2 = 0;
 static int gSpideyChaseSynthHeldWorldHeading = 0;
 static int gSpideyChaseSynthHeldWorldHeadingValid = 0;
 static unsigned long gSpideyChaseHeadingSamples = 0;
@@ -4931,6 +4932,63 @@ static unsigned long gSpideyChaseRampCalls = 0;
 static unsigned long gSpideyChaseRampCorrections = 0;
 static unsigned long gSpideyChaseRampUnexpected = 0;
 static int gSpideyChaseRampInstalled = 0;
+
+static unsigned long SpideyChaseReadWorkerTypeMask(
+		CPlayer* player)
+{
+	if (!player)
+		return 0;
+
+	unsigned long mask =
+		0;
+
+	__try
+	{
+		unsigned char* raw =
+			(unsigned char*)player;
+		int* block =
+			*(int**)(raw + 0x1BC);
+
+		for (int nodes = 0;
+			 block && nodes < 32;
+			 ++nodes)
+		{
+			const int type =
+				block[0];
+			const int size =
+				block[1];
+
+			if (type >= 0 &&
+				type < 32)
+			{
+				mask |=
+					1UL <<
+					type;
+			}
+
+			if (size < 2 ||
+				size > 32)
+			{
+				break;
+			}
+
+			int* next =
+				(int*)block[
+					size -
+					1];
+			if (next == block)
+				break;
+			block =
+				next;
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		return mask;
+	}
+
+	return mask;
+}
 
 static void SpideyChaseReadWorkerHead(
 		CPlayer* player,
@@ -5014,6 +5072,9 @@ static void SpideyRecordChaseSynthTrace(
 		elapsed;
 	sample->field80Before =
 		field80Before;
+	sample->workerMaskBefore =
+		SpideyChaseReadWorkerTypeMask(
+			player);
 	sample->headBeforeType =
 		headBeforeType;
 	sample->headBeforeSize =
@@ -5053,6 +5114,9 @@ static void SpideyRecordChaseSynthTrace(
 			(unsigned int)*(raw + 0x8E8);
 		sample->ceiling =
 			(unsigned int)*(raw + 0x8E9);
+		sample->workerMaskAfter =
+			SpideyChaseReadWorkerTypeMask(
+				player);
 		SpideyChaseReadWorkerHead(
 			player,
 			&sample->headAfterType,
@@ -5085,8 +5149,6 @@ static void SpideyResetChaseSynthState(
 	gSpideyChaseSynthHeldValid =
 		0;
 	gSpideyChaseSynthFreshThisCall =
-		0;
-	gSpideyChaseSynthSampleType2 =
 		0;
 	gSpideyChaseSynthHeldWorldHeading =
 		0;
@@ -5220,8 +5282,6 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 		1;
 	gSpideyChaseSynthFreshThisCall =
 		1;
-	gSpideyChaseSynthSampleType2 =
-		headBeforeType == 2;
 	++gSpideyChaseSynthRetailUpdates;
 
 	if ((unsigned long)synthElapsed >
@@ -5285,15 +5345,17 @@ static unsigned long SpideyChaseHeadingDistance12(
 	return (unsigned long)delta;
 }
 
-// Retail type-2 route steering first converts its world-space target direction
-// into camera-relative stick axes using CCamera+0x23A. ReadAnalogueInput then
-// derives field_E32 from those axes, and CheckForwards adds the current
-// CCamera+0x23A again when Spider-Man is not wall-crawling.
+// Retail synthesized movement ultimately becomes camera-relative analogue
+// axes. Route worker type 2 explicitly generates them from CCamera+0x23A, and
+// the other direction-producing script workers feed the same ReadAnalogueInput
+// path. CheckForwards then adds the current CCamera+0x23A again on normal
+// ground movement.
 //
-// Therefore holding the old camera-relative axes while the native-60 camera
-// keeps updating is not equivalent to the old 20-Hz controller. Preserve the
-// sampled world steering heading instead. On held 60-Hz frames, rewrite E32
-// so CheckForwards sees the same world heading even if the camera moved.
+// Therefore holding only the old axes while the native-60 camera keeps moving
+// is not equivalent to the original 20-Hz controller. Preserve the effective
+// sampled world steering heading for ANY active synthesized analogue movement.
+// On held 60-Hz frames, rewrite E32 so CheckForwards sees the same world
+// heading even if the camera moved.
 static void SpideyChaseStabilizeHeldWorldHeading(
 		CPlayer* player)
 {
@@ -5311,8 +5373,7 @@ static void SpideyChaseStabilizeHeldWorldHeading(
 		*(signed char*)(raw + 0xE2D) != 0 ||
 		*(signed char*)(raw + 0xE2E) != 0;
 
-	if (!gSpideyChaseSynthSampleType2 ||
-		!axesActive)
+	if (!axesActive)
 	{
 		gSpideyChaseSynthHeldWorldHeadingValid =
 			0;
@@ -5544,7 +5605,7 @@ static void SpideyDumpChaseSynthTrace()
 			&gSpideyChaseSynthTrace[i];
 		fprintf(
 			f,
-			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
+			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u worker_mask_before=0x%08lX worker_mask_after=0x%08lX head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
 			i,
 			sample->tick,
 			sample->elapsed,
@@ -5567,6 +5628,8 @@ static void SpideyDumpChaseSynthTrace()
 			sample->desiredWorldHeading,
 			sample->wall,
 			sample->ceiling,
+			sample->workerMaskBefore,
+			sample->workerMaskAfter,
 			sample->headBeforeType,
 			sample->headBeforeSize,
 			sample->headBefore2,
