@@ -4881,6 +4881,11 @@ struct SpideyChaseSynthTraceSample
 	int posY;
 	int posZ;
 	int angleY;
+	int headingTraceValid;
+	int cameraHeading;
+	int inputBasisHeading;
+	int desiredRelativeHeading;
+	int desiredWorldHeading;
 	unsigned int wall;
 	unsigned int ceiling;
 	int headBeforeType;
@@ -4906,6 +4911,13 @@ static int gSpideyChaseSynthAccumulatedTicks = 0;
 static signed char gSpideyChaseSynthHeldX = 0;
 static signed char gSpideyChaseSynthHeldY = 0;
 static int gSpideyChaseSynthHeldValid = 0;
+static int gSpideyChaseSynthFreshThisCall = 0;
+static int gSpideyChaseSynthSampleType2 = 0;
+static int gSpideyChaseSynthHeldWorldHeading = 0;
+static int gSpideyChaseSynthHeldWorldHeadingValid = 0;
+static unsigned long gSpideyChaseHeadingSamples = 0;
+static unsigned long gSpideyChaseHeadingCorrections = 0;
+static unsigned long gSpideyChaseHeadingMaxPreCorrectionDrift = 0;
 static unsigned long gSpideyChaseSynthCalls = 0;
 static unsigned long gSpideyChaseSynthActiveCalls = 0;
 static unsigned long gSpideyChaseSynthRetailUpdates = 0;
@@ -5072,6 +5084,14 @@ static void SpideyResetChaseSynthState(
 		0;
 	gSpideyChaseSynthHeldValid =
 		0;
+	gSpideyChaseSynthFreshThisCall =
+		0;
+	gSpideyChaseSynthSampleType2 =
+		0;
+	gSpideyChaseSynthHeldWorldHeading =
+		0;
+	gSpideyChaseSynthHeldWorldHeadingValid =
+		0;
 }
 
 static void __fastcall SpideyChaseVenomSynth20Hz(
@@ -5082,6 +5102,8 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 		(SpideyRetailPlayerSynthInputFn)0x004BC300;
 
 	++gSpideyChaseSynthCalls;
+	gSpideyChaseSynthFreshThisCall =
+		0;
 
 	if (!player ||
 		SpideyRetailGetLevelId() != 0x501 ||
@@ -5196,6 +5218,10 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 			0xE2E);
 	gSpideyChaseSynthHeldValid =
 		1;
+	gSpideyChaseSynthFreshThisCall =
+		1;
+	gSpideyChaseSynthSampleType2 =
+		headBeforeType == 2;
 	++gSpideyChaseSynthRetailUpdates;
 
 	if ((unsigned long)synthElapsed >
@@ -5214,6 +5240,167 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 		headBeforeSize,
 		headBefore2,
 		headBefore3);
+}
+
+static int SpideyChaseReadCameraTransformHeading(
+		int* heading)
+{
+	if (heading)
+		*heading = 0;
+
+	__try
+	{
+		unsigned char* camera =
+			*(unsigned char**)0x0056F3B8;
+		if (!camera)
+			return 0;
+
+		if (heading)
+		{
+			*heading =
+				(int)*(unsigned short*)(
+					camera +
+					0x23A) &
+				0x0FFF;
+		}
+		return 1;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0;
+	}
+}
+
+static unsigned long SpideyChaseHeadingDistance12(
+		int a,
+		int b)
+{
+	int delta =
+		(a - b) &
+		0x0FFF;
+	if (delta > 0x800)
+		delta =
+			0x1000 -
+			delta;
+	return (unsigned long)delta;
+}
+
+// Retail type-2 route steering first converts its world-space target direction
+// into camera-relative stick axes using CCamera+0x23A. ReadAnalogueInput then
+// derives field_E32 from those axes, and CheckForwards adds the current
+// CCamera+0x23A again when Spider-Man is not wall-crawling.
+//
+// Therefore holding the old camera-relative axes while the native-60 camera
+// keeps updating is not equivalent to the old 20-Hz controller. Preserve the
+// sampled world steering heading instead. On held 60-Hz frames, rewrite E32
+// so CheckForwards sees the same world heading even if the camera moved.
+static void SpideyChaseStabilizeHeldWorldHeading(
+		CPlayer* player)
+{
+	if (!player ||
+		!player->field_1AC)
+	{
+		gSpideyChaseSynthHeldWorldHeadingValid =
+			0;
+		return;
+	}
+
+	unsigned char* raw =
+		(unsigned char*)player;
+	const int axesActive =
+		*(signed char*)(raw + 0xE2D) != 0 ||
+		*(signed char*)(raw + 0xE2E) != 0;
+
+	if (!gSpideyChaseSynthSampleType2 ||
+		!axesActive)
+	{
+		gSpideyChaseSynthHeldWorldHeadingValid =
+			0;
+		return;
+	}
+
+	int cameraHeading =
+		0;
+	if (!SpideyChaseReadCameraTransformHeading(
+			&cameraHeading))
+	{
+		gSpideyChaseSynthHeldWorldHeadingValid =
+			0;
+		return;
+	}
+
+	const int relativeHeading =
+		(int)*(unsigned short*)(
+			raw +
+			0xE32) &
+		0x0FFF;
+	const int inputBasisHeading =
+		(int)*(unsigned short*)(
+			raw +
+			0xE34) &
+		0x0FFF;
+	const int worldHeading =
+		player->field_8E8 ?
+			relativeHeading :
+			(relativeHeading +
+			 cameraHeading) &
+				0x0FFF;
+
+	if (gSpideyChaseSynthFreshThisCall ||
+		!gSpideyChaseSynthHeldWorldHeadingValid)
+	{
+		gSpideyChaseSynthHeldWorldHeading =
+			worldHeading;
+		gSpideyChaseSynthHeldWorldHeadingValid =
+			1;
+		++gSpideyChaseHeadingSamples;
+
+		if (gSpideyChaseSynthTraceCount > 0)
+		{
+			SpideyChaseSynthTraceSample* sample =
+				&gSpideyChaseSynthTrace[
+					gSpideyChaseSynthTraceCount -
+					1];
+			sample->headingTraceValid =
+				1;
+			sample->cameraHeading =
+				cameraHeading;
+			sample->inputBasisHeading =
+				inputBasisHeading;
+			sample->desiredRelativeHeading =
+				relativeHeading;
+			sample->desiredWorldHeading =
+				worldHeading;
+		}
+		return;
+	}
+
+	const unsigned long drift =
+		SpideyChaseHeadingDistance12(
+			worldHeading,
+			gSpideyChaseSynthHeldWorldHeading);
+	if (drift >
+		gSpideyChaseHeadingMaxPreCorrectionDrift)
+	{
+		gSpideyChaseHeadingMaxPreCorrectionDrift =
+			drift;
+	}
+
+	int correctedRelative =
+		gSpideyChaseSynthHeldWorldHeading;
+	if (!player->field_8E8)
+	{
+		correctedRelative =
+			(correctedRelative -
+			 cameraHeading) &
+			0x0FFF;
+	}
+
+	*(unsigned short*)(
+		raw +
+		0xE32) =
+		(unsigned short)correctedRelative;
+	++gSpideyChaseHeadingCorrections;
 }
 
 static void __fastcall SpideyChaseVenomReadAnalogue20HzRamp(
@@ -5264,6 +5451,9 @@ static void __fastcall SpideyChaseVenomReadAnalogue20HzRamp(
 	retail(
 		player,
 		0);
+
+	SpideyChaseStabilizeHeldWorldHeading(
+		player);
 
 	const int axesActive =
 		*(signed char*)(raw + 0xE2D) != 0 ||
@@ -5319,13 +5509,16 @@ static void SpideyLogChaseSynthStats()
 
 	fprintf(
 		f,
-		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3\\n",
+		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3\\n",
 		gSpideyChaseSynthInstalled,
 		gSpideyChaseSynthCalls,
 		gSpideyChaseSynthActiveCalls,
 		gSpideyChaseSynthRetailUpdates,
 		gSpideyChaseSynthHeldCalls,
 		gSpideyChaseSynthMaxElapsed,
+		gSpideyChaseHeadingSamples,
+		gSpideyChaseHeadingCorrections,
+		gSpideyChaseHeadingMaxPreCorrectionDrift,
 		gSpideyChaseRampInstalled,
 		gSpideyChaseRampCalls,
 		gSpideyChaseRampCorrections,
@@ -5351,7 +5544,7 @@ static void SpideyDumpChaseSynthTrace()
 			&gSpideyChaseSynthTrace[i];
 		fprintf(
 			f,
-			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d wall=%u ceiling=%u head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
+			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
 			i,
 			sample->tick,
 			sample->elapsed,
@@ -5367,6 +5560,11 @@ static void SpideyDumpChaseSynthTrace()
 			sample->posY,
 			sample->posZ,
 			sample->angleY,
+			sample->headingTraceValid,
+			sample->cameraHeading,
+			sample->inputBasisHeading,
+			sample->desiredRelativeHeading,
+			sample->desiredWorldHeading,
 			sample->wall,
 			sample->ceiling,
 			sample->headBeforeType,
@@ -5410,7 +5608,7 @@ static int SpideyInstallChaseSynth20HzCompat()
 	{
 		fprintf(
 			f,
-			"chase_synth_20hz_install synth=%d synth_call=0x004BD572 synth_retail=0x004BC300 ramp_calls=%d ramp_retail=0x004BD510 level=0x501 policy=60hz_render_physics_20hz_scripted_control_sample_hold cadence_ticks=3 manual_input=untouched\\n",
+			"chase_synth_20hz_install synth=%d synth_call=0x004BD572 synth_retail=0x004BC300 ramp_calls=%d ramp_retail=0x004BD510 level=0x501 policy=60hz_render_physics_20hz_scripted_control_sample_hold_camera_compensated_world_heading cadence_ticks=3 manual_input=untouched\\n",
 			synthInstalled,
 			rampInstalled);
 		fclose(f);
