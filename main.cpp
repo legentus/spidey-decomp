@@ -4597,186 +4597,137 @@ static void SpideyLogRetailFieldXrefs(
 	fclose(f);
 }
 
-// Chase Venom high-FPS compatibility.
-//
-// A known external fix for the retail PC executable ("Kellog's Frame Limiter"
-// in krystalgamer/spidey-tools) fixes the Chase Venom path bug by intercepting
-// the five retail CBody::EveryFrame call sites and refusing to let body AI
-// proceed while the elapsed body tick delta is below 2.  That establishes an
-// important retail invariant: scripted body AI was authored around a minimum
-// two-vblank quantum even though rendering may run faster.
-//
-// Do NOT apply that limiter globally here: this project intentionally runs
-// normal gameplay at native 60 Hz and already has a validated one-tick player
-// physics path.  Reproduce the proven retail invariant only while retail says
-// the current level is 0x501 (Chase Venom).  This keeps every other level on
-// the native-60 path.
-typedef void (__fastcall *SpideyRetailBodyEveryFrameFn)(
-		CBody*,
-		void*);
-
-static unsigned long gSpideyChaseBodyCadenceCalls = 0;
-static unsigned long gSpideyChaseBodyCadenceActiveCalls = 0;
-static unsigned long gSpideyChaseBodyCadenceWaits = 0;
-static unsigned long gSpideyChaseBodyCadenceBypassSpecial = 0;
-static unsigned long gSpideyChaseBodyCadenceUpdaterBypass = 0;
-static unsigned long gSpideyChaseBodyCadenceMaxObservedDelta = 0;
-static int gSpideyChaseBodyCadenceInstalled = 0;
-
 typedef int (__cdecl *SpideyRetailTrigGetLevelIdFn)();
 
-static unsigned long gSpideyChaseBodyCadenceLastLevelId = 0xFFFFFFFFUL;
-static unsigned long gSpideyChaseBodyCadenceLevel501Checks = 0;
-
-static int SpideyChaseVenomCadenceActive()
+static int SpideyRetailGetLevelId()
 {
-	// Do not call the reconstructed Trig_GetLevelID() here: trig.cpp still
-	// contains a placeholder implementation that returns 0x686868.  Call the
-	// retail executable directly instead.
-	SpideyRetailTrigGetLevelIdFn retailGetLevelId =
+	SpideyRetailTrigGetLevelIdFn fn =
 		(SpideyRetailTrigGetLevelIdFn)0x004DE770;
-	const int levelId =
-		retailGetLevelId();
-
-	gSpideyChaseBodyCadenceLastLevelId =
-		(unsigned long)levelId;
-	if (levelId == 0x501)
-	{
-		++gSpideyChaseBodyCadenceLevel501Checks;
-		return 1;
-	}
-
-	return 0;
+	return fn();
 }
 
-static void __fastcall SpideyChaseVenomEveryFrameCompat(
-		CBody* body,
-		void*)
+struct SpideyChaseSchedulerStats
 {
-	SpideyRetailBodyEveryFrameFn retail =
-		(SpideyRetailBodyEveryFrameFn)0x00460ED0;
+	unsigned long logicCalls;
+	unsigned long logicDelta0;
+	unsigned long logicDelta1;
+	unsigned long logicDelta2;
+	unsigned long logicDelta3Plus;
+	unsigned long logicUpdaterActive;
+	unsigned long presentCalls;
+	unsigned long presentDelta0;
+	unsigned long presentDelta1;
+	unsigned long presentDelta2;
+	unsigned long presentDelta3Plus;
+	unsigned long presentUpdaterActive;
+	unsigned long presentDelta2Run;
+	unsigned long presentDelta2MaxRun;
+	long lastLogicVblank;
+	long lastPresentVblank;
+	int logicVblankValid;
+	int presentVblankValid;
+};
 
-	++gSpideyChaseBodyCadenceCalls;
+static SpideyChaseSchedulerStats gSpideyChaseSchedulerStats;
 
-	if (body &&
-		SpideyChaseVenomCadenceActive())
+static int SpideyRetailFrameUpdaterActive()
+{
+	return
+		*(volatile long*)0x005FAE98 != 0 ||
+		*(volatile long*)0x0060CFB0 != 0;
+}
+
+static void SpideyRecordChaseLogicScheduler()
+{
+	if (SpideyRetailGetLevelId() != 0x501)
+		return;
+
+	SpideyChaseSchedulerStats* stats =
+		&gSpideyChaseSchedulerStats;
+	const long current =
+		*(volatile long*)0x006B4CA0;
+
+	++stats->logicCalls;
+	if (SpideyRetailFrameUpdaterActive())
+		++stats->logicUpdaterActive;
+
+	if (stats->logicVblankValid)
 	{
-		++gSpideyChaseBodyCadenceActiveCalls;
+		const long delta =
+			current - stats->lastLogicVblank;
+		if (delta <= 0)
+			++stats->logicDelta0;
+		else if (delta == 1)
+			++stats->logicDelta1;
+		else if (delta == 2)
+			++stats->logicDelta2;
+		else
+			++stats->logicDelta3Plus;
+	}
+	else
+	{
+		stats->logicVblankValid = 1;
+	}
 
-		// Retail EveryFrame itself forces field_80=2 when this bit is set,
-		// so the historical limiter intentionally bypasses these objects.
-		if (body->mCBodyFlags & 4)
+	stats->lastLogicVblank =
+		current;
+}
+
+static void SpideyRecordChasePresentScheduler()
+{
+	if (SpideyRetailGetLevelId() != 0x501)
+		return;
+
+	SpideyChaseSchedulerStats* stats =
+		&gSpideyChaseSchedulerStats;
+	const long current =
+		*(volatile long*)0x006B4CA0;
+
+	++stats->presentCalls;
+	if (SpideyRetailFrameUpdaterActive())
+		++stats->presentUpdaterActive;
+
+	if (stats->presentVblankValid)
+	{
+		const long delta =
+			current - stats->lastPresentVblank;
+		if (delta <= 0)
 		{
-			++gSpideyChaseBodyCadenceBypassSpecial;
+			++stats->presentDelta0;
+			stats->presentDelta2Run = 0;
+		}
+		else if (delta == 1)
+		{
+			++stats->presentDelta1;
+			stats->presentDelta2Run = 0;
+		}
+		else if (delta == 2)
+		{
+			++stats->presentDelta2;
+			++stats->presentDelta2Run;
+			if (stats->presentDelta2Run >
+				stats->presentDelta2MaxRun)
+			{
+				stats->presentDelta2MaxRun =
+					stats->presentDelta2Run;
+			}
 		}
 		else
 		{
-			const long previousTick =
-				body->field_7C;
-			volatile long* currentTick =
-				(volatile long*)0x006B4CA8;
-			volatile long* firstUpdater =
-				(volatile long*)0x005FAE98;
-			volatile long* secondUpdater =
-				(volatile long*)0x0060CFB0;
-
-			long delta =
-				*currentTick - previousTick;
-
-			if (delta < 2 &&
-				!*firstUpdater &&
-				!*secondUpdater)
-			{
-				++gSpideyChaseBodyCadenceWaits;
-
-				// Match the proven external fix: wait only until the canonical
-				// vblank clock supplies the second tick.  This is intentionally
-				// scoped to the automated Chase Venom sequence.
-				do
-				{
-					delta =
-						*currentTick - previousTick;
-					body->field_80 =
-						delta;
-				}
-				while (delta < 2 &&
-					!*firstUpdater &&
-					!*secondUpdater);
-			}
-			else if (delta < 2)
-			{
-				++gSpideyChaseBodyCadenceUpdaterBypass;
-			}
-
-			if ((unsigned long)delta >
-				gSpideyChaseBodyCadenceMaxObservedDelta)
-			{
-				gSpideyChaseBodyCadenceMaxObservedDelta =
-					(unsigned long)delta;
-			}
+			++stats->presentDelta3Plus;
+			stats->presentDelta2Run = 0;
 		}
 	}
-
-	retail(
-		body,
-		0);
-}
-
-static int SpideyInstallChaseVenomBodyCadenceCompat()
-{
-	int installed =
-		0;
-
-	installed +=
-		SpideyPatchDirectCall(
-			0x00460F99,
-			0x00460ED0,
-			(void*)&SpideyChaseVenomEveryFrameCompat,
-			"chase_venom_cbody_interleave_radial");
-	installed +=
-		SpideyPatchDirectCall(
-			0x00460FAE,
-			0x00460ED0,
-			(void*)&SpideyChaseVenomEveryFrameCompat,
-			"chase_venom_cbody_interleave_normal");
-	installed +=
-		SpideyPatchDirectCall(
-			0x00461111,
-			0x00460ED0,
-			(void*)&SpideyChaseVenomEveryFrameCompat,
-			"chase_venom_ob_ai_radial");
-	installed +=
-		SpideyPatchDirectCall(
-			0x00461126,
-			0x00460ED0,
-			(void*)&SpideyChaseVenomEveryFrameCompat,
-			"chase_venom_ob_ai_normal");
-	installed +=
-		SpideyPatchDirectCall(
-			0x004F6C19,
-			0x00460ED0,
-			(void*)&SpideyChaseVenomEveryFrameCompat,
-			"chase_venom_web_ai");
-
-	gSpideyChaseBodyCadenceInstalled =
-		installed;
-
-	FILE* f =
-		SpideyOpenConsolidatedLog(
-			"TIMING");
-	if (f)
+	else
 	{
-		fprintf(
-			f,
-			"chase_venom_body_cadence_install calls=%d expected=5 retail_every_frame=0x00460ED0 retail_get_level_id=0x004DE770 level=0x501 activation=retail_level_0x501 minimum_delta=2 scope=chase_venom_level_only source=kellog_frame_limiter_adapted\\n",
-			installed);
-		fclose(f);
+		stats->presentVblankValid = 1;
 	}
 
-	return installed;
+	stats->lastPresentVblank =
+		current;
 }
 
-static void SpideyLogChaseVenomBodyCadenceStats()
+static void SpideyLogChaseSchedulerStats()
 {
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -4784,19 +4735,105 @@ static void SpideyLogChaseVenomBodyCadenceStats()
 	if (!f)
 		return;
 
+	const SpideyChaseSchedulerStats* stats =
+		&gSpideyChaseSchedulerStats;
 	fprintf(
 		f,
-		"chase_venom_body_cadence_stats installed=%d calls=%lu active_calls=%lu waits=%lu special_bypass=%lu updater_bypass=%lu max_delta=%lu last_retail_level=0x%lX level_0x501_checks=%lu policy=retail_minimum_two_tick_body_cadence_during_level_0x501\\n",
-		gSpideyChaseBodyCadenceInstalled,
-		gSpideyChaseBodyCadenceCalls,
-		gSpideyChaseBodyCadenceActiveCalls,
-		gSpideyChaseBodyCadenceWaits,
-		gSpideyChaseBodyCadenceBypassSpecial,
-		gSpideyChaseBodyCadenceUpdaterBypass,
-		gSpideyChaseBodyCadenceMaxObservedDelta,
-		gSpideyChaseBodyCadenceLastLevelId,
-		gSpideyChaseBodyCadenceLevel501Checks);
+		"chase_scheduler_stats logic_calls=%lu logic_delta0=%lu logic_delta1=%lu logic_delta2=%lu logic_delta3plus=%lu logic_updater_active=%lu present_calls=%lu present_delta0=%lu present_delta1=%lu present_delta2=%lu present_delta3plus=%lu present_updater_active=%lu present_delta2_max_run=%lu retail_level=0x501 updater1=0x005FAE98 updater2=0x0060CFB0 vblanks=0x006B4CA0 policy=in_memory_only\\n",
+		stats->logicCalls,
+		stats->logicDelta0,
+		stats->logicDelta1,
+		stats->logicDelta2,
+		stats->logicDelta3Plus,
+		stats->logicUpdaterActive,
+		stats->presentCalls,
+		stats->presentDelta0,
+		stats->presentDelta1,
+		stats->presentDelta2,
+		stats->presentDelta3Plus,
+		stats->presentUpdaterActive,
+		stats->presentDelta2MaxRun);
 	fclose(f);
+}
+
+static void SpideyCaptureRetailScheduler()
+{
+	SpideyLogHighFpsRetailBytes(
+		"Logic_Block",
+		0x00455400,
+		0x1A0);
+	SpideyLogHighFpsRetailBytes(
+		"Display_Block",
+		0x004555A0,
+		0x430);
+	SpideyLogHighFpsRetailBytes(
+		"PlayAway_Block",
+		0x004559D0,
+		0x2C0);
+	SpideyLogHighFpsRetailBytes(
+		"SpideyMain_Block",
+		0x00455C90,
+		0x610);
+
+	const unsigned long ranges[][2] =
+	{
+		{ 0x00455400, 0x1A0 },
+		{ 0x004555A0, 0x430 },
+		{ 0x004559D0, 0x2C0 },
+		{ 0x00455C90, 0x610 }
+	};
+	const char* labels[] =
+	{
+		"Logic",
+		"Display",
+		"PlayAway",
+		"SpideyMain"
+	};
+
+	for (int i = 0; i < 4; ++i)
+	{
+		char label[96];
+
+		sprintf(
+			label,
+			"%s_FirstFrameUpdater",
+			labels[i]);
+		SpideyLogRetailFieldXrefs(
+			label,
+			ranges[i][0],
+			ranges[i][1],
+			0x005FAE98);
+
+		sprintf(
+			label,
+			"%s_SecondFrameUpdater",
+			labels[i]);
+		SpideyLogRetailFieldXrefs(
+			label,
+			ranges[i][0],
+			ranges[i][1],
+			0x0060CFB0);
+
+		sprintf(
+			label,
+			"%s_Vblanks",
+			labels[i]);
+		SpideyLogRetailFieldXrefs(
+			label,
+			ranges[i][0],
+			ranges[i][1],
+			0x006B4CA0);
+
+		sprintf(
+			label,
+			"%s_TimerRelated",
+			labels[i]);
+		SpideyLogRetailFieldXrefs(
+			label,
+			ranges[i][0],
+			ranges[i][1],
+			0x006B4CA8);
+	}
 }
 
 static void SpideyInstallHighFpsTimingCompat()
@@ -4865,10 +4902,7 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-
-
-
-	SpideyInstallChaseVenomBodyCadenceCompat();
+	SpideyCaptureRetailScheduler();
 }
 
 static unsigned long gSpideyModernAimMovementCalls = 0;
@@ -13855,7 +13889,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 				0;
 		}
 
-		SpideyLogChaseVenomBodyCadenceStats();
+		SpideyLogChaseSchedulerStats();
 
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -14209,6 +14243,8 @@ static void __cdecl SpideyCompatLogicTiming()
 	SpideyRetailLogicFn retail =
 		(SpideyRetailLogicFn)0x00455400;
 
+	SpideyRecordChaseLogicScheduler();
+
 	LARGE_INTEGER retailStart;
 	LARGE_INTEGER retailEnd;
 	QueryPerformanceCounter(
@@ -14266,6 +14302,8 @@ static void __cdecl SpideyCompatLogicTiming()
 
 static void SpideyRecordPresentTiming()
 {
+	SpideyRecordChasePresentScheduler();
+
 	// These accumulators cover exactly the work since the previous presenter
 	// entry. Snapshot/reset them before doing any current presenter work.
 	const unsigned long outsideLogicRetailUs =
