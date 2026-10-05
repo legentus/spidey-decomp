@@ -1,5 +1,122 @@
 # CURRENT STATUS
 
+## CHASE VENOM — SHARED SCRIPTED-INPUT RAMP FIX CANDIDATE IMPLEMENTED (2026-10-05)
+
+Latest startup/xref runtime:
+- revision `4c95746a345b285ed6659c548420698fbbe6fe13`;
+- consolidated log: `spidey-decomp(20261005-082904).log`;
+- exact input-dispatch bytes and DF0/DF4/DF8 xrefs captured successfully.
+
+### Heading interpolation cleared
+
+The DF0/DF4/DF8 xref pass disproved the remaining “turn interpolation itself runs once per raw frame” hypothesis.
+
+Retail `SpideyAI0` consumer around `0x004B7181`:
+- loads `field_DF8` (remaining turn/interpolation count);
+- loads player `field_80`;
+- when `DF8 > field_80`:
+  - multiplies signed `field_DF4` by `field_80`;
+  - adds that elapsed-scaled turn step to the current heading;
+  - subtracts `field_80` from `field_DF8`;
+- otherwise:
+  - snaps heading to `field_DF0`;
+  - clears `field_DF8`.
+
+Therefore `CPlayer::SetTargetTorsoAngle` + its main consumer are already elapsed-tick aware. Do not scale DF4 or inflate DF8.
+
+The other DF4 xref around `0x004B23A4` only uses the sign of DF4 to choose left/right turn animation variants; it is not the interpolation integrator.
+
+### Proven raw-cadence seam: CPlayer::ReadAnalogueInput field_8F0 ramp
+
+The captured `CPlayer::ReadAnalogueInput @ 0x004BD510` contains:
+
+- when analogue axes are non-zero:
+  - `field_8F0 += 0x20`;
+  - clamp `field_8F0` to `0x100`;
+- when axes are zero:
+  - `field_8F0 = 0`.
+
+This ramp uses **no `field_80` at all**.
+
+The same routine calls `CPlayer::SynthesizeAnalogueInput @ 0x004BC300` whenever player `field_1AC` is active, then runs the same raw `+0x20` ramp on the synthesized axes. Thus scripted Spider-Man movement definitely passes through a per-update ramp whose real-time behavior changes with Logic cadence.
+
+At:
+- 20 updates/s: 8 ramp updates = ~400 ms to reach `0x100`;
+- 30 updates/s: ~267 ms;
+- 60 updates/s: ~133 ms.
+
+That is a strong fit for the known Chase Venom symptom: the script can request the correct route while Spider-Man's scripted movement/steering strength reaches full response much earlier in real time, pushing him into the wall before the authored route transition.
+
+### Implemented fix candidate
+
+Source commit:
+- `e602bc64e36cf872e2060cfee8ac38ad2742c537` — `timing: preserve scripted input ramp at 20hz`.
+
+Implementation:
+- hook direct retail calls to `CPlayer::ReadAnalogueInput @ 0x004BD510`;
+- call the full retail routine first;
+- only when `field_1AC != 0` (scripted/synthesized player input) and analogue axes remain active:
+  - verify retail performed the exact expected fixed `+0x20` / clamp behavior;
+  - replace only that ramp result with a canonical-clock equivalent of `+0x20 per 3 elapsed 60-Hz ticks`;
+- use a remainder sidecar so the 60-Hz sequence is exact over time:
+  - field_80=1: +10, +11, +11 = +32 per 3 ticks;
+  - field_80=2: +21, +21, +22 over three updates = +64 per 6 ticks;
+  - field_80=3: +32, reproducing retail 20-Hz behavior exactly;
+- field_80 is clamped to the same 0..6 elapsed range used elsewhere in retail player timing;
+- manual/non-synthesized player input is left completely untouched;
+- if retail changed field_8F0 in any unexpected way, the wrapper leaves it alone and increments an in-memory unexpected counter rather than forcing a guess.
+
+Validation telemetry:
+- startup:
+  - `scripted_input_ramp_install calls=...`;
+- shutdown:
+  - `scripted_input_ramp_stats installed=... calls=... scripted_calls=... corrections=... unexpected=... remainder=...`.
+
+No per-frame disk I/O is added.
+
+### Why 20-Hz basis is intentionally scoped to scripted input
+
+The PC port is generally designed around ~30-FPS gameplay, but the Chase Venom in-game cutscene is specifically known to require a temporary 20-FPS cap. The raw field_8F0 ramp sits after the synthesized-input producer and before ordinary locomotion consumes the axes. Applying the 20-Hz rate only while `field_1AC` is active targets that cutscene/script class without making manual controls sluggish or undoing native-60 player physics.
+
+If this validates, it is a reusable engine fix for other Spider-Man scripted-movement/cutscene sequences that use the same synthesized-input path.
+
+### Static sanity
+
+At source commit `e602bc64...`:
+- `main.cpp` braces: 1127/1127;
+- parentheses: 5234/5234;
+- one install log marker;
+- one shutdown stats marker;
+- xref-only DF capture calls removed from startup.
+
+GitHub currently reports no Actions workflow runs for branch `dev`, so runtime build remains the authoritative compile check.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `e602bc64e36cf872e2060cfee8ac38ad2742c537` or a newer documentation-only descendant.
+
+Test:
+1. replay the same end-of-building Chase Venom sequence at native 60 Hz;
+2. watch specifically whether Spider-Man now follows Venom out of the building instead of turning right/jumping into the wall;
+3. continue far enough to confirm the chase does not game-over from excess separation;
+4. exit cleanly;
+5. return the single consolidated `spidey-decomp.log` and report whether the bad path was fixed, improved, unchanged, or made worse.
+
+Expected log evidence:
+- `scripted_input_ramp_install calls=>0`;
+- shutdown `scripted_input_ramp_stats` with `scripted_calls>0`, `corrections>0`, and ideally `unexpected=0`.
+
+If successful:
+- keep this shared synthesized-input fix;
+- remove any remaining Chase-Venom-only RE scaffolding;
+- then audit other raw-per-update player/cutscene primitives using the same methodology.
+
+If unchanged:
+- the field_8F0 ramp is still a proven raw-cadence bug, but it is not sufficient by itself to explain Chase Venom; retain the evidence and continue to the next consumer rather than reverting validated native-60 systems.
+
 ## CHASE VENOM RE — WALL DETECTOR ELAPSED-AWARE; TURN INTERPOLATION XREF PASS READY (2026-10-05)
 
 Latest runtime:
