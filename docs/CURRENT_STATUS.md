@@ -1,5 +1,18 @@
 # CURRENT STATUS
 
+## TEST CONTEXT NOTE — CHASE VENOM IS BEING ENTERED THROUGH LEVEL SELECT (2026-10-05)
+
+User clarified that current Chase Venom reproductions are launched through the game's Level Select rather than reached naturally through story progression.
+
+Interpretation:
+- the corrected compatibility gate at source `88934f3a183c36a2e7ed65a3111a596b034f7570` calls the retail `Trig_GetLevelId @ 0x004DE770` after the level is loaded;
+- therefore Level Select should **not** prevent cadence logging/activation if the loaded Chase Venom level really reports retail ID `0x501`;
+- the next log's `level_0x501_checks` and `active_calls` counters are the authoritative proof;
+- however, Level Select may bypass story/save/progression setup that normal campaign entry would establish;
+- if the cadence gate is proven active and Chase Venom still behaves differently, keep Level Select as a possible setup-variable difference rather than assuming the timing fix itself is disproven.
+
+For current testing, continuing through Level Select is acceptable and desirable for fast iteration. Do not require a full story playthrough unless later evidence specifically points to missing progression state.
+
 ## CHASE VENOM — INTERRUPTED SESSION RECOVERED; RETAIL LEVEL-ID GATE FIXED (2026-10-05)
 
 Latest runtime tested before the disconnect:
