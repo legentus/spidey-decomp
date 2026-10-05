@@ -1,5 +1,126 @@
 # CURRENT STATUS
 
+## CHASE VENOM — FAILED RAMP PATCH RETIRED; PROVEN CBODY CADENCE FIX ADAPTED (2026-10-05)
+
+Latest failed runtime:
+- revision `66427a9a84dd82a8ddf2a6dad5a9d46277785983`;
+- consolidated log: `spidey-decomp(20261005-084226).log`;
+- user confirmed the Chase Venom path bug remained unchanged;
+- ignore the later/new-game experimentation in that session for diagnosis.
+
+### Scripted input ramp result
+
+The `field_8F0` ramp experiment was definitely active:
+- install succeeded at the only direct retail `CPlayer::ReadAnalogueInput @ 0x004BD510` call;
+- shutdown stats:
+  - total calls: 9508;
+  - scripted calls: 2284;
+  - corrected active-axis updates: 1117;
+  - unexpected retail behavior: 0;
+  - remainder: 0.
+
+Conclusion:
+- the fixed `+0x20` per-call ramp is a real raw-cadence quirk;
+- changing it to a 20-Hz-equivalent rate is **not sufficient** to fix Chase Venom;
+- remove the experiment rather than retaining an unvalidated behavioral change.
+
+The source no longer installs or contains the scripted-input ramp patch.
+
+### External proven fix located
+
+A public reverse-engineering patch in `krystalgamer/spidey-tools` provides an existing fix for this exact high-FPS Chase Venom failure:
+
+- commit: `cac3b525c7d7cddd3650c4cbb6a7af3ab6bfc97d` — `Added Kellog's Frame Limiter`;
+- later retained in current `spidey-tools` releases with `FPS_DIVIDER = 2`.
+
+Its mechanism is **not** a path-script, turn, wall, or Venom-specific patch.
+
+It hooks the five retail `CBody::EveryFrame @ 0x00460ED0` call sites:
+- `0x00460F99` — first/radial path in `CBody::InterleaveAI`;
+- `0x00460FAE` — second/normal path in `CBody::InterleaveAI`;
+- `0x00461111` — first/radial path in `Ob_AI`;
+- `0x00461126` — second/normal path in `Ob_AI`;
+- `0x004F6C19` — `CWeb_AI`.
+
+For ordinary bodies (mCBodyFlags bit 2 clear), before calling retail `EveryFrame` it waits until:
+
+`gTimerRelated/current_frame - body->field_7C >= 2`
+
+unless either retail frame-updater global at `0x005FAE98` or `0x0060CFB0` is active.
+
+This proves the important missing invariant:
+- large parts of retail body AI were authored expecting a **minimum two-vblank body update quantum**;
+- our native-60 conversion made `field_80 == 1` common;
+- player physics was explicitly converted for that one-tick path, but not every scripted body-AI state machine was.
+
+This directly explains why local elapsed-time fixes could leave Chase Venom broken even when the player physics, top-level synthesized-input scheduler, heading interpolation, and wall timer are individually correct.
+
+### New compatibility implementation
+
+Source commits:
+- `8997afe0a35ced32ac3bd8496cc4008ba83cffad` — `timing: adapt proven Chase Venom body cadence fix`;
+- `ad4bcf5ef05da35758b965f14754d14edcfa3ef4` — `timing: validate Chase Venom body cadence level-wide`.
+
+Implementation:
+- reproduces the historical five-callsite `CBody::EveryFrame` interception;
+- keeps retail `CBody::EveryFrame` itself authoritative;
+- respects the historical `mCBodyFlags & 4` bypass, because retail itself forces those bodies to `field_80=2`;
+- respects the two historical frame-updater globals;
+- waits only until the canonical 60-Hz vblank clock supplies the second elapsed tick;
+- records counters only; no per-frame disk I/O.
+
+Important scope difference from the old global limiter:
+- the compatibility gate is active **only while `Trig_GetLevelID() == 0x501` (Chase Venom)**;
+- every other level remains on the project's validated native-60 path;
+- this level-wide activation is intentional for the first validation because the prior post-synth trace did not reliably identify the exact bad transition window;
+- if this fixes the sequence, narrow the activation window afterward rather than guessing beforehand.
+
+Startup expected:
+`chase_venom_body_cadence_install calls=5 expected=5 retail_every_frame=0x00460ED0 level=0x501 activation=level_0x501 minimum_delta=2 scope=chase_venom_level_only source=kellog_frame_limiter_adapted`
+
+Shutdown expected:
+`chase_venom_body_cadence_stats installed=5 calls=... active_calls=... waits=... special_bypass=... updater_bypass=... max_delta=...`
+
+### What this test means
+
+If Chase Venom now works:
+- the root layer is confirmed: one or more level/script body-AI consumers require the retail minimum-two-tick cadence;
+- do **not** conclude that the entire game should be returned to 30 Hz;
+- next work is to narrow which body/state transition actually needs the gate, then decide between:
+  1. a small scripted-sequence cadence compatibility island, or
+  2. converting that remaining body-AI primitive to true one-tick/native-60 semantics.
+
+If Chase Venom is still broken:
+- verify the five hooks installed and `active_calls/waits` were nonzero;
+- if they were, compare our wrapper semantics directly against the external patch's updater globals / call ordering before pursuing another unrelated timer.
+
+### Static sanity
+
+At source commit `ad4bcf5e...`:
+- `main.cpp` braces: 1130/1130;
+- parentheses: 5238/5238;
+- one cadence install marker;
+- one cadence shutdown-stats marker;
+- failed `scripted_input_ramp_*` code count: 0;
+- all five historical callsite addresses present exactly once in the new installer.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `ad4bcf5ef05da35758b965f14754d14edcfa3ef4` or a newer documentation-only descendant.
+
+Test only the relevant path:
+1. enter/replay Chase Venom;
+2. reach the automated building chase;
+3. watch the end where Venom jumps out and Spider-Man previously turned right / jumped into the wall;
+4. confirm whether Spider-Man now follows the authored route;
+5. continue until the chase no longer fails from excess Venom distance;
+6. exit cleanly and return the one consolidated log.
+
+No need to do unrelated new-game testing for this build.
+
 ## CHASE VENOM — SHARED SCRIPTED-INPUT RAMP FIX CANDIDATE IMPLEMENTED (2026-10-05)
 
 Latest startup/xref runtime:
