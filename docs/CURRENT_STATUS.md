@@ -1,5 +1,91 @@
 # CURRENT STATUS
 
+## CHASE VENOM RE — WALL DETECTOR ELAPSED-AWARE; TURN INTERPOLATION XREF PASS READY (2026-10-05)
+
+Latest runtime:
+- revision `335ea9443b7faf79108cdfd34e168afb8fa21fe5`;
+- consolidated log: `spidey-decomp(20261005-081314).log`;
+- user replayed the Chase Venom failure sequence successfully.
+
+### Runtime trace result
+
+The attempted post-`CPlayer::SynthesizeAnalogueInput` in-memory trace installed at call site `0x004BD572`, but shutdown reported:
+- `samples=0`;
+- `dropped=0`.
+
+Treat that literally: the sampled path/condition was not active in the way assumed during the reproduced sequence. Do not infer runtime values from a trace that did not fire.
+
+### Static retail findings from this build
+
+All seven startup retail blocks captured successfully.
+
+Important timing result from `CPlayer::CheckRunIntoWall @ 0x004BFBC0`:
+- its persistent run-into-wall counter at player offset `+0xAD7` advances by the low byte of player `field_80`;
+- therefore the basic wall-hit delay is already elapsed-tick aware and is **not** simply running 3x fast at native 60 Hz.
+
+Important result from `CPlayer::SetTargetTorsoAngle @ 0x004C6970`:
+- computes target heading in `field_DF0`;
+- computes per-update angular step in `field_DF4`;
+- computes the remaining interpolation/update count in `field_DF8`;
+- this routine itself contains no `field_80` scaling;
+- default turn interpolation uses a nominal count of 10 updates, with state-dependent alternatives and clamping;
+- this is now the strongest raw-cadence candidate, but do **not** patch it until its consumer is grounded. If the consumer already multiplies/decrements by elapsed ticks, changing the setter would be wrong.
+
+The observed Chase Venom symptom still fits this seam well:
+- the script can request a correct target direction;
+- if heading interpolation completes too quickly in real time at 60 Hz, Spider-Man can curve into the wall earlier than authored and transition into wall crawl;
+- this is a hypothesis pending the consumer xref.
+
+### Source change
+
+Source commit:
+- `8da02a0745416e3d5544b8208421a0747dfc090b` — `timing: trace player turn interpolation consumers`.
+
+Changes:
+- removed the zero-sample Chase Venom in-memory sampler and its shutdown dump;
+- added a startup-only capture of the retail input-dispatch candidate `0x004BD510..0x004BD74F`;
+- added a startup xref scanner over `SpideyAI0 @ 0x004B13F0..0x004B878F`;
+- scanner finds exact little-endian references to player offsets:
+  - `0x0DF0` — target heading;
+  - `0x0DF4` — per-update heading step;
+  - `0x0DF8` — heading interpolation/count state;
+- for each reference it logs the exact address plus a compact surrounding byte window;
+- no per-frame/gameplay disk logging is added.
+
+Static sanity:
+- `main.cpp` braces: 1118/1118;
+- parentheses: 5200/5200;
+- old chase trace summary code removed;
+- exactly one ReadAnalogueInput-candidate capture and one DF0/DF4/DF8 scan request are present.
+
+### Exact next run
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Expected source:
+- `8da02a0745416e3d5544b8208421a0747dfc090b` or a newer documentation-only descendant.
+
+No gameplay test is needed for this capture:
+1. launch normally;
+2. reach the menu / allow startup patches to finish;
+3. exit cleanly;
+4. return the single consolidated `spidey-decomp.log`.
+
+Expected evidence:
+- `high_fps_re_bytes_done label=CPlayer_ReadAnalogueInput_Candidate ... valid=1`;
+- `high_fps_field_xref ... field=0x0DF0 ...`;
+- `high_fps_field_xref ... field=0x0DF4 ...`;
+- `high_fps_field_xref ... field=0x0DF8 ...`;
+- corresponding `high_fps_field_xref_done` summaries.
+
+Then:
+1. disassemble the exact DF4/DF8 consumers inside `SpideyAI0`;
+2. determine whether count/step application is raw-per-call or elapsed-tick aware;
+3. patch the smallest shared turn primitive if proven raw-cadence;
+4. only then replay Chase Venom for validation.
+
+Do not change the Chase Venom distance threshold and do not alter the validated player native-60 physics path.
+
 ## CHASE VENOM RE — SCRIPT INTERPRETER CLEARED; LOCOMOTION CONSUMER TRACE READY (2026-10-05)
 
 Latest capture runtime:
