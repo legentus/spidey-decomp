@@ -1,3 +1,55 @@
+# CHASE VENOM CAMERA-RELATIVE STEERING FRONTIER (2026-10-05)
+
+## Start here
+
+Latest tested runtime:
+- `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`
+- Chase Venom in-engine cutscene is visually 60 FPS.
+- Route bug remains in that tested build: Spider-Man fails the building-entry course and runs into the wall.
+- User-supplied `spidey-decomp(20261005-233411).log` is internally the same `df0b1d62...` revision and is therefore not a newer test.
+
+Current source frontier:
+- `0ab2efb34c841814b2313aa74301e5eb3789a7ad` — generalized Chase synthesized world-heading sample/hold.
+- `e1c8a369a80b8dfd14ed79655c00110ac1b2c546` — startup-only E32/E34/camera-heading ownership xrefs.
+- `2f6e0dcbb8dec436350b523bd6de59e87be25977` — detailed worker-timing documentation descendant.
+
+Key new RE:
+- type-2 route worker converts target world direction to **camera-relative axes** using `CCamera+0x23A`;
+- `ReadAnalogueInput` converts axes to `field_E32` using `field_E34`;
+- `CheckForwards` adds the current transform-derived `camera+0x23A` back before torso/movement turning;
+- holding only old axes while the camera runs at 60 Hz changes the world direction, so the compatibility layer now preserves the sampled **world heading**;
+- compensation applies to any active synthesized analogue movement, not only when type 2 happens to be the worker-list head;
+- timed worker types 3/6/7/8/9 all use `field_80`; do not slow their countdowns again.
+
+New telemetry:
+- `heading_samples`
+- `heading_corrections`
+- `heading_max_pre_correction_drift`
+- `worker_mask_before`
+- `worker_mask_after`
+- fresh sample camera heading / E34 / E32 / desired world heading
+- startup xrefs labeled `SpideyAI0_E32`, `SpideyAI0_E34`, `SpideyAI0_CameraHeading23A`
+
+Detailed RE:
+- `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`
+- `docs/CURRENT_STATUS.md`
+- `docs/HIGH_FPS_TIMING_AUDIT.md`
+
+Next action:
+- build latest `dev` with `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
+- test Level Select -> Chase Venom through the known building-entry failure;
+- confirm 60-FPS cutscene is retained;
+- report fixed / improved / unchanged / worse;
+- exit cleanly and return one consolidated log.
+
+Do not:
+- reintroduce the CBody minimum-two-tick limiter;
+- globally cap the cutscene/game to 20/30 FPS;
+- inflate Venom FollowDirections thresholds;
+- globally scale SynthesizeAnalogueInput timers that already consume `field_80`.
+
+---
+
 # RETAIL PLAYER-PHYSICS RESTORATION UPDATE (2026-10-04)
 
 Latest runtime result:
