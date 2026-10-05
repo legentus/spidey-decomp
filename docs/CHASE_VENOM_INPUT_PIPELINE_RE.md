@@ -93,6 +93,37 @@ struct SynthWorkerType2
 };
 ```
 
+## 3A. Worker dispatch classification
+
+The retail worker jump table at `0x004BD44C` maps worker types 2..15 as follows:
+
+| Type | Retail body | Classification |
+| --- | --- | --- |
+| 2 | `0x004BCFB8` | X/Z route target; produces camera-relative analogue axes |
+| 3 | `0x004BCC2D` | timed synthesized action/direction worker |
+| 4 | `0x004BD207` | invalid/unhandled in this dispatcher |
+| 5 | `0x004BD0FD` | spatial/target-vector worker; no raw per-call timer found |
+| 6 | `0x004BCE5B` | timed animation/action worker |
+| 7 | `0x004BCF37` | timed player-state worker |
+| 8 | `0x004BCDDC` | timed `field_E00` worker |
+| 9 | `0x004BCD68` | timed wait/parser-resume worker |
+| 10..14 | `0x004BD207` | invalid/unhandled in this dispatcher |
+| 15 | `0x004BCB9A` | conditional state/animation worker |
+
+The important timing result is that every timed worker inspected uses the body elapsed tick count `field_80`, for example:
+
+```cpp
+worker->remaining -= player->field_80;
+```
+
+This is true for types 3, 6, 7, 8 and 9.
+
+Therefore the synthesized-input subsystem does **not** contain a second obvious family of raw `--timer` counters that would run three times too fast at native 60. Its time durations are mostly already expressed in canonical elapsed ticks.
+
+The remaining native-60 problem is the frequency of the controller feedback loop: spatial steering/output is recalculated more often against changing player/camera state.
+
+This also means a 20-Hz-equivalent synth sample must preserve the whole sampled controller output, not assume route type 2 is always the linked-list head. Multiple workers can coexist.
+
 ## 4. Exact type-2 target steering
 
 Retail type-2 worker body begins at `0x004BCFB8`.
@@ -283,7 +314,7 @@ The 20-Hz-equivalent synth sample remains narrow to:
 - retail level `0x501`;
 - synthesized input only.
 
-On a fresh type-2 steering sample:
+On a fresh synthesized analogue steering sample:
 
 1. retail synth produces the camera-relative axes;
 2. retail ReadAnalogueInput produces `field_E32`;
@@ -296,6 +327,12 @@ On the two intervening 60-Hz calls:
 2. after retail ReadAnalogueInput, the wrapper rewrites `field_E32`;
 3. the rewrite compensates for the **current** `camera+0x23A`;
 4. CheckForwards therefore sees the same sampled world heading even if the camera transform moved.
+
+The first implementation gated the compensation on "worker-list head is type 2." Deeper dispatch reconstruction showed that was too narrow because route steering can coexist with other worker types.
+
+Current source:
+- `0ab2efb34c841814b2313aa74301e5eb3789a7ad` — preserve the sampled world heading for **any active synthesized analogue movement**, not only a type-2 head worker.
+- The trace now records `worker_mask_before` and `worker_mask_after`, a bitmask of every worker type present in the linked list.
 
 This preserves:
 
