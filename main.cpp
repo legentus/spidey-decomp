@@ -4597,6 +4597,171 @@ static void SpideyLogRetailFieldXrefs(
 	fclose(f);
 }
 
+// Retail ReadAnalogueInput ramps field_8F0 by a fixed 0x20 once per player
+// update whenever analogue input is non-zero.  That ramp is not scaled by
+// field_80.  Scripted/synthesized Spider-Man movement (field_1AC != 0) is the
+// path used by Chase Venom, whose authored cutscene behavior is only stable at
+// 20 FPS.  Preserve the retail 20-Hz ramp rate on the canonical 60-Hz clock
+// without touching manual player input:
+//
+//     +0x20 per 3 elapsed 60-Hz ticks
+//
+// The remainder sidecar makes this exact over time (10,11,11 at field_80=1)
+// and naturally preserves real-time behavior when rendering drops below 60.
+typedef void (__fastcall *SpideyRetailReadAnalogueInputFn)(
+		CPlayer*,
+		void*);
+
+static CPlayer* gSpideySynthRampPlayer = 0;
+static int gSpideySynthRampRemainder = 0;
+static unsigned long gSpideySynthRampCalls = 0;
+static unsigned long gSpideySynthRampScriptedCalls = 0;
+static unsigned long gSpideySynthRampCorrections = 0;
+static unsigned long gSpideySynthRampUnexpected = 0;
+static int gSpideySynthRampInstalled = 0;
+
+static void __fastcall SpideyReadAnalogueInputScripted20Hz(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailReadAnalogueInputFn retail =
+		(SpideyRetailReadAnalogueInputFn)0x004BD510;
+
+	++gSpideySynthRampCalls;
+	if (!player)
+	{
+		retail(
+			player,
+			0);
+		return;
+	}
+
+	unsigned char* raw =
+		(unsigned char*)player;
+	const int scriptedBefore =
+		player->field_1AC != 0;
+	const int oldRamp =
+		*(int*)(raw + 0x8F0);
+	int elapsedTicks =
+		player->field_80;
+	if (elapsedTicks < 0)
+		elapsedTicks = 0;
+	if (elapsedTicks > 6)
+		elapsedTicks = 6;
+
+	if (gSpideySynthRampPlayer != player)
+	{
+		gSpideySynthRampPlayer =
+			player;
+		gSpideySynthRampRemainder =
+			0;
+	}
+
+	retail(
+		player,
+		0);
+
+	if (!scriptedBefore)
+	{
+		gSpideySynthRampRemainder =
+			0;
+		return;
+	}
+
+	++gSpideySynthRampScriptedCalls;
+	const int axesActive =
+		player->field_E2D != 0 ||
+		player->field_E2E != 0;
+	if (!axesActive)
+	{
+		gSpideySynthRampRemainder =
+			0;
+		return;
+	}
+
+	const int retailRamp =
+		*(int*)(raw + 0x8F0);
+	int expectedRetail =
+		oldRamp + 0x20;
+	if (expectedRetail > 0x100)
+		expectedRetail = 0x100;
+
+	// Only replace the exact fixed +0x20 retail ramp.  If another branch
+	// changed field_8F0, leave it alone rather than guessing.
+	if (oldRamp < 0 ||
+		oldRamp > 0x100 ||
+		retailRamp != expectedRetail)
+	{
+		++gSpideySynthRampUnexpected;
+		gSpideySynthRampRemainder =
+			0;
+		return;
+	}
+
+	const int numerator =
+		(0x20 * elapsedTicks) +
+		gSpideySynthRampRemainder;
+	const int increment =
+		numerator / 3;
+	gSpideySynthRampRemainder =
+		numerator % 3;
+
+	int correctedRamp =
+		oldRamp + increment;
+	if (correctedRamp > 0x100)
+		correctedRamp = 0x100;
+	*(int*)(raw + 0x8F0) =
+		correctedRamp;
+	++gSpideySynthRampCorrections;
+}
+
+static int SpideyInstallScriptedInputRamp20Hz()
+{
+	const int installed =
+		SpideyPatchDirectCallsToTargetInRange(
+			0x00401000,
+			0x0053B000,
+			0x004BD510,
+			(void*)&SpideyReadAnalogueInputScripted20Hz,
+			"timing_scripted_input_ramp_20hz");
+	gSpideySynthRampInstalled =
+		installed;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"scripted_input_ramp_install calls=%d retail=0x004BD510 field=0x08F0 scope=player_synthesized_only basis=20hz canonical_clock=60hz rate=32_per_3_ticks manual_input=untouched\\n",
+			installed);
+		fclose(f);
+	}
+
+	return installed;
+}
+
+static void SpideyLogScriptedInputRampStats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"scripted_input_ramp_stats installed=%d calls=%lu scripted_calls=%lu corrections=%lu unexpected=%lu remainder=%d policy=20hz_scripted_ramp_on_60hz_clock\\n",
+		gSpideySynthRampInstalled,
+		gSpideySynthRampCalls,
+		gSpideySynthRampScriptedCalls,
+		gSpideySynthRampCorrections,
+		gSpideySynthRampUnexpected,
+		gSpideySynthRampRemainder);
+	fclose(f);
+}
+
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
@@ -4663,31 +4828,10 @@ static void SpideyInstallHighFpsTimingCompat()
 		fclose(f);
 	}
 
-	// The Chase Venom runtime confirmed the wall detector itself consumes
-	// field_80, while the first attempted post-synth trace produced no samples.
-	// The remaining timing suspect is the shared torso/heading interpolation
-	// state (DF0/DF4/DF8).  Capture the input dispatcher and scan the huge
-	// SpideyAI0 retail state machine for exact references to those fields.  This
-	// is startup-only and requires no Chase Venom replay.
-	SpideyLogHighFpsRetailBytes(
-		"CPlayer_ReadAnalogueInput_Candidate",
-		0x004BD510,
-		0x240);
-	SpideyLogRetailFieldXrefs(
-		"SpideyAI0_DF0",
-		0x004B13F0,
-		0x73A0,
-		0x0DF0);
-	SpideyLogRetailFieldXrefs(
-		"SpideyAI0_DF4",
-		0x004B13F0,
-		0x73A0,
-		0x0DF4);
-	SpideyLogRetailFieldXrefs(
-		"SpideyAI0_DF8",
-		0x004B13F0,
-		0x73A0,
-		0x0DF8);
+	// Chase Venom RE proved DF4/DF8 heading interpolation already multiplies
+	// and decrements by field_80.  The remaining proven raw-cadence seam in
+	// this chain is ReadAnalogueInput's fixed +0x20 field_8F0 ramp.
+	SpideyInstallScriptedInputRamp20Hz();
 
 }
 
@@ -13674,6 +13818,8 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 			gSpideyPacingBeginPeriodOne =
 				0;
 		}
+
+		SpideyLogScriptedInputRampStats();
 
 		FILE* f =
 			SpideyOpenConsolidatedLog(
