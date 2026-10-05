@@ -1,5 +1,110 @@
 # CURRENT STATUS
 
+## CHASE VENOM — CAMERA-RELATIVE STEERING PIPELINE RECONSTRUCTED; WORLD-HEADING HOLD READY (2026-10-05)
+
+Latest tested runtime remains:
+- revision `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`;
+- in-engine Chase cutscene is confirmed 60 FPS;
+- route failure remains: Spider-Man takes the wrong course at the building-entry turn and runs into the wall instead of following Venom.
+
+The newly supplied `spidey-decomp(20261005-233411).log` is not a newer behavior test:
+- its internal session/runtime revision is also `df0b1d62...`;
+- therefore it predates all `chase_synth_20hz_*` code and cannot validate the new compatibility path.
+
+### New retail x86 -> C reconstruction
+
+Detailed document:
+- `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`
+
+Newly proven retail control chain:
+
+1. `CPlayer::SynthesizeAnalogueInput @ 0x004BC300` already advances its main script clock with `field_80`.
+2. Chase route worker type 2 reads target X/Z from its worker block.
+3. It computes direction from current Spider-Man position to that target.
+4. Critically, it converts that direction into **camera-relative analogue axes** using `CCamera+0x23A`.
+5. `CPlayer::ReadAnalogueInput @ 0x004BD510` converts those axes into `field_E32` using another heading basis, `field_E34`.
+6. `CPlayer::CheckForwards @ 0x004BF8A0` then adds the **current** `CCamera+0x23A` to `field_E32` for ordinary ground locomotion before calling `SetTargetTorsoAngle`.
+
+`CCamera+0x23A` is not just the requested camera angle. `CCamera::LoadIntoMikeCamera` derives it from the actual camera transform matrix.
+
+### Important correction to the first sample/hold design
+
+The earlier untested source `6c40ef8...` held type-2 output axes on the two intervening 60-Hz frames.
+
+That is not a faithful 20-Hz emulation because those axes are camera-relative while the camera itself keeps updating at 60 Hz. The same held stick vector can therefore map to a different world direction before the next scripted steering sample.
+
+New source:
+- `f2f46b7ff37332cbcb2179ac5f8d0b2991dc9a0e` — `timing: preserve Chase world heading across held steering frames`.
+
+Behavior:
+- synth producer still samples at a 20-Hz equivalent only for level `0x501` + synthesized input;
+- render/camera/physics/collision/animation remain 60 Hz;
+- on a fresh type-2 sample, the wrapper captures the effective world desired heading after retail `ReadAnalogueInput`;
+- on intervening held frames, it rewrites `field_E32` against the current `camera+0x23A`;
+- `CheckForwards` therefore sees the same sampled world heading even while the camera transform moves.
+
+New stats:
+- `heading_samples`;
+- `heading_corrections`;
+- `heading_max_pre_correction_drift`.
+
+New trace fields:
+- camera transform heading;
+- `field_E34` input basis;
+- `field_E32` relative desired heading;
+- reconstructed desired world heading.
+
+### One remaining steering-basis unknown
+
+The exact owner/update order for `field_E34` is not yet proven.
+
+New source:
+- `e1c8a369a80b8dfd14ed79655c00110ac1b2c546` — `timing: trace Chase steering-basis ownership`.
+
+It adds startup-only displacement scans across:
+- `SpideyAI0 @ 0x004B13F0 + 0x73A0`
+
+for:
+- `+0xE32`;
+- `+0xE34`;
+- `+0x23A`.
+
+Expected labels:
+- `SpideyAI0_E32`;
+- `SpideyAI0_E34`;
+- `SpideyAI0_CameraHeading23A`.
+
+No per-frame file logging was added.
+
+### Current authoritative source frontier
+
+Behavior source:
+- `e1c8a369a80b8dfd14ed79655c00110ac1b2c546`.
+
+Documentation descendant:
+- `a29986c32249e259a9327ee2c418f6e19345bcd9` — detailed scripted-input RE document.
+
+### Exact next runtime test
+
+Run `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+
+Test only Chase Venom through the known failure point:
+1. confirm the real-time cutscene is still 60 FPS;
+2. watch the building-entry route;
+3. report fixed / improved / unchanged / worse;
+4. continue far enough to establish whether the chase stays playable;
+5. exit cleanly so the in-memory trace is dumped;
+6. return the single consolidated log.
+
+The next log should simultaneously validate:
+- 20-Hz-equivalent script sampling;
+- camera-compensated world-heading hold;
+- magnitude of the pre-correction held-axis heading drift;
+- `field_E34` ownership/update sites.
+
+Do not reintroduce a global 20/30-FPS cap or the historical CBody minimum-two-tick limiter.
+
+
 ## CHASE VENOM — CUTSCENE CONFIRMED 60 FPS; SCRIPTED STEERING SAMPLE/HOLD FIX READY (2026-10-05)
 
 Latest tested runtime:
