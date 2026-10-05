@@ -1,5 +1,53 @@
 # CURRENT STATUS
 
+## RUNTIME VALIDATED — NARROW PLAYER NATIVE-60 BATCH FIXES PERCEIVED SPEED WITHOUT REGRESSING GROUNDING (2026-10-05)
+
+Latest tested runtime:
+- revision `35d7a3e385c8ba16a521018bad9a781cef15321b`;
+- consolidated log: `spidey-decomp(20261005-065935).log`;
+- user report: timing felt materially better and no longer felt sped up;
+- session ran from 01:08:35.9836581 to 02:08:20.4822684 local time (~3584.499 s / 59m44.5s) and exited normally.
+
+Install validation:
+- normal friction hook = 1;
+- crawl friction hook = 1;
+- special-move half-step threshold = 1;
+- normal-move half-step threshold = 1;
+- post-collision velocity restore threshold = 1;
+- fall half-step threshold = 1;
+- crawl-move half-step threshold = 1;
+- no expected-byte failures or partial-install evidence.
+
+Master timing:
+- source callbacks = 3,583,686;
+- dispatched callbacks = 215,021;
+- virtual ticks = 215,021;
+- paused callbacks = 297;
+- unexpected vblank deltas = 1 across the full session;
+- last interval = 17 ms;
+- 215,021 dispatched ticks across ~3584.499 seconds = ~59.986 Hz.
+- This strongly confirms the canonical game timer is running at the intended ~60 Hz rather than globally fast.
+
+Grounding / scripted-cutscene regression guard:
+- at frame 28200 the live-cutscene player body is exactly `-78729216,15695872,-155586560`;
+- shadow is `-78729216,16089088,-155586560`;
+- shadow normal is `0,-4096,0`;
+- these are the same known-good grounded values previously observed with fully retail player physics.
+- Frames 28500 and 28800 retain the same body/shadow ground band, so the new narrow hooks do not reproduce the old reconstructed-physics fall-through regression.
+
+Other observations:
+- no crash/access-violation/assert evidence in the session;
+- session exits with `exit_code=0`;
+- one isolated `[DXERROR] D3D error=0x00000001` from `PCTex.cpp:1740` occurs mid-session, immediately followed by continued renderer/input activity and is not correlated with the timing work or a process failure. Track separately only if a visible texture/rendering symptom appears.
+- consolidated timing output has `file_telemetry=0`, so no periodic `timing_logic hz=` / `timing_present hz=` samples were emitted in this run; the long-run canonical timer calculation above is therefore the strongest numeric cadence evidence.
+
+Conclusion:
+- mark the first narrow retail-preserving player native-60 batch as **runtime validated**;
+- keep full reconstructed `patch_physics()` disabled;
+- retain retail ownership of collision/grounding/landing/platform/cutscene physics;
+- preserve the current two friction hooks + five threshold-byte edits;
+- next native-60 work should move outward to other proven raw-frame/countdown primitives (AI/state timers) rather than altering the validated player-physics path.
+
 ## IMPLEMENTED — FIRST NARROW RETAIL-PRESERVING PLAYER NATIVE-60 BATCH READY (2026-10-04)
 
 Source chain:
