@@ -4924,6 +4924,10 @@ static unsigned long gSpideyChaseSynthActiveCalls = 0;
 static unsigned long gSpideyChaseSynthRetailUpdates = 0;
 static unsigned long gSpideyChaseSynthHeldCalls = 0;
 static unsigned long gSpideyChaseSynthMaxElapsed = 0;
+static unsigned long gSpideyChaseType3HeldLatchCalls = 0;
+static unsigned long gSpideyChaseType3HeldLatchWrites = 0;
+static unsigned long gSpideyChaseType3HeldLatchDynamic = 0;
+static unsigned long gSpideyChaseType3HeldLatchDirectional = 0;
 static int gSpideyChaseSynthInstalled = 0;
 
 static CPlayer* gSpideyChaseRampPlayer = 0;
@@ -5031,6 +5035,144 @@ static void SpideyChaseReadWorkerHead(
 			block[1] > 3)
 		{
 			*data3 = block[3];
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+}
+
+// Type-3 synth workers have per-call side effects in addition to their
+// analogue axes. Retail 0x004BCC2D dispatches worker->data2 as follows:
+//
+//   0..7,16..19: assert player[0x1C0 + code*0x10] and, on the first
+//                 assertion, player[offset + 1].
+//   8:             player[0x240] = 1, E2E = -127
+//   9:             player[0x250] = 1, E2E = +127
+//   10:            player[0x260] = 1, E2D = -127
+//   11:            player[0x270] = 1, E2D = +127
+//
+// The 20-Hz sample/hold wrapper already preserves the final E2D/E2E result.
+// On the two held 60-Hz frames, however, skipping retail synth entirely also
+// skipped these latches while the rest of CPlayer still updated at 60 Hz.
+// Reassert only the latch side effects here; do not touch the held axes, so
+// final worker-order precedence remains exactly what the fresh retail sample
+// produced.
+static void SpideyChaseReassertHeldType3Latches(
+		CPlayer* player)
+{
+	if (!player)
+		return;
+
+	__try
+	{
+		unsigned char* raw =
+			(unsigned char*)player;
+		int* block =
+			*(int**)(raw + 0x1BC);
+		int foundType3 =
+			0;
+
+		for (int nodes = 0;
+			 block && nodes < 32;
+			 ++nodes)
+		{
+			const int type =
+				block[0];
+			const int size =
+				block[1];
+
+			if (type == 3 &&
+				size > 3)
+			{
+				const int code =
+					block[2];
+				int wrote =
+					0;
+
+				foundType3 =
+					1;
+
+				if ((code >= 0 &&
+					 code <= 7) ||
+					(code >= 16 &&
+					 code <= 19))
+				{
+					const int offset =
+						0x1C0 +
+						(code << 4);
+
+					if (!raw[offset])
+					{
+						raw[
+							offset +
+							1] =
+							1;
+					}
+					raw[offset] =
+						1;
+					++gSpideyChaseType3HeldLatchDynamic;
+					wrote =
+						1;
+				}
+				else if (code == 8)
+				{
+					raw[0x240] =
+						1;
+					++gSpideyChaseType3HeldLatchDirectional;
+					wrote =
+						1;
+				}
+				else if (code == 9)
+				{
+					raw[0x250] =
+						1;
+					++gSpideyChaseType3HeldLatchDirectional;
+					wrote =
+						1;
+				}
+				else if (code == 10)
+				{
+					raw[0x260] =
+						1;
+					++gSpideyChaseType3HeldLatchDirectional;
+					wrote =
+						1;
+				}
+				else if (code == 11)
+				{
+					raw[0x270] =
+						1;
+					++gSpideyChaseType3HeldLatchDirectional;
+					wrote =
+						1;
+				}
+
+				if (wrote)
+				{
+					++gSpideyChaseType3HeldLatchWrites;
+				}
+			}
+
+			if (size < 2 ||
+				size > 32)
+			{
+				break;
+			}
+
+			int* next =
+				(int*)block[
+					size -
+					1];
+			if (next == block)
+				break;
+			block =
+				next;
+		}
+
+		if (foundType3)
+		{
+			++gSpideyChaseType3HeldLatchCalls;
 		}
 	}
 	__except(EXCEPTION_EXECUTE_HANDLER)
@@ -5233,6 +5375,8 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 			gSpideyChaseSynthHeldX;
 		*(signed char*)(raw + 0xE2E) =
 			gSpideyChaseSynthHeldY;
+		SpideyChaseReassertHeldType3Latches(
+			player);
 		++gSpideyChaseSynthHeldCalls;
 		return;
 	}
@@ -5570,13 +5714,17 @@ static void SpideyLogChaseSynthStats()
 
 	fprintf(
 		f,
-		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3\\n",
+		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu type3_latch_calls=%lu type3_latch_writes=%lu type3_latch_dynamic=%lu type3_latch_directional=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3\\n",
 		gSpideyChaseSynthInstalled,
 		gSpideyChaseSynthCalls,
 		gSpideyChaseSynthActiveCalls,
 		gSpideyChaseSynthRetailUpdates,
 		gSpideyChaseSynthHeldCalls,
 		gSpideyChaseSynthMaxElapsed,
+		gSpideyChaseType3HeldLatchCalls,
+		gSpideyChaseType3HeldLatchWrites,
+		gSpideyChaseType3HeldLatchDynamic,
+		gSpideyChaseType3HeldLatchDirectional,
 		gSpideyChaseHeadingSamples,
 		gSpideyChaseHeadingCorrections,
 		gSpideyChaseHeadingMaxPreCorrectionDrift,

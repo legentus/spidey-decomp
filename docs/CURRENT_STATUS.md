@@ -51,9 +51,36 @@ Gameplay observation is still valid evidence:
 - based on retail memory/expected Venom route, Spider-Man should emerge on the other side of the building;
 - this suggests the current compatibility layer is still preserving the wrong route/path sequence rather than reproducing retail Chase traversal.
 
-Treat this as **TESTED — BEHAVIOR STILL WRONG / LOGGING INCOMPLETE** for the installed `34c6f816...` candidate. A proper instrumented rerun through `TEST_LATEST_BUILD.bat` is required before the next code change so the synthesized-worker/heading trace can be evaluated.
+This direct-launch observation was later confirmed by the proper instrumented harness run below. Preserve it only as the earlier observational test; the authoritative diagnostic evidence is now `logs/20261005-211946/spidey-decomp.log`.
 
-Next runtime action: run `TEST_LATEST_BUILD.bat` from the local authoritative checkout, then Level Select -> Chase Venom, verify the 60-FPS cutscene remains intact, and judge the building-entry route as fixed / improved / unchanged / worse. In local-authoritative mode this BAT does **not** download or mirror GitHub; it builds the current local files, seeds/cleans the consolidated log, launches the game, waits for exit, and archives the completed log. Do not launch `SpideyPC.exe` directly for instrumented tests because that bypasses the test-session setup/archive step. After exit, ChatGPT can read the consolidated log directly from the game folder or repo logs; the user does not need to upload it unless local-PC access is unavailable.
+### Instrumented Chase run 20261005-211946 — route still wrong; type-3 held-latch bug identified
+
+The proper `TEST_LATEST_BUILD.bat` run reproduced the same non-vanilla behavior: Spider-Man still does not chase Venom through the building and does not emerge from the far side.
+
+Authoritative tested runtime behavior is therefore **TESTED — STILL WRONG** for the installed `34c6f816...` candidate.
+
+High-signal evidence from the completed trace:
+- `synth_calls=2271`, `retail_updates=759`, `held_calls=1512`, `trace_samples=759`;
+- scheduler Logic remained essentially one canonical tick per call, so the global native-60 scheduler is not the remaining cause;
+- `input_basis_e34=0` for all 759 synth samples and the startup SpideyAI0 scan found zero `E34` references in the scanned range;
+- only two type-2 X/Z route targets appeared, and both reached the retail completion radius and removed themselves;
+- the building sequence contains a long type-3 worker with `code=10`, initial countdown `490` canonical ticks, and sampled axes `E2D=-127,E2E=0`.
+
+Direct retail disassembly of `CPlayer::SynthesizeAnalogueInput @ 0x004BC300`, type-3 body `0x004BCC2D`, proved that code 10 does **two** per-synth-call side effects:
+- `player[0x260] = 1`;
+- `E2D = -127`.
+
+The prior 20-Hz sample/hold wrapper preserved the analogue axes on the two held native-60 frames but did **not** reassert the type-3 latch bytes. The rest of `CPlayer` still runs at 60 Hz, so the scripted action latch could disappear on two out of every three frames even while the held analogue direction remained present.
+
+New working-tree candidate:
+- reassert all active type-3 latch side effects on held synth frames without advancing worker timers;
+- preserve the already-sampled final `E2D/E2E` axes so worker-order precedence is unchanged;
+- add `type3_latch_calls`, `type3_latch_writes`, `type3_latch_dynamic`, and `type3_latch_directional` telemetry;
+- forced-clean VC6 matching build: **PASS**.
+
+Detailed RE and opcode map: `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`.
+
+Next runtime action after this candidate is committed/installed: run `TEST_LATEST_BUILD.bat`, Level Select -> Chase Venom, and report whether Spider-Man now traverses the building and exits the correct far side. Exit normally so ChatGPT can inspect the new `type3_latch_*` counters and trace directly.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 

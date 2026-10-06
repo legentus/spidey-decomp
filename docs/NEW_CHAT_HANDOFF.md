@@ -2,6 +2,43 @@
 
 > **Workflow update:** the authoritative working repository is now the local Git checkout at `F:\Spider-Man 2000 Recomp\project main`. Normal TEST/FAST BATs build that local checkout directly and do not refresh from GitHub. `origin` remains a fallback/backup remote. Read the top of `docs/CURRENT_STATUS.md` before changing this workflow.
 
+## LIVE FRONTIER — TYPE-3 HELD-LATCH CANDIDATE
+
+This section supersedes the older Chase frontier notes immediately below it.
+
+Latest proper instrumented test:
+- installed behavior revision: `34c6f816a876e086b3e60cf99ee731bb709baf8f`;
+- archive: `logs/20261005-211946/spidey-decomp.log`;
+- result: **STILL WRONG** — Spider-Man does not follow Venom through the building and does not emerge from the far side;
+- cutscene/native-60 scheduler remains healthy.
+
+New trace conclusions:
+- 759 Chase synth samples were captured;
+- `E34` remained zero in every captured sample;
+- both observed type-2 X/Z targets reached the retail completion radius and retired normally;
+- the building sequence is dominated by a long type-3 `code=10` worker with an initial 490-tick countdown.
+
+Retail disassembly breakthrough:
+- type-3 code 10 does `player[0x260]=1` **and** `E2D=-127` every synth call;
+- the prior 20-Hz sample/hold wrapper preserved `E2D/E2E` on held native-60 frames but dropped the type-3 latch side effects;
+- the new candidate reasserts active type-3 latches on held frames without advancing their timers or changing the sampled final axes;
+- forced-clean VC6 matching build: **PASS**.
+
+New telemetry:
+- `type3_latch_calls`
+- `type3_latch_writes`
+- `type3_latch_dynamic`
+- `type3_latch_directional`
+
+Exact retail opcode map and rationale:
+- `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`
+
+Next test after installation:
+- run `TEST_LATEST_BUILD.bat`;
+- Level Select -> Chase Venom;
+- verify whether Spider-Man now enters/traverses the building and exits the far side;
+- exit normally so the new latch counters can be inspected directly.
+
 ## Start here
 
 Latest tested runtime:

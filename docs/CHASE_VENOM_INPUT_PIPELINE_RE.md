@@ -362,48 +362,139 @@ The route trace now records, on fresh synth samples:
 
 This will show how large the previously uncorrected held-frame heading drift would have been.
 
-## 11. Remaining unknown: field_E34 ownership
+## 11. 2026-10-05 instrumented Chase result
 
-The exact writer/update order for `field_E34` is the next static/runtime RE target.
+The proper harness run archived at:
 
-Commit:
+`logs/20261005-211946/spidey-decomp.log`
 
-- `e1c8a369a80b8dfd14ed79655c00110ac1b2c546` — trace Chase steering-basis ownership.
+still reproduced the non-vanilla building traversal: Spider-Man did not chase Venom through the building and did not emerge from the correct far side.
 
-The next build performs startup-only machine-code displacement scans over:
+Key runtime facts:
 
-`SpideyAI0 @ 0x004B13F0 + 0x73A0`
+- `synth_calls=2271`
+- `retail_updates=759`
+- `held_calls=1512`
+- `max_elapsed=6`
+- `heading_samples=350`
+- `heading_corrections=700`
+- `heading_max_pre_correction_drift=2048`
+- `ramp_unexpected=0`
+- `trace_samples=759`
+- scheduler Logic remained overwhelmingly one canonical tick per call.
 
-for:
+The startup displacement scan found:
 
-- `+0xE32`
-- `+0xE34`
-- `+0x23A`
+- 10 references to `E32` in the scanned SpideyAI0 range;
+- 4 references to camera transform heading `+0x23A`;
+- **0 references to `E34`** in that range.
 
-Expected log labels:
+The runtime trace also recorded `input_basis_e34=0` for all 759 Chase synth samples. This does not prove there is no writer anywhere in the executable, but it materially weakens the earlier assumption that a changing `E34` basis is driving the Chase failure.
 
-- `SpideyAI0_E32`
-- `SpideyAI0_E34`
-- `SpideyAI0_CameraHeading23A`
+### Type-2 route targets are completing
 
-This is static startup scanning only. It adds no synchronous per-frame logging.
+The run contained only two type-2 route-target segments:
 
-## 12. Exact next validation
+1. target `(2576384, -38219776)`, completed near shifted X/Z delta `(1, 33)`;
+2. target `(77103104, 16703488)`, completed near shifted X/Z delta `(-2, 47)`.
 
-Use `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`.
+Both are within the retail type-2 completion threshold of `0x40` in the shifted X/Z space.
 
-The tested source should be `e1c8a369...` or a documentation-only descendant.
+Therefore the current evidence does **not** look like a missing or permanently stuck type-2 waypoint. The authored route workers are being created and removed.
+
+## 12. Exact retail type-3 worker semantics
+
+Direct disassembly of the retail `CPlayer::SynthesizeAnalogueInput @ 0x004BC300` function blob proves the type-3 body at `0x004BCC2D` is an elapsed-tick countdown plus action/direction dispatch.
+
+High-level structure:
+
+```cpp
+remaining -= player->field_80;
+if (remaining < 0)
+{
+    remove_worker();
+    return;
+}
+
+activeMask |= 1 << code;
+
+switch (code)
+{
+    // dispatch table described below
+}
+```
+
+The retail code-to-handler map is:
+
+- codes `0..7`, `16..19`:
+  - assert byte `player[0x1C0 + code * 0x10]`;
+  - if it was previously zero, also assert the next byte;
+- code `8`:
+  - `player[0x240] = 1`;
+  - `E2E = -127`;
+- code `9`:
+  - `player[0x250] = 1`;
+  - `E2E = +127`;
+- code `10`:
+  - `player[0x260] = 1`;
+  - `E2D = -127`;
+- code `11`:
+  - `player[0x270] = 1`;
+  - `E2D = +127`;
+- codes `12..15` dispatch to the retail invalid/assert path.
+
+This matters because the failing Chase run contains a long type-3 **code 10** worker:
+
+- begins at trace sample `i=98`;
+- initial countdown `490` canonical ticks;
+- final sampled analogue output is `E2D=-127, E2E=0`;
+- this is the long scripted traversal immediately preceding the later Chase route phases.
+
+A later type-3 **code 9** worker also appears with a `150`-tick countdown.
+
+## 13. Sample/hold bug found: held frames dropped type-3 latches
+
+The existing 20-Hz-equivalent synth wrapper executed retail synth once per three canonical ticks and, on the two intervening 60-Hz calls, restored only the final held analogue axes `E2D/E2E`.
+
+That omitted the per-call type-3 latch side effects above.
+
+For the long code-10 worker, retail normally emits both:
+
+```cpp
+player[0x260] = 1;
+E2D = -127;
+```
+
+On held native-60 frames, the wrapper restored `E2D=-127` but did **not** reassert `player[0x260]=1`.
+
+Because the rest of `CPlayer` continues updating at 60 Hz, any consumer that clears/uses these one-frame latches can therefore observe the scripted action flag on only one out of every three frames even though the analogue direction is present continuously.
+
+### New compatibility correction
+
+The held-frame path now walks the active synth worker list and reasserts the retail type-3 latch side effects without advancing worker timers.
+
+Important detail: it does **not** recompute or overwrite the final analogue axes. Those remain the sampled `E2D/E2E` result from the fresh retail synth call, preserving worker-order precedence when type 2 and type 3 coexist.
+
+New telemetry:
+
+- `type3_latch_calls`
+- `type3_latch_writes`
+- `type3_latch_dynamic`
+- `type3_latch_directional`
+
+The forced-clean VC6 matching build passed after this change.
+
+## 14. Exact next validation
+
+Use `TEST_LATEST_BUILD.bat` from the local-authoritative checkout.
 
 In Chase Venom:
 
 1. confirm the in-engine cutscene remains visually 60 FPS;
-2. watch the building-entry turn where Spider-Man previously ran into the wall;
-3. report fixed / improved / unchanged / worse;
-4. continue long enough to know whether the chase remains playable;
-5. exit cleanly so the in-memory trace dumps;
-6. return the one consolidated `spidey-decomp.log`.
+2. watch whether Spider-Man now follows Venom through the building;
+3. verify whether he emerges from the correct far side;
+4. report fixed / improved / unchanged / worse;
+5. continue far enough to ensure the later Chase remains playable;
+6. exit cleanly so the updated synth stats and trace are archived.
 
-If the route still fails, the same log should now answer two questions at once:
-
-1. whether camera-basis drift was materially present and corrected;
-2. who writes `field_E34` and whether its update ordering exposes another authored-cadence assumption.
+The most important new counters are the four `type3_latch_*` fields. If they are non-zero during the failing sequence but behavior is still unchanged, the next RE target is the consumer/clear path for the type-3 latch bytes rather than another camera-heading correction.
