@@ -14099,3 +14099,63 @@ No damage behavior is changed.
 - no runtime test has been performed on the SetPos-only candidate yet.
 
 Health-bar alignment remains unresolved and unchanged.
+
+
+## 2026-10-06 — world-space QuadBit drift root-cause candidate
+
+User reports:
+- Mysterio helmet/head effect still moves relative to the helmet when the camera moves, even with retail/default Mysterio camera active;
+- blob shadows slide away from characters when the camera moves;
+- Venom wrap/tentacle effect has similar drift;
+- therefore issue is not primarily modern-camera ownership.
+
+Retail camera evidence from latest Mysterio run `logs/20261006-045343/spidey-decomp.log`:
+- camera mode during fight is retail LOOKAROUND (mode 17);
+- modern camera inactive;
+- helmet effect still drifts.
+
+### QuadBit renderer RE
+
+Mysterio helmet ring derives from `CQuadBit`.
+Retail QuadBit display:
+`DisplayQuadBitList @ 0x004097E0`.
+
+DisplayQuadBitList uses two parallel transforms:
+
+1. GTE path:
+   - subtracts `gMikeCamera.Position @ 0x0056F1B4/B8/BC`;
+   - feeds result to `gte_rtps`;
+   - therefore requires current GTE rotation matrix to be active camera rotation.
+
+2. DCX path:
+   - calls `DCX_XformVector @ 0x00402700` on original world-space corners;
+   - DCX_XformVector reads active 4x4 matrix `0x0056E668`;
+   - DisplayQuadBitList refreshes that active matrix by copying `0x0056E6F8` at entry.
+
+Existing compatibility restored only GTE rotation using `0x0056F1E4`.
+
+Critical finding:
+- `M3d_RenderSetup @ 0x00472DC0` builds pristine per-frame DCX camera/projection matrix as:
+  `matrix4x4_ml(result, 0x0056E778, 0x0056E570)`
+  and copies result to `0x0056E6F8`.
+- `DCModel_RenderModel` and `DC_PSXModel_RenderModel` later reuse/overwrite `0x0056E6F8` with model-local transforms.
+- therefore restoring only GTE camera rotation leaves QuadBits in mixed camera/model space.
+
+New renderer-only candidate:
+- immediately before retail DisplayQuadBitList:
+  1. recompute exact retail DCX matrix via `matrix4x4_ml(rebuilt, 0x0056E778, 0x0056E570)`;
+  2. copy 64-byte result back to `0x0056E6F8`;
+  3. restore GTE camera rotation from `0x0056F1E4`;
+  4. call untouched retail DisplayQuadBitList.
+
+This directly targets Mysterio helmet ring and other CQuadBit world effects, including likely blob-shadow quads.
+
+Venom wrap classification:
+- `CVenomWrap : CNonRenderedBit`, not CQuadBit;
+- do not claim this QuadBit fix will solve Venom wrap; trace its produced renderer primitive separately after QuadBit runtime result.
+
+Validation:
+- git diff --check PASS;
+- forced-clean matching VC6 compile/link PASS.
+
+No runtime test of the full DCX+GTE QuadBit restore yet.

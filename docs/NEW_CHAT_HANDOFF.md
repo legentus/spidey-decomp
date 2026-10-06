@@ -2896,3 +2896,16 @@ Existing laser liveness compatibility remains active.
 Soft-spot telemetry is pass-through only and now reads player web mode from raw retail offset +0x8F8.
 
 Forced-clean matching VC6 build + link PASS. Next action is one Mysterio runtime test.
+
+
+## QuadBit world-effect anchoring frontier
+
+Mysterio helmet ring is CQuadBit. Retail DisplayQuadBitList uses both GTE camera rotation and a separate DCX 4x4 transform.
+
+Old fix restored only GTE rotation. New candidate also rebuilds exact retail DCX camera/projection matrix:
+`matrix4x4_ml(dst, 0x0056E778, 0x0056E570)` -> `0x0056E6F8`
+before untouched DisplayQuadBitList.
+
+Forced-clean VC6 build/link PASS.
+
+CVenomWrap is CNonRenderedBit, so its tentacle/wrap drift is a separate renderer path.
