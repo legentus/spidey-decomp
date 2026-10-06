@@ -2722,3 +2722,17 @@ Installed reference build identity:
 - input `44680FE5EBE1CD63CDDD14B3423745A4DBE6707BE2506EDC37E5C27671D31F50`
 
 Use `TEST_LATEST_BUILD.bat` for the reference run. The whole game running around 20 FPS is expected and intentional.
+
+
+## 2026-10-06 Chase good20 -> BaddyList frontier
+
+See `docs/NEW_CHAT_HANDOFF_2026-10-06_CHASE_GOOD20_BADDYLIST_FRONTIER.md` for the complete current frontier.
+
+Key state:
+- working ground-truth: full-engine 20-FPS run `logs/20261006-020549/spidey-decomp.log`;
+- failing comparison: `logs/20261006-012109/spidey-decomp.log`;
+- failure proven to be camera/actor phase during the same code-9 scripted worker;
+- Venom confirmed on `BaddyList @ 0x0056E990`;
+- current candidate restores global 60 Hz and cadence-gates BaddyList only during L5A1 synthesized player control;
+- forced-clean matching build passed before checkpoint;
+- use Local Commander for local PC/repo interaction going forward.

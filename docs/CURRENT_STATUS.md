@@ -13669,3 +13669,20 @@ Forced-clean matching VC6 build: PASS.
 - game intentionally not launched.
 
 TEST INSTRUCTION: run `TEST_LATEST_BUILD.bat`, not direct `SpideyPC.exe`, so the harness seeds and archives the full reference log. This diagnostic intentionally runs the whole engine at about 20 FPS/Hz. Test Chase Venom and report whether Spider-Man physically follows Venom through the building. Exit normally afterward so the working/broken reference trace can be captured.
+
+
+## 2026-10-06 — working full-20 Chase reference isolated the next 60-Hz dependency
+
+Dedicated recovery/frontier document:
+- `docs/NEW_CHAT_HANDOFF_2026-10-06_CHASE_GOOD20_BADDYLIST_FRONTIER.md`
+
+Ground-truth run `logs/20261006-020549/spidey-decomp.log` successfully traversed the building at full-engine 20 FPS. Direct comparison with failing `logs/20261006-012109/spidey-decomp.log` shows the decisive failure is camera/actor phase, not merely steering math: the same final type-3 code-9 worker runs with camera heading ~1029 in the working run but ~2080 and rotating in the failing run, turning the same scripted forward input into a side-wall collision.
+
+Retail RE proves Venom lives on `BaddyList @ 0x0056E990`, updated by `Logic` at call site `0x004554F5` before pending trigger commands are consumed. The live candidate restores the global timer to native 60 Hz and cadence-gates only BaddyList during L5A1 synthesized control, alongside the already-gated scripted player/camera/synth paths. New trace telemetry records camera mode/interpolation plus node-74 pulse state.
+
+A forced-clean matching VC6 build of this uncommitted candidate passed before PC access switched to Local Commander.
+
+PC workflow update:
+- use Local Commander as the primary local-machine interface from this point forward;
+- local checkout remains authoritative;
+- Desktop Commander is no longer the preferred path for this project.
