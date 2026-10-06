@@ -4931,21 +4931,27 @@ static unsigned long gSpideyChaseType3HeldLatchWrites = 0;
 static unsigned long gSpideyChaseType3HeldLatchDynamic = 0;
 static unsigned long gSpideyChaseType3HeldLatchDirectional = 0;
 
-// L5A1 authored building-entry command point.
-// L5A1_T.trg node 44:
-//   checksum 0x854B6E67
-//   links 21,48,53,196,292,300,338,305
-//   commands: [134,1,3,FFFF]
-// Trigger-table index 2 in L5A1_G.psx maps to this checksum.  The linked
-// commands switch the building into its "Inside" state, including node 338's
-// SetVisibilityByName("Inside", 1, 1, true).  At native 60 the current Chase
-// path can reach the solid entry geometry while this physical command point
-// is still unexecuted.  The recovery below does not alter collision or
-// teleport the player: it invokes the exact authored retail command point
-// only after the missed-transition state is proven at runtime.
-static const unsigned long kSpideyChaseBuildingEntryChecksum =
-	0x854B6E67UL;
-static const int kSpideyChaseBuildingEntryNode = 44;
+// L5A1 scripted Wait-chain state used by the through-building Chase.
+//
+// Retail trigger graph:
+//   TRGP_Wait05 -> node 70  -> starts node 71's long scripted sequence and
+//                             enables TRGP_Wait06 through node 336.
+//   TRGP_Wait06 -> node 298 -> advances the world/script state again.
+//
+// Their checksums are the actual CRCs of the authored trigger names and are
+// present in L5A1_G.psx.  Unlike SCommandPoint::Executed (cleared by Logic
+// every update), NumPulsesSet/NumPulses persist after opcode 134 + opcode 3:
+//   completed stage == NumPulsesSet != 0 && NumPulses == 0.
+//
+// The black-wall failure happens while Wait05 is already complete, Wait06 is
+// expected next, and the long type-3/code-10 movement is still driving the
+// player.  Recover Wait06 only in that exact persistent stage.
+static const unsigned long kSpideyChaseWait05Checksum =
+	0xF24C5EF1UL;
+static const int kSpideyChaseWait05Node = 70;
+static const unsigned long kSpideyChaseWait06Checksum =
+	0x6B450F4BUL;
+static const int kSpideyChaseWait06Node = 298;
 static CPlayer* gSpideyChaseBuildingEntryPlayer = 0;
 static int gSpideyChaseBuildingEntryRecovered = 0;
 static int gSpideyChaseBuildingEntryBlockedSamples = 0;
@@ -5069,16 +5075,12 @@ static void SpideyChaseReadWorkerHead(
 	}
 }
 
-// Recover the authored L5A1 building-entry transition only when the retail
-// physical command point has demonstrably been missed.
+// Recover the authored Wait05 -> Wait06 transition only when the persistent
+// trigger state proves Wait05 completed and Wait06 did not.
 //
-// This is deliberately not a no-clip or position correction.  Node 44 is the
-// retail trigger behind the transition: its checksum is stored as trigger
-// table index 2 in L5A1_G.psx, and its command list pulses the exact authored
-// Inside/window/building state nodes.  Native-60 can leave Spider-Man pushing
-// into the solid entry geometry while node 44 remains unexecuted.  In that
-// state, invoke the same command point retail would have fired from the
-// trigger face.
+// SCommandPoint::Executed is deliberately not used here: retail Logic clears
+// it every logic update.  NumPulsesSet/NumPulses are the persistent evidence
+// left by this level's opcode-134/opcode-3 trigger stages.
 static void SpideyChaseRecoverBuildingEntryIfMissed(
 		CPlayer* player)
 {
@@ -5116,24 +5118,47 @@ static void SpideyChaseRecoverBuildingEntryIfMissed(
 		return;
 	}
 
-	SCommandPoint* entry =
+	SCommandPoint* wait05 =
 		GetCommandPoint(
-			kSpideyChaseBuildingEntryNode);
-	if (!entry ||
-		entry->Checksum !=
-			kSpideyChaseBuildingEntryChecksum)
+			kSpideyChaseWait05Node);
+	SCommandPoint* wait06 =
+		GetCommandPoint(
+			kSpideyChaseWait06Node);
+
+	if (!wait05 ||
+		!wait06 ||
+		wait05->Checksum !=
+			kSpideyChaseWait05Checksum ||
+		wait06->Checksum !=
+			kSpideyChaseWait06Checksum)
 	{
 		gSpideyChaseBuildingEntryBlockedSamples =
 			0;
 		return;
 	}
 
-	// If retail already reached the face, never duplicate it.
-	if (entry->Executed)
+	const int wait05Complete =
+		wait05->NumPulsesSet &&
+		wait05->NumPulses == 0;
+	const int wait06Complete =
+		wait06->NumPulsesSet &&
+		wait06->NumPulses == 0;
+
+	// If retail naturally completed Wait06, there is nothing to recover.
+	if (wait06Complete)
 	{
 		++gSpideyChaseBuildingEntryNaturalSeen;
 		gSpideyChaseBuildingEntryRecovered =
 			1;
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+		return;
+	}
+
+	// The long through-building command is only a valid Wait06 recovery site
+	// after Wait05 has actually completed.
+	if (!wait05Complete)
+	{
 		gSpideyChaseBuildingEntryBlockedSamples =
 			0;
 		return;
@@ -5176,7 +5201,7 @@ static void SpideyChaseRecoverBuildingEntryIfMissed(
 	++gSpideyChaseBuildingEntryBlockedSamples;
 
 	// Require two consecutive observed wall-collision samples.  A transient
-	// brush against nearby geometry is not enough to synthesize the trigger.
+	// brush against nearby geometry is not enough to advance the Wait chain.
 	if (gSpideyChaseBuildingEntryBlockedSamples <
 		2)
 	{
@@ -5226,7 +5251,7 @@ static void SpideyChaseRecoverBuildingEntryIfMissed(
 
 	SCommandPoint* fired =
 		Trig_TriggerCommandPoint(
-			kSpideyChaseBuildingEntryChecksum,
+			kSpideyChaseWait06Checksum,
 			true);
 
 	if (fired)
@@ -5242,9 +5267,13 @@ static void SpideyChaseRecoverBuildingEntryIfMissed(
 		{
 			fprintf(
 				f,
-				"chase_building_entry_recovery fired=1 node=%d checksum=0x%08lX pos=%d,%d,%d state=0x%08lX collision=0x%04X head=%d,%d,%d,%d item_checksum=0x%08lX item_region=%d item_model=%d item_flags=0x%08lX face_flags=0x%08lX policy=invoke_authored_commandpoint_no_noclip_no_teleport\\n",
-				kSpideyChaseBuildingEntryNode,
-				kSpideyChaseBuildingEntryChecksum,
+				"chase_building_entry_recovery fired=1 stage=wait05_to_wait06 node=%d checksum=0x%08lX wait05_pulses_set=%u wait05_pulses=%u wait06_pulses_set=%u wait06_pulses=%u pos=%d,%d,%d state=0x%08lX collision=0x%04X head=%d,%d,%d,%d item_checksum=0x%08lX item_region=%d item_model=%d item_flags=0x%08lX face_flags=0x%08lX policy=advance_next_authored_wait_stage_no_noclip_no_teleport\\n",
+				kSpideyChaseWait06Node,
+				kSpideyChaseWait06Checksum,
+				(unsigned int)wait05->NumPulsesSet,
+				(unsigned int)wait05->NumPulses,
+				(unsigned int)wait06->NumPulsesSet,
+				(unsigned int)wait06->NumPulses,
 				player->mPos.vx,
 				player->mPos.vy,
 				player->mPos.vz,
@@ -5264,14 +5293,14 @@ static void SpideyChaseRecoverBuildingEntryIfMissed(
 	}
 	else
 	{
-		// A natural hit may have raced us between the pre-check and trigger
-		// call.  Treat that as resolved if the real command point now says it
-		// executed; otherwise allow another guarded attempt next sample.
-		entry =
+		// A same-frame natural collision may already have consumed Wait06.
+		// Re-check the persistent pulse state before allowing another attempt.
+		wait06 =
 			GetCommandPoint(
-				kSpideyChaseBuildingEntryNode);
-		if (entry &&
-			entry->Executed)
+				kSpideyChaseWait06Node);
+		if (wait06 &&
+			wait06->NumPulsesSet &&
+			wait06->NumPulses == 0)
 		{
 			++gSpideyChaseBuildingEntryNaturalSeen;
 			gSpideyChaseBuildingEntryRecovered =
@@ -5967,7 +5996,7 @@ static void SpideyLogChaseSynthStats()
 
 	fprintf(
 		f,
-		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu type3_latch_calls=%lu type3_latch_writes=%lu type3_latch_dynamic=%lu type3_latch_directional=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu building_entry_checks=%lu building_entry_blocked_matches=%lu building_entry_natural_seen=%lu building_entry_recovery_attempts=%lu building_entry_recovery_fires=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3 building_entry_policy=invoke_authored_node44_if_missed_no_noclip_no_teleport\\n",
+		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu type3_latch_calls=%lu type3_latch_writes=%lu type3_latch_dynamic=%lu type3_latch_directional=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu building_entry_checks=%lu building_entry_blocked_matches=%lu building_entry_natural_seen=%lu building_entry_recovery_attempts=%lu building_entry_recovery_fires=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3 building_entry_policy=recover_wait05_to_wait06_from_persistent_pulse_state_no_noclip_no_teleport\\n",
 		gSpideyChaseSynthInstalled,
 		gSpideyChaseSynthCalls,
 		gSpideyChaseSynthActiveCalls,

@@ -538,3 +538,45 @@ So the building-entry path is now grounded end-to-end: **trigger face index 2 ->
 The candidate does not create noclip, delete collision, force visibility, or reposition Spider-Man. If level `0x501`, synthesized control, type-3 code-10 worker, forward collision, the observed building-entry cluster, the real node-44 checksum, an unexecuted command point, and two consecutive blocked samples all agree, it invokes the exact authored `Trig_TriggerCommandPoint(0x854B6E67, true)`.
 
 Telemetry records recovery counts and the blocking item's model checksum/region/model/flags plus face flags, so the next runtime remains diagnostic even if another issue remains.
+
+### 2026-10-05 late update — Wait-chain stage identity corrected
+
+The first node-44 recovery build was tested behaviorally via direct `SpideyPC.exe` launch and the black-wall failure still occurred. That launch did not produce a usable runtime trace (live log only 617 bytes), so the recovery counters from that run are unavailable. The gameplay result is still valid: the Wait04-only recovery was not sufficient.
+
+Further retail TRG/CRC reconstruction changed the stage diagnosis:
+- node 34 checksum `0x6C28CB52` = CRC(`TRGP_Wait02`)
+- node 39 checksum `0x1B2FFBC4` = CRC(`TRGP_Wait03`)
+- node 44 checksum `0x854B6E67` = CRC(`TRGP_Wait04`)
+- node 70 checksum `0xF24C5EF1` = CRC(`TRGP_Wait05`)
+- node 298 checksum `0x6B450F4B` = CRC(`TRGP_Wait06`)
+
+The chain is explicit:
+- Wait02 enables `TRGP_Wait03` through node 46;
+- Wait03 enables `TRGP_Wait04` through node 47;
+- Wait04 enables `TRGP_Wait05` through node 48 and switches `Inside` on through node 338;
+- Wait05 launches the long scripted building sequence through node 71 and enables `TRGP_Wait06` through node 336;
+- Wait06 advances the later world/script state and enables `TRGP_Wait10` through node 337.
+
+This means the long type-3/code-10 worker that is active at the black wall belongs to the **Wait05 -> Wait06** leg. Recovering Wait04 was one stage too early.
+
+Critical command-point lifetime correction:
+- `SCommandPoint::Executed` is cleared every Logic update by `Trig_ResetCPExecutedFlags()`;
+- therefore it is not valid as persistent evidence that a Wait stage happened earlier;
+- opcode 134 sets `NumPulsesSet=1` and initializes `NumPulses`;
+- opcode 3 performs the fanout and decrements `NumPulses`;
+- for these one-pulse Wait nodes, `NumPulsesSet != 0 && NumPulses == 0` is persistent evidence that the stage completed.
+
+New candidate logic therefore requires:
+- Wait05 node 70 exists with checksum `0xF24C5EF1`;
+- Wait06 node 298 exists with checksum `0x6B450F4B`;
+- Wait05 persistent pulse state says completed;
+- Wait06 persistent pulse state says not completed;
+- Chase synthesized control active;
+- head worker type 3 / code 10;
+- real forward collision;
+- player in the captured building-entry cluster;
+- two consecutive blocked samples.
+
+Only then does it invoke the authored `Trig_TriggerCommandPoint(0x6B450F4B, true)` for **Wait06**. No noclip, teleport, or arbitrary collision changes are used.
+
+Forced-clean matching VC6 build of this corrected stage-aware source: **PASS**.

@@ -295,11 +295,41 @@ Installed untested node-44 recovery candidate:
 - prepare/install into the real game folder: **PASS**;
 - game intentionally not launched.
 
+### Corrected recovery frontier — Wait05 -> Wait06
+
+The direct-launch test of the prior Wait04/node-44 recovery still showed the same black-wall failure, but that direct launch produced only a 617-byte header log, so no recovery counters survived.
+
+Deeper L5A1 reconstruction proved the Wait chain:
+- Wait02 node 34 / `0x6C28CB52`;
+- Wait03 node 39 / `0x1B2FFBC4`;
+- Wait04 node 44 / `0x854B6E67`;
+- Wait05 node 70 / `0xF24C5EF1`;
+- Wait06 node 298 / `0x6B450F4B`.
+
+Wait04 turns `Inside` on and enables Wait05. Wait05 launches the long scripted building sequence and enables Wait06. Therefore the active long type-3/code-10 worker at the black wall belongs to the **Wait05 -> Wait06** leg.
+
+Also, `SCommandPoint::Executed` is per-frame and is cleared every Logic update. The previous recovery incorrectly treated it as persistent state.
+
+Persistent stage evidence is instead:
+`NumPulsesSet != 0 && NumPulses == 0`
+
+because opcode 134 initializes the pulse count and opcode 3 performs the fanout then decrements it.
+
+Corrected behavior candidate:
+- require Wait05 persistent state = completed;
+- require Wait06 persistent state = not completed;
+- require scripted type-3/code-10 movement;
+- require real forward collision in the captured building cluster for two consecutive samples;
+- invoke the exact authored Wait06 command point `Trig_TriggerCommandPoint(0x6B450F4B,true)`;
+- no noclip, teleport, or manual wall deletion.
+
+Forced-clean matching VC6 build: **PASS**.
+
 Next runtime action:
-1. test the already-installed node-44 authored-commandpoint recovery candidate;
-2. replay Chase Venom;
-3. watch specifically whether the black-wall/building transition now opens/changes and Spider-Man continues through the building after Venom;
-4. exit normally so the new recovery counters and blocking-model telemetry can be inspected.
+1. install the corrected Wait05->Wait06 candidate;
+2. run `TEST_LATEST_BUILD.bat` (not direct `SpideyPC.exe`) so the harness preserves the full runtime log;
+3. replay Chase Venom and watch the black wall;
+4. exit normally so the persistent Wait-state/recovery telemetry can be inspected.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
