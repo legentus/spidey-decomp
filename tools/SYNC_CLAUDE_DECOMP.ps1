@@ -21,24 +21,18 @@ function Fail([string]$Message, [int]$Code = 1) {
     exit $Code
 }
 
-function Invoke-Git {
-    param([Parameter(Mandatory = $true)][string[]]$GitArgs)
-
-    $output = & git.exe @GitArgs 2>&1
+function Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args) {
+    $output = & git.exe @Args 2>&1
     $code = $LASTEXITCODE
     if ($code -ne 0) {
-        if ($output) {
-            $output | ForEach-Object { Write-Host $_ }
-        }
-        throw "git $($GitArgs -join ' ') failed with exit code $code."
+        if ($output) { $output | ForEach-Object { Write-Host $_ } }
+        throw "git $($Args -join ' ') failed with exit code $code."
     }
     return $output
 }
 
-function Get-GitText {
-    param([Parameter(Mandatory = $true)][string[]]$GitArgs)
-
-    return ((Invoke-Git -GitArgs $GitArgs) -join [Environment]::NewLine).Trim()
+function Git-Text([string[]]$Args) {
+    return ((Git @Args) -join [Environment]::NewLine).Trim()
 }
 
 function Test-Ancestor([string]$Older, [string]$Newer) {
@@ -56,11 +50,11 @@ Write-Host "[POLICY] No force pushes, no automatic conflict resolution."
 Write-Host ""
 
 if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
-    Fail "git.exe was not found on PATH."
+    Fail "git was not found on PATH."
 }
 
 try {
-    $inside = Get-GitText -GitArgs @("rev-parse", "--is-inside-work-tree")
+    $inside = Git-Text @("rev-parse", "--is-inside-work-tree")
 } catch {
     Fail "This folder is not a Git working tree."
 }
@@ -68,7 +62,7 @@ if ($inside -ne "true") {
     Fail "This folder is not a Git working tree."
 }
 
-$branch = Get-GitText -GitArgs @("branch", "--show-current")
+$branch = Git-Text @("branch", "--show-current")
 if ($branch -ne "dev") {
     Fail "Expected local branch 'dev', but current branch is '$branch'. Switch back to dev before syncing."
 }
@@ -95,26 +89,26 @@ $dirtyParts = @($dirtyParts | Where-Object { $_ } | Sort-Object -Unique)
 if ($dirtyParts.Count -gt 0) {
     Write-Host "[BLOCKED] Local working tree is not clean:" -ForegroundColor Yellow
     $dirtyParts | ForEach-Object { Write-Host ("  " + $_) }
-    Fail "Commit, stash, or intentionally remove local changes before syncing. Nothing was fetched or merged."
+    Fail "Commit, stash, or intentionally remove local changes before syncing. Nothing was fetched/merged into the working tree."
 }
 
 Write-Host "[1/7] Fetching remote refs..."
 try {
-    Invoke-Git -GitArgs @("fetch", "origin", "--prune") | Out-Null
+    Git @("fetch", "origin", "--prune") | Out-Null
 } catch {
     Fail $_.Exception.Message
 }
 
 try {
-    $localHead = Get-GitText -GitArgs @("rev-parse", "HEAD")
-    $remoteDev = Get-GitText -GitArgs @("rev-parse", "origin/dev")
-    $claudeTip = Get-GitText -GitArgs @("rev-parse", "origin/claude-decomp")
+    $localHead = Git-Text @("rev-parse", "HEAD")
+    $remoteDev = Git-Text @("rev-parse", "origin/dev")
+    $claudeTip = Git-Text @("rev-parse", "origin/claude-decomp")
 } catch {
     Fail "Required refs origin/dev and origin/claude-decomp must both exist."
 }
 
-Write-Host ("[INFO] local dev:       " + $localHead)
-Write-Host ("[INFO] origin/dev:      " + $remoteDev)
+Write-Host ("[INFO] local dev:      " + $localHead)
+Write-Host ("[INFO] origin/dev:     " + $remoteDev)
 Write-Host ("[INFO] Claude snapshot: " + $claudeTip)
 
 $remoteDevInLocal = Test-Ancestor $remoteDev $localHead
@@ -130,21 +124,19 @@ if (-not $remoteDevInLocal) {
 if ($localHead -ne $remoteDev) {
     Write-Host "[2/7] Publishing our local dev commits so Claude can see the current frontier..."
     try {
-        Invoke-Git -GitArgs @("push", "origin", "dev") | Out-Null
+        Git @("push", "origin", "dev") | Out-Null
     } catch {
-        Fail "Could not fast-forward origin/dev. No force push was attempted."
+        Fail "Could not fast-forward origin/dev. No force push was attempted. Re-fetch and reconcile manually."
     }
-
-    Invoke-Git -GitArgs @("fetch", "origin", "--prune") | Out-Null
-    $remoteDev = Get-GitText -GitArgs @("rev-parse", "origin/dev")
+    Git @("fetch", "origin", "--prune") | Out-Null
+    $remoteDev = Git-Text @("rev-parse", "origin/dev")
 } else {
     Write-Host "[2/7] origin/dev already contains our local frontier."
 }
 
-$backupBranch = $null
 if (Test-Ancestor $claudeTip $localHead) {
     Write-Host "[3/7] Claude snapshot is already contained in local dev; nothing new to merge."
-    Write-Host "[4/7] No rollback branch needed."
+    Write-Host "[4/7] No backup branch needed."
     Write-Host "[5/7] No merge needed."
 } else {
     $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -152,7 +144,7 @@ if (Test-Ancestor $claudeTip $localHead) {
 
     Write-Host ("[3/7] Creating rollback branch " + $backupBranch + " ...")
     try {
-        Invoke-Git -GitArgs @("branch", $backupBranch, $localHead) | Out-Null
+        Git @("branch", $backupBranch, $localHead) | Out-Null
     } catch {
         Fail "Could not create the local rollback branch."
     }
@@ -170,16 +162,14 @@ if (Test-Ancestor $claudeTip $localHead) {
             Write-Host $conflicts
         }
         Write-Host ("Rollback branch preserved: " + $backupBranch)
-
         & git.exe merge --abort 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Fail "Merge conflicted and git merge --abort also failed. Stop editing and ask ChatGPT to inspect the repo." 3
+            Fail "Merge conflicted and git merge --abort also failed. Do not continue editing; ask ChatGPT to inspect the repo." 3
         }
         Fail "Merge was safely aborted. Local dev is back where it started; no conflict was auto-resolved." 2
     }
 
     Write-Host "[5/7] Merge completed successfully."
-
     $diffCheck = & git.exe diff --check HEAD^1..HEAD 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARNING] git diff --check reported whitespace/errors in the merged change:" -ForegroundColor Yellow
@@ -190,27 +180,27 @@ if (Test-Ancestor $claudeTip $localHead) {
 
 Write-Host "[6/7] Re-fetching before publishing integrated dev..."
 try {
-    Invoke-Git -GitArgs @("fetch", "origin", "--prune") | Out-Null
+    Git @("fetch", "origin", "--prune") | Out-Null
 } catch {
     Fail $_.Exception.Message
 }
 
-$currentHead = Get-GitText -GitArgs @("rev-parse", "HEAD")
-$latestRemoteDev = Get-GitText -GitArgs @("rev-parse", "origin/dev")
+$currentHead = Git-Text @("rev-parse", "HEAD")
+$latestRemoteDev = Git-Text @("rev-parse", "origin/dev")
 
 if (-not (Test-Ancestor $latestRemoteDev $currentHead)) {
-    Fail "origin/dev changed while the sync was running. Integrated work is safe locally, but the script will not overwrite the newer remote."
+    Fail "origin/dev changed while the sync was running. Integrated work is safe locally, but this script will not overwrite the newer remote. Ask ChatGPT to reconcile."
 }
 
 try {
-    Invoke-Git -GitArgs @("push", "origin", "dev") | Out-Null
+    Git @("push", "origin", "dev") | Out-Null
 } catch {
     Fail "Integrated local dev is safe, but push to origin/dev failed. No force push was attempted."
 }
 
-Invoke-Git -GitArgs @("fetch", "origin", "--prune") | Out-Null
-$latestClaude = Get-GitText -GitArgs @("rev-parse", "origin/claude-decomp")
-$finalHead = Get-GitText -GitArgs @("rev-parse", "HEAD")
+Git @("fetch", "origin", "--prune") | Out-Null
+$latestClaude = Git-Text @("rev-parse", "origin/claude-decomp")
+$finalHead = Git-Text @("rev-parse", "HEAD")
 
 Write-Host "[7/7] Sync complete." -ForegroundColor Green
 Write-Host ("[OK] local/origin dev: " + $finalHead)
@@ -219,16 +209,15 @@ if ($latestClaude -ne $claudeTip -and -not (Test-Ancestor $latestClaude $finalHe
     Write-Host ""
     Write-Host "[NOTE] Claude pushed additional commits while this sync was running." -ForegroundColor Yellow
     Write-Host ("       New Claude tip: " + $latestClaude)
-    Write-Host "       Those commits were not mixed into this snapshot. Run the BAT again after Claude finishes."
+    Write-Host "       Those commits were NOT mixed into this snapshot. Run the BAT again after Claude finishes."
 }
 
 Write-Host ""
-Write-Host "For Claude's next batch:"
-Write-Host "  git fetch origin"
-Write-Host "  git checkout claude-decomp"
-Write-Host "  git merge --ff-only origin/dev"
-Write-Host "  ...decompile/commit..."
-Write-Host "  git push origin claude-decomp"
+Write-Host "For Claude's next batch, tell it to:"
+Write-Host "  1. git fetch origin"
+Write-Host "  2. git checkout claude-decomp"
+Write-Host "  3. git merge --ff-only origin/dev"
+Write-Host "  4. decompile/commit/push only to claude-decomp"
 Write-Host ""
 Write-Host "Do NOT let Claude push directly to dev or master."
 Pause-IfNeeded
