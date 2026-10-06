@@ -11600,12 +11600,14 @@ static void __cdecl SpideyCompatMysterioBossQPoly2D(
 	{
 		++gSpideyMysterioBossUiScaledDraws;
 		SpideyLogMysterioHealthRect(
-			"fill_qpoly_live_before_compact",
+			"fill_qpoly_live_passthrough",
 			x0,
 			y0,
 			x3,
 			y3);
-		SpideyCompatHealthBarQPoly2D(
+		// Mysterio has already converted these QPoly vertices into live pixels.
+		// Do not run them through the authored-space health-bar compactor twice.
+		((SpideyRetailQPoly2DFn)0x00507910)(
 			x0, y0, u0, v0, color0,
 			x1, y1, u1, v1, color1,
 			x2, y2, u2, v2, color2,
@@ -13844,10 +13846,14 @@ typedef void (__cdecl *SpideyRetailMatrix4x4MulFn)(
 		const float*,
 		const float*);
 
+typedef void (__cdecl *SpideyRetailZeroGteTranslationFn)(void);
+
 static unsigned long gSpideyQuadBitCameraRestoreCalls =
 	0;
 static unsigned long gSpideyQuadBitDcxMismatchCalls =
 	0;
+static unsigned long gSpideyQuadBitGteTranslationNonZeroCalls = 0;
+static unsigned long gSpideyQuadBitGteTranslationProbeSamples = 0;
 static unsigned long gSpideyQuadBitHorPlusDrawCalls =
 	0;
 
@@ -13962,6 +13968,8 @@ static void __cdecl SpideyDisplayQuadBitListCameraAnchored(
 		(SpideyRetailSetRotMatrixFn)0x0046D7B0;
 	SpideyRetailMatrix4x4MulFn matrixMul =
 		(SpideyRetailMatrix4x4MulFn)0x00476A00;
+	SpideyRetailZeroGteTranslationFn zeroGteTranslation =
+		(SpideyRetailZeroGteTranslationFn)0x0046E460;
 	SpideyRetailDisplayQuadBitListFn retail =
 		(SpideyRetailDisplayQuadBitListFn)0x004097E0;
 
@@ -13995,8 +14003,40 @@ static void __cdecl SpideyDisplayQuadBitListCameraAnchored(
 		rebuiltDcx,
 		sizeof(rebuiltDcx));
 
+	const int quadBitPreTransX = *(volatile int*)0x00610B34;
+	const int quadBitPreTransY = *(volatile int*)0x00610B38;
+	const int quadBitPreTransZ = *(volatile int*)0x00610B3C;
+	if (quadBitPreTransX || quadBitPreTransY || quadBitPreTransZ)
+		++gSpideyQuadBitGteTranslationNonZeroCalls;
+
+	if (gSpideyQuadBitGteTranslationProbeSamples < 64 &&
+		(quadBitPreTransX || quadBitPreTransY || quadBitPreTransZ ||
+		 gSpideyQuadBitGteTranslationProbeSamples < 8))
+	{
+		FILE* log = SpideyOpenConsolidatedLog("DRAW");
+		if (log)
+		{
+			fprintf(
+				log,
+				"quadbit_gte_state sample=%lu restore_call=%lu pre_trans=%d,%d,%d camera=%d,%d,%d list=0x%08lX nonzero_total=%lu action=zero_before_retail\n",
+				gSpideyQuadBitGteTranslationProbeSamples,
+				gSpideyQuadBitCameraRestoreCalls,
+				quadBitPreTransX,
+				quadBitPreTransY,
+				quadBitPreTransZ,
+				*(volatile int*)0x0056F1B4,
+				*(volatile int*)0x0056F1B8,
+				*(volatile int*)0x0056F1BC,
+				(unsigned long)(list ? *list : 0),
+				gSpideyQuadBitGteTranslationNonZeroCalls);
+			fclose(log);
+		}
+		++gSpideyQuadBitGteTranslationProbeSamples;
+	}
+
 	setRotMatrix(
 		activeCameraTransform);
+	zeroGteTranslation();
 	retail(
 		list);
 }
@@ -14057,7 +14097,7 @@ static void SpideyInstallQuadBitCameraAnchorCompat()
 	{
 		fprintf(
 			f,
-			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 horplus_calls=%d,%d horplus_qpoly_wrapper=0x%08lX reason=%s\n",
+			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 gte_zero_trans=0x0046E460 horplus_calls=%d,%d horplus_qpoly_wrapper=0x%08lX reason=%s\n",
 			installed,
 			(unsigned long)&SpideyDisplayQuadBitListCameraAnchored,
 			horPlusCallOne,

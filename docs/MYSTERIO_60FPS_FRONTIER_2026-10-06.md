@@ -115,3 +115,67 @@ Compare 60 vs 20:
 - user-visible beam frequency/pattern.
 
 Do not promote any broad Mysterio 20-Hz cadence fix until that comparison identifies the first real divergence.
+
+
+## 2026-10-06 — Mysterio HUD passthrough + QuadBit GTE translation frontier
+
+### Runtime verdict consumed
+- Newest archived user test: `logs/20261006-170406/spidey-decomp.log`.
+- Runtime revision in that session: `c39b9a430ebd5e08ad4e2798a445f47eabc8a69c`; active QuadBit Hor+ behavior originated at `3cc47634`.
+- User visual verdict: Mysterio health bar still fragmented/outside its holder; Mysterio helmet circle, blob shadows, and similar GFX still move relative to their owners when the camera moves.
+- The Hor+ wrapper definitely executed in the log, so Hor+ alone is a negative result rather than an untested patch.
+
+### Mysterio health-bar diagnosis and source fix
+- `mysterio_health_alignment` telemetry proves the QPoly fill reaches `SpideyCompatMysterioBossQPoly2D` already in live-resolution coordinates.
+- Example at 2560x1440: holder authored rect `268..277 x 32..42` becomes live `1340..1385 x 192..252`; the immediately following QPoly fill is already exactly `1340..1385 x 192..252` before the compatibility scaler touches it.
+- Root cause: the Mysterio-only wrapper then called `SpideyCompatHealthBarQPoly2D`, compacting/scaling those live pixels a second time.
+- Fix now in `main.cpp`: while Mysterio is active, that QPoly path logs `fill_qpoly_live_passthrough` and calls retail `PCGfx_DrawQPoly2D @ 0x00507910` directly.
+- Authored-space flat/Gouraud health pieces remain on their existing compatibility paths. Venom Chase UI code is untouched.
+
+### Shared CQuadBit GFX diagnosis
+- The affected systems share the retail `CQuadBit` path:
+  - body blob shadows are allocated as `CQuadBit` in `CBody::UpdateShadow`;
+  - `CMysterioHeadCircle : public CQuadBit`;
+  - multiple Venom/Mysterio sparks/effects also derive from `CQuadBit`.
+- Retail `DisplayQuadBitList @ 0x004097E0` subtracts camera position from QuadBit world vertices, then projects with the emulated GTE path.
+- `gte_rtps @ 0x0046DBC0` consumes separate GTE rotation registers at `0x00610B20...` and translation registers at:
+  - X: `0x00610B34`
+  - Y: `0x00610B38`
+  - Z: `0x00610B3C`
+- Previous compatibility wrapper restored camera rotation with `gte_SetRotMatrix @ 0x0046D7B0` but did **not** clear those translation registers.
+
+### Strong retail comparison
+- Retail sibling effect renderer `CSimpleTexturedRibbon_Display @ 0x0040AA00` follows the same camera-relative GTE projection pattern.
+- At `0x0040ABD2` it calls `gte_SetRotMatrix @ 0x0046D7B0`.
+- Immediately after, at `0x0040ABD7`, it calls `0x0046E460`, a helper whose entire body zeros `0x00610B34/38/3C`.
+- Only then does it execute the GTE transform/projection.
+- This is the critical difference: after camera subtraction, translation must be zero. Inheriting model-local GTE translation can move world effects relative to the correctly rendered owner as camera/model state changes.
+
+### New QuadBit candidate fix + probe
+- `SpideyDisplayQuadBitListCameraAnchored` now:
+  1. rebuilds/restores the DCX camera-projection matrix as before;
+  2. samples the preexisting GTE translation registers;
+  3. restores the active camera rotation;
+  4. calls retail zero-translation helper `0x0046E460`;
+  5. calls retail `DisplayQuadBitList`.
+- New log marker:
+  `quadbit_gte_state ... pre_trans=X,Y,Z ... action=zero_before_retail`
+- Startup marker now includes:
+  `gte_zero_trans=0x0046E460`
+- The probe logs the first eight calls even if translation is zero, plus later nonzero samples up to the cap. A nonzero `pre_trans` directly confirms the state leak existed in the old path.
+
+### Build validation
+- Forced-clean matching VC6 compile/link: PASS twice after source changes.
+- Candidate `Release/spider.dll` before commit/revision stamping:
+  - size: 909,312 bytes
+  - SHA-256: `8f65f350ec16a41f0f85478b0adf7053e52b2ca6f30e11995abbfee85b44ef4a`
+  - embedded `gte_zero_trans=0x0046E460` marker: confirmed.
+- No Venom Chase behavior/UI code, Mysterio AI cadence code, or FireBoobies cadence code was changed.
+
+### Next runtime test
+Run only through `TEST_LATEST_BUILD.bat`. In the Mysterio fight verify:
+1. the health fill is inside its holder instead of fragmented across the screen;
+2. the helmet/head-circle effect stays attached while rotating/moving the camera;
+3. blob shadows remain under NPCs while rotating/moving the camera;
+4. if convenient, observe another QuadBit-derived effect such as Venom/Mysterio particles.
+After exit, inspect the newly archived consolidated log for `fill_qpoly_live_passthrough`, `gte_zero_trans=0x0046E460`, and `quadbit_gte_state`.
