@@ -24,15 +24,8 @@ function Fail([string]$Message, [int]$Code = 1) {
 function Invoke-Git {
     param([Parameter(Mandatory = $true)][string[]]$GitArgs)
 
-    $oldPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $output = & git.exe @GitArgs 2>&1
-        $code = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $oldPreference
-    }
-
+    $output = & git.exe @GitArgs 2>&1
+    $code = $LASTEXITCODE
     if ($code -ne 0) {
         if ($output) {
             $output | ForEach-Object { Write-Host $_ }
