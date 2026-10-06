@@ -74,8 +74,14 @@ Telemetry:
 
 Forced-clean matching VC6 build: **PASS**.
 
+Installed candidate:
+- behavior commit: `795367ce3ddabb05c2aaee843f838e54750f75cf`;
+- proxy SHA-256: `05810A992991ACF4B47FF0FC6C4AE536251C53F0B17BCA9B02888F8ABAB35F4B`;
+- renderer11 SHA-256: `818BB56194A6DE5A8E3C92BFF661B244412BFAC2D68AA023EFB51539C11446CB`;
+- input11 SHA-256: `A512066ABEA6F2A4523ED78CC2ACCA48E5D888853E514B54296B36513FDC738E`;
+- prepare/install + 32-bit modern-input preflight: **PASS**.
+
 Next action:
-- commit/install this authored-cadence player-AI candidate;
 - test via `TEST_LATEST_BUILD.bat`;
 - replay Chase Venom;
 - verify whether the approach angle/path to `Inside01` changes and whether Spider-Man naturally enters/exits the building;

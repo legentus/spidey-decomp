@@ -403,6 +403,15 @@ New telemetry:
 
 Forced-clean matching VC6 build of this source: **PASS**.
 
+Installed untested authored-cadence player-AI candidate:
+- behavior commit: `795367ce3ddabb05c2aaee843f838e54750f75cf`;
+- proxy SHA-256: `05810A992991ACF4B47FF0FC6C4AE536251C53F0B17BCA9B02888F8ABAB35F4B`;
+- renderer11 SHA-256: `818BB56194A6DE5A8E3C92BFF661B244412BFAC2D68AA023EFB51539C11446CB`;
+- input11 SHA-256: `A512066ABEA6F2A4523ED78CC2ACCA48E5D888853E514B54296B36513FDC738E`;
+- prepare/install pipeline: **PASS**;
+- modern-input 32-bit ABI preflight: **PASS**;
+- game intentionally not launched.
+
 Next runtime action:
 1. install the authored-cadence player-AI candidate;
 2. run `TEST_LATEST_BUILD.bat`;
