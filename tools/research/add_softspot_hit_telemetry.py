@@ -34,7 +34,9 @@ static int __fastcall SpideyMysterioSoftSpotHitTelemetry(
 		*(CPlayer* volatile*)0x006A9038;
 	if (player)
 		playerWebMode =
-			(int)player->field_8F8;
+			(int)*(volatile unsigned char*)(
+				(unsigned char*)player +
+				0x8F8);
 
 	const int hpBefore =
 		spot ?

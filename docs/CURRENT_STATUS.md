@@ -14028,3 +14028,74 @@ A new telemetry-only vtable wrapper logs every soft-spot hit and then calls reta
 This telemetry is intended to determine whether the user's ordinary web attack is really arriving with a destructive retail hit class before changing any damage behavior.
 
 Health-bar alignment remains unresolved and is not part of this laser/crash candidate.
+
+
+## 2026-10-06 — Mysterio laser crash follow-up: SetPos-only authored cadence
+
+Two broad Mysterio cadence experiments are now explicitly RETIRED:
+
+1. Whole `CMysterio::AI` 20-Hz wrapper
+   - changed unrelated boss behavior/state upkeep;
+   - coincided with incorrect node vulnerability and a runtime crash;
+   - do not restore.
+
+2. Whole `CMysterio::FireBoobies` 20-Hz wrapper
+   - user reported crash exactly when Mysterio began firing lasers;
+   - static RE shows this was also too broad because FireBoobies itself owns a multi-stage state machine and already uses elapsed-time `CBaddy::RunTimer` internally;
+   - do not restore.
+
+### Retail FireBoobies finding
+
+Detailed disassembly of `CMysterio::FireBoobies @ 0x0045D200` shows:
+- `field_320` is the attack substate;
+- substate 0 performs attack setup;
+- substate 1 waits for animation/state readiness then transitions to substate 2;
+- substate 2 calls `CBaddy::RunTimer(&field_394)`, refreshes/aims the two laser beams, and invokes `CMysterioLaser::SetPos @ 0x0045B5E0`;
+- therefore the state machine itself must continue to execute every native 60-Hz Logic update.
+
+The key authored-cadence difference is below that state machine:
+- at original 20 FPS, active substate-2 beam `SetPos` geometry/collision refresh happens once per ~50 ms update;
+- at native 60 FPS, the same two direct SetPos calls can execute every ~16.7 ms;
+- this is a much narrower and safer frame-rate dependency than throttling Mysterio AI or FireBoobies.
+
+### New candidate
+
+Global timer remains native 60 Hz.
+
+`CMysterio::AI` remains 60 Hz.
+
+`CMysterio::FireBoobies` remains 60 Hz and is now telemetry-only/pass-through.
+
+Only the two beam SetPos callsites are authored-cadence sampled:
+- left beam: `0x0045D3AB -> CMysterioLaser::SetPos @ 0x0045B5E0`;
+- right beam: `0x0045D44E -> CMysterioLaser::SetPos @ 0x0045B5E0`.
+
+Policy:
+- first SetPos for a beam runs immediately;
+- later calls use retail canonical clock `0x006B4CA8`;
+- calls less than 3 canonical ticks after the previous retail SetPos return 0 to FireBoobies without advancing beam geometry/collision;
+- every >=3 tick boundary calls untouched retail SetPos;
+- retail FireBoobies interprets return 0 as “beam still active”, so held samples do not force an attack-state transition;
+- existing elapsed-time laser-liveness wrapper remains active, allowing the beam to survive the held 60-Hz-only samples until the next authored SetPos update.
+
+Telemetry:
+- `mysterio_laser_setpos_20hz_stats`;
+- `mysterio_laser_attack event=retail_passthrough ... policy=fireboobies_60hz_setpos_20hz`.
+
+### Soft-spot telemetry compile correction
+
+The first attempt referenced decomp-header member `CPlayer::field_8F8`, but that retail offset is not declared in the current CPlayer header. Matching VC6 failed with C2039 at main.cpp(4446).
+
+Corrected telemetry reads the retail byte directly:
+`*(unsigned char*)((unsigned char*)player + 0x8F8)`.
+
+No damage behavior is changed.
+
+### Build validation
+
+- `git diff --check`: PASS.
+- forced-clean matching VC6 build: PASS.
+- full link of `Release\\spider.dll`: PASS.
+- no runtime test has been performed on the SetPos-only candidate yet.
+
+Health-bar alignment remains unresolved and unchanged.

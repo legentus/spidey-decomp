@@ -2881,3 +2881,18 @@ New CSoftSpot telemetry:
 - telemetry-only wrapper at vtable slot `0x0053BB94` records hit flags, damage, part, HP and player web mode, then calls retail unchanged.
 
 Next run should test Mysterio long enough for several laser attacks and deliberately try the ordinary web attack on one soft spot. Exit normally if stable.
+
+
+## Mysterio laser current safe frontier — SetPos-only cadence
+
+Do NOT restore whole-Mysterio-AI or whole-FireBoobies throttling; both caused runtime instability.
+
+Current candidate keeps all boss/state logic at 60 Hz and samples only the two `CMysterioLaser::SetPos` calls at the authored 3-canonical-tick boundary:
+- 0x0045D3AB
+- 0x0045D44E
+
+Existing laser liveness compatibility remains active.
+
+Soft-spot telemetry is pass-through only and now reads player web mode from raw retail offset +0x8F8.
+
+Forced-clean matching VC6 build + link PASS. Next action is one Mysterio runtime test.

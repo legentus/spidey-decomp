@@ -4443,7 +4443,9 @@ static int __fastcall SpideyMysterioSoftSpotHitTelemetry(
 		*(CPlayer* volatile*)0x006A9038;
 	if (player)
 		playerWebMode =
-			(int)player->field_8F8;
+			(int)*(volatile unsigned char*)(
+				(unsigned char*)player +
+				0x8F8);
 
 	const int hpBefore =
 		spot ?
@@ -4539,39 +4541,187 @@ typedef void (__fastcall *SpideyRetailMysterioFireBoobiesFn)(
 		CMysterio*,
 		void*);
 
-static CMysterio* gSpideyMysterioLaser20Boss =
+typedef int (__fastcall *SpideyRetailMysterioLaserSetPosFn)(
+		CMysterioLaser*,
+		void*,
+		const CVector*,
+		const CSVector*);
+
+struct SpideyMysterioLaserSetPosGate
+{
+	CMysterioLaser* laser;
+	long lastTick;
+	int valid;
+};
+
+static SpideyMysterioLaserSetPosGate gSpideyMysterioLaserSetPosGate[2] =
+{
+	{ 0, 0, 0 },
+	{ 0, 0, 0 }
+};
+
+static unsigned long gSpideyMysterioLaserSetPosCalls =
 	0;
-static long gSpideyMysterioLaser20LastTick =
+static unsigned long gSpideyMysterioLaserSetPosRetailCalls =
 	0;
-static int gSpideyMysterioLaser20TickValid =
+static unsigned long gSpideyMysterioLaserSetPosHeldCalls =
 	0;
-static int gSpideyMysterioLaser20AccumulatedTicks =
+static unsigned long gSpideyMysterioLaserSetPosMaxElapsed =
 	0;
-static unsigned long gSpideyMysterioLaser20Calls =
-	0;
-static unsigned long gSpideyMysterioLaser20RetailCalls =
-	0;
-static unsigned long gSpideyMysterioLaser20HeldCalls =
-	0;
-static unsigned long gSpideyMysterioLaser20MaxElapsed =
+static int gSpideyMysterioLaserSetPosInstalled =
 	0;
 
-static void SpideyResetMysterioLaser20State(
-		CMysterio* mysterio)
+static SpideyMysterioLaserSetPosGate*
+SpideyGetMysterioLaserSetPosGate(
+		CMysterioLaser* laser)
 {
-	gSpideyMysterioLaser20Boss =
-		mysterio;
-	gSpideyMysterioLaser20LastTick =
+	for (int i = 0; i < 2; ++i)
+	{
+		if (gSpideyMysterioLaserSetPosGate[i].laser ==
+			laser)
+		{
+			return &gSpideyMysterioLaserSetPosGate[i];
+		}
+	}
+
+	for (int freeIndex = 0; freeIndex < 2; ++freeIndex)
+	{
+		if (!gSpideyMysterioLaserSetPosGate[freeIndex].laser)
+		{
+			gSpideyMysterioLaserSetPosGate[freeIndex].laser =
+				laser;
+			gSpideyMysterioLaserSetPosGate[freeIndex].lastTick =
+				0;
+			gSpideyMysterioLaserSetPosGate[freeIndex].valid =
+				0;
+			return &gSpideyMysterioLaserSetPosGate[freeIndex];
+		}
+	}
+
+	// Mysterio owns at most two concurrent beam objects. If a pointer is
+	// replaced between attacks, recycle the oldest slot deterministically.
+	int slot =
+		gSpideyMysterioLaserSetPosGate[0].lastTick <=
+			gSpideyMysterioLaserSetPosGate[1].lastTick ?
+			0 :
+			1;
+	gSpideyMysterioLaserSetPosGate[slot].laser =
+		laser;
+	gSpideyMysterioLaserSetPosGate[slot].lastTick =
 		0;
-	gSpideyMysterioLaser20TickValid =
+	gSpideyMysterioLaserSetPosGate[slot].valid =
 		0;
-	gSpideyMysterioLaser20AccumulatedTicks =
-		0;
+	return &gSpideyMysterioLaserSetPosGate[slot];
+}
+
+static int __fastcall SpideyMysterioLaserSetPos20Hz(
+		CMysterioLaser* laser,
+		void*,
+		const CVector* position,
+		const CSVector* rotation)
+{
+	SpideyRetailMysterioLaserSetPosFn retail =
+		(SpideyRetailMysterioLaserSetPosFn)0x0045B5E0;
+
+	++gSpideyMysterioLaserSetPosCalls;
+
+	if (!laser ||
+		!SpideyIsMysterioBossActive())
+	{
+		return retail(
+			laser,
+			0,
+			position,
+			rotation);
+	}
+
+	SpideyMysterioLaserSetPosGate* gate =
+		SpideyGetMysterioLaserSetPosGate(
+			laser);
+	const long now =
+		*(volatile long*)0x006B4CA8;
+
+	if (!gate->valid)
+	{
+		gate->lastTick =
+			now;
+		gate->valid =
+			1;
+
+		++gSpideyMysterioLaserSetPosRetailCalls;
+		return retail(
+			laser,
+			0,
+			position,
+			rotation);
+	}
+
+	int elapsed =
+		(int)(
+			now -
+			gate->lastTick);
+	if (elapsed < 0 ||
+		elapsed > 30)
+	{
+		// New attack / wrap / stale slot: resynchronize immediately.
+		elapsed =
+			3;
+	}
+
+	if (elapsed <
+		3)
+	{
+		++gSpideyMysterioLaserSetPosHeldCalls;
+		// Retail FireBoobies treats zero as "beam still active"; do not
+		// advance beam geometry/collision on this 60-Hz-only sample.
+		return 0;
+	}
+
+	gate->lastTick =
+		now;
+
+	++gSpideyMysterioLaserSetPosRetailCalls;
+	if ((unsigned long)elapsed >
+		gSpideyMysterioLaserSetPosMaxElapsed)
+	{
+		gSpideyMysterioLaserSetPosMaxElapsed =
+			(unsigned long)elapsed;
+	}
+
+	return retail(
+		laser,
+		0,
+		position,
+		rotation);
+}
+
+static void SpideyLogMysterioLaserSetPosStats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"mysterio_laser_setpos_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu callsites=0x0045D3AB,0x0045D44E retail=0x0045B5E0 policy=setpos_only_20hz_fireboobies_ai_60hz\\n",
+		gSpideyMysterioLaserSetPosInstalled,
+		gSpideyMysterioLaserSetPosCalls,
+		gSpideyMysterioLaserSetPosRetailCalls,
+		gSpideyMysterioLaserSetPosHeldCalls,
+		gSpideyMysterioLaserSetPosMaxElapsed);
+	fclose(f);
 }
 
 // @Ok
-// Cadence-gate only the authored state-6 FireBoobies routine. CMysterio::AI
-// itself remains native 60 Hz so damage/state/object upkeep is never starved.
+// FireBoobies telemetry remains pass-through. The state machine itself must run
+// every 60-Hz Logic update; only the beam SetPos sampling is authored-cadence.
+// CMysterio::AI itself remains native 60 Hz so damage/state/object upkeep is
+// never starved.
+static unsigned long gSpideyMysterioFireBoobiesCalls =
+	0;
+
 static void __fastcall SpideyMysterioFireBoobiesTelemetry(
 		CMysterio* mysterio,
 		void*)
@@ -4579,178 +4729,57 @@ static void __fastcall SpideyMysterioFireBoobiesTelemetry(
 	SpideyRetailMysterioFireBoobiesFn retail =
 		(SpideyRetailMysterioFireBoobiesFn)0x0045D200;
 
-	++gSpideyMysterioLaser20Calls;
-
-	if (!mysterio ||
-		!SpideyIsMysterioBossActive())
-	{
-		if (gSpideyMysterioLaser20Boss != mysterio ||
-			gSpideyMysterioLaser20TickValid)
-		{
-			SpideyResetMysterioLaser20State(
-				mysterio);
-		}
-
-		retail(
-			mysterio,
-			0);
-		return;
-	}
-
-	if (gSpideyMysterioLaser20Boss !=
-		mysterio)
-	{
-		SpideyResetMysterioLaser20State(
-			mysterio);
-	}
+	++gSpideyMysterioFireBoobiesCalls;
 
 	const unsigned long now =
 		(unsigned long)*(volatile long*)0x006B4CA8;
-
-	// A large gap means state 6 ended and a new laser attack has begun.
-	if (gSpideyMysterioLaser20TickValid &&
-		(long)(
-			now -
-			(unsigned long)gSpideyMysterioLaser20LastTick) >
-			6)
-	{
-		SpideyResetMysterioLaser20State(
-			mysterio);
-	}
-
-	if (!gSpideyMysterioLaser20TickValid)
-	{
-		gSpideyMysterioLaser20LastTick =
-			(long)now;
-		gSpideyMysterioLaser20TickValid =
-			1;
-
-		int initialElapsed =
-			mysterio->field_80;
-		if (initialElapsed < 0)
-			initialElapsed = 0;
-		if (initialElapsed > 6)
-			initialElapsed = 6;
-
-		gSpideyMysterioLaser20AccumulatedTicks =
-			initialElapsed;
-	}
-	else
-	{
-		int elapsed =
-			(int)(
-				(long)now -
-				gSpideyMysterioLaser20LastTick);
-		gSpideyMysterioLaser20LastTick =
-			(long)now;
-
-		if (elapsed < 0)
-			elapsed = 0;
-		if (elapsed > 6)
-			elapsed = 6;
-
-		gSpideyMysterioLaser20AccumulatedTicks +=
-			elapsed;
-	}
-
 	const int stateBefore =
-		(int)mysterio->field_31C.bothFlags;
+		mysterio ?
+			(int)mysterio->field_31C.bothFlags :
+			-1;
 	const int substateBefore =
-		mysterio->dumbAssPad;
-	const int cooldown39C =
-		mysterio->field_39C;
-	const int leftArm =
-		mysterio->field_34C != 0;
-	const int rightArm =
-		mysterio->field_350 != 0;
-
-	if (gSpideyMysterioLaser20AccumulatedTicks <
-		3)
-	{
-		++gSpideyMysterioLaser20HeldCalls;
-
-		FILE* heldLog =
-			SpideyOpenConsolidatedLog(
-				"TIMING");
-		if (heldLog)
-		{
-			fprintf(
-				heldLog,
-				"mysterio_laser_attack event=hold call=%lu tick=%lu accumulated=%d state=%d substate=%d cooldown39c=%d arms=%d,%d boss_active=1 policy=fireboobies_20hz\\n",
-				gSpideyMysterioLaser20Calls,
-				now,
-				gSpideyMysterioLaser20AccumulatedTicks,
-				stateBefore,
-				substateBefore,
-				cooldown39C,
-				leftArm,
-				rightArm);
-			fclose(heldLog);
-		}
-		return;
-	}
-
-	int simElapsed =
-		gSpideyMysterioLaser20AccumulatedTicks;
-	if (simElapsed < 1)
-		simElapsed = 1;
-	if (simElapsed > 6)
-		simElapsed = 6;
-
-	const int originalField80 =
-		mysterio->field_80;
-	mysterio->field_80 =
-		simElapsed;
+		mysterio ?
+			mysterio->dumbAssPad :
+			-1;
+	const int elapsed =
+		mysterio ?
+			(int)mysterio->field_80 :
+			0;
 
 	retail(
 		mysterio,
 		0);
 
-	mysterio->field_80 =
-		originalField80;
-	gSpideyMysterioLaser20AccumulatedTicks =
-		0;
-
-	++gSpideyMysterioLaser20RetailCalls;
-	if ((unsigned long)simElapsed >
-		gSpideyMysterioLaser20MaxElapsed)
-	{
-		gSpideyMysterioLaser20MaxElapsed =
-			(unsigned long)simElapsed;
-	}
-
 	const int stateAfter =
-		(int)mysterio->field_31C.bothFlags;
+		mysterio ?
+			(int)mysterio->field_31C.bothFlags :
+			-1;
 	const int substateAfter =
-		mysterio->dumbAssPad;
+		mysterio ?
+			mysterio->dumbAssPad :
+			-1;
 
-	FILE* log =
-		SpideyOpenConsolidatedLog(
-			"TIMING");
-	if (log)
+	if (gSpideyMysterioFireBoobiesCalls <=
+		512)
 	{
-		fprintf(
-			log,
-			"mysterio_laser_attack event=retail call=%lu retail_call=%lu tick=%lu state=%d->%d substate=%d->%d sim_elapsed=%d cooldown39c=%d arms=%d,%d boss_active=1 policy=fireboobies_20hz\\n",
-			gSpideyMysterioLaser20Calls,
-			gSpideyMysterioLaser20RetailCalls,
-			now,
-			stateBefore,
-			stateAfter,
-			substateBefore,
-			substateAfter,
-			simElapsed,
-			cooldown39C,
-			leftArm,
-			rightArm);
-		fclose(log);
-	}
-
-	if (stateAfter !=
-		6)
-	{
-		SpideyResetMysterioLaser20State(
-			mysterio);
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (log)
+		{
+			fprintf(
+				log,
+				"mysterio_laser_attack event=retail_passthrough call=%lu tick=%lu state=%d->%d substate=%d->%d field80=%d boss_active=%d policy=fireboobies_60hz_setpos_20hz\\n",
+				gSpideyMysterioFireBoobiesCalls,
+				now,
+				stateBefore,
+				stateAfter,
+				substateBefore,
+				substateAfter,
+				elapsed,
+				SpideyIsMysterioBossActive());
+			fclose(log);
+		}
 	}
 }
 
@@ -4987,23 +5016,7 @@ static int SpideyIsMysterioBossActive()
 // ticks while boss type 311 is active. All other Mysterio AI logic, damage
 // handling, animation/state upkeep, camera, physics and rendering remain 60 Hz.
 
-static void SpideyLogMysterioLaser20Stats()
-{
-	FILE* f =
-		SpideyOpenConsolidatedLog(
-			"TIMING");
-	if (!f)
-		return;
 
-	fprintf(
-		f,
-		"mysterio_laser_20hz_stats calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu boss_type=311 callsite=0x0045F489 policy=fireboobies_only_20hz_global_ai_60hz\\n",
-		gSpideyMysterioLaser20Calls,
-		gSpideyMysterioLaser20RetailCalls,
-		gSpideyMysterioLaser20HeldCalls,
-		gSpideyMysterioLaser20MaxElapsed);
-	fclose(f);
-}
 
 struct SpideyChaseSchedulerStats
 {
@@ -7189,6 +7202,22 @@ static void SpideyInstallHighFpsTimingCompat()
 			0x0045D200,
 			(void*)&SpideyMysterioFireBoobiesTelemetry,
 			"mysterio_laser_attack_telemetry");
+
+	const int mysterioLaserSetPosLeftInstalled =
+		SpideyPatchDirectCall(
+			0x0045D3AB,
+			0x0045B5E0,
+			(void*)&SpideyMysterioLaserSetPos20Hz,
+			"mysterio_laser_setpos_left_20hz");
+	const int mysterioLaserSetPosRightInstalled =
+		SpideyPatchDirectCall(
+			0x0045D44E,
+			0x0045B5E0,
+			(void*)&SpideyMysterioLaserSetPos20Hz,
+			"mysterio_laser_setpos_right_20hz");
+	gSpideyMysterioLaserSetPosInstalled =
+		mysterioLaserSetPosLeftInstalled &&
+		mysterioLaserSetPosRightInstalled;
 	const unsigned long foundDestructor =
 		(unsigned long)mysterioLaserVtable[0];
 	const unsigned long foundMove =
@@ -7234,7 +7263,7 @@ static void SpideyInstallHighFpsTimingCompat()
 	{
 		fprintf(
 			f,
-			"high_fps_compat mysterio_laser=%d softspot_hit_telemetry=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_fireboobies_20hz_cadence\n",
+			"high_fps_compat mysterio_laser=%d softspot_hit_telemetry=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_setpos_20hz_sampling\n",
 			mysterioLaserInstalled,
 			mysterioSoftSpotHitTelemetryInstalled,
 			mysterioLaserAttackTelemetryInstalled,
@@ -16685,7 +16714,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 				0;
 		}
 
-		SpideyLogMysterioLaser20Stats();
+		SpideyLogMysterioLaserSetPosStats();
 		SpideyLogChasePlayerAI20Stats();
 		SpideyLogChaseCameraAI20Stats();
 		SpideyLogChaseBaddyAI20Stats();
