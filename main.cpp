@@ -15992,10 +15992,13 @@ static unsigned long gSpideyPacingUnexpectedVblankDelta = 0;
 static unsigned long gSpideyPacingLastIntervalMs = 0;
 static int gSpideyPacingBeginPeriodOne = 0;
 
-// Native-60 retail timer delivery: one canonical vblank per active callback.
-// The names are retained to keep the completed 20-FPS reference diff small.
-static const unsigned long kSpideyPacingDiagnosticHz = 60UL;
-static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 1UL;
+// Temporary Mysterio ground-truth reference: deliver the untouched retail
+// TimerCallback at ~20 Hz. Retail converts each ~50 ms interval to roughly
+// three canonical 60-Hz ticks, reproducing the authored full-engine 20-FPS
+// update quantum while preserving canonical elapsed time. Revert to 60/1
+// after the Mysterio laser reference trace is captured.
+static const unsigned long kSpideyPacingDiagnosticHz = 20UL;
+static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 3UL;
 
 static int SpideyPatchMainImport(
 		const char* dllName,
@@ -16197,8 +16200,8 @@ static void CALLBACK SpideyPacingTimerThunk(
 			gSpideyPacingVirtualTotalMs);
 	if (interval < 1)
 		interval = 1;
-	if (interval > 20)
-		interval = 20;
+	if (interval > 60)
+		interval = 60;
 
 	// Advance the delivery schedule regardless of retail pause state. Retail's
 	// original 16 ms periodic timer kept firing while paused too; TimerCallback
@@ -16371,7 +16374,7 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	{
 		fprintf(
 			f,
-			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=17 target_hz=60 expected_vblanks_per_callback=1 policy=periodic_1ms_dispatch_16_17ms_60hz source_clock=%s retail_callback_preserved=1\n",
+			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=51 target_hz=20 expected_vblanks_per_callback=3 policy=mysterio_reference_periodic_1ms_dispatch_50ms_full_engine_20hz source_clock=%s retail_callback_preserved=1\n",
 			delay,
 			resolution,
 			flags,
@@ -16535,7 +16538,7 @@ static int SpideyInstallModernTimerPacing()
 	{
 		fprintf(
 			f,
-			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=60 expected_vblanks_per_callback=1 policy=periodic_1ms_source_dispatch_16_17ms_60hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=20 expected_vblanks_per_callback=3 policy=mysterio_reference_periodic_1ms_source_dispatch_50ms_full_engine_20hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
 			setInstalled,
 			killInstalled,
 			(unsigned long)gSpideyOriginalTimeSetEvent,

@@ -2837,3 +2837,12 @@ User requires:
 See `docs/MYSTERIO_60FPS_FRONTIER_2026-10-06.md`.
 
 Do not change Venom Chase phase-lock behavior while working on Mysterio.
+
+
+### Mysterio 20-FPS reference now prepared
+
+60-FPS restore point: `0b3586fb`.
+
+Current diagnostic changes only timer delivery to full-engine 20 FPS (20 Hz callback / ~3 canonical ticks). Mysterio UI fix, retail-camera guard, and FireBoobies telemetry remain identical.
+
+After one Mysterio fight run, compare attack starts/tick spacing and restore timer to 60 before making the production laser fix.

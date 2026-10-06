@@ -13855,3 +13855,24 @@ Full details:
 `docs/MYSTERIO_60FPS_FRONTIER_2026-10-06.md`
 
 Next: checkpoint this 60-FPS candidate, then make a temporary full-engine 20-FPS reference variant with the same telemetry to compare actual laser attack cadence.
+
+
+### Temporary Mysterio full-engine 20-FPS reference build
+
+The preserved 60-FPS Mysterio UI/camera/telemetry source is commit:
+`0b3586fb`.
+
+A temporary diagnostic variant now changes only the modern timer dispatcher:
+- target callback cadence: 20 Hz;
+- expected retail vblank advance per active callback: 3;
+- interval clamp widened from 20 ms to 60 ms;
+- first delivery target ~51 ms;
+- retail TimerCallback itself remains untouched.
+
+Purpose:
+- reproduce the original full-engine 20-FPS Mysterio behavior;
+- compare `mysterio_laser_attack` canonical attack timing against 60 FPS;
+- judge visible laser frequency/pattern;
+- simultaneously sanity-check the new Mysterio health-fill alignment and retail-only boss-camera policy.
+
+The whole game running at about 20 FPS is intentional in this diagnostic and must be reverted after the reference log is captured.
