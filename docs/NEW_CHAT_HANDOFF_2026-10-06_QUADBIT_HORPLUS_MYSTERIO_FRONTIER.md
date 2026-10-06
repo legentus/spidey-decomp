@@ -368,3 +368,55 @@ Regardless:
 - Venom Chase is frozen known-good;
 - Mysterio web-node damage is a separate validated follow-up;
 - Venom wrap/tentacle path is CNonRenderedBit and requires separate renderer tracing.
+
+
+## 12. Objective telemetry from pending test archive 20261006-170406
+
+A new archived harness log completed while this handoff was being assembled:
+
+`logs\20261006-170406\spidey-decomp.log`
+
+The user's visual verdict was not yet supplied at handoff time. Do not infer whether the effect drift is visually fixed until the user reports it.
+
+Runtime identity:
+- session revision: `c39b9a430ebd5e08ad4e2798a445f47eabc8a69c` (docs-only lineage over behavior commit `3cc47634`);
+- proxy SHA-256: `90E45EF0E45C5CD67DE6D0476A3479E4BE940046D153359FEE99970FDC3175EE`;
+- renderer11 SHA-256: `2CB3DAD337967FDB8998F843F7A2BD325361B5C894DF40E3A63D9AFFF7A304AE`;
+- input11 SHA-256: `753D082EFD52BC971F867C016F2F014916A1ECEB87A03387B323AE9C34C3D3BF`.
+
+QuadBit Hor+ execution proof:
+- `quadbit_camera_anchor installed=1`;
+- both Hor+ QPoly3D callsite patches installed = `1,1`;
+- wrapper executed;
+- `scalar=0.750000` at logical width 2560;
+- sample X coordinates were actually transformed, e.g. `1030 -> 1092.5`, `1425 -> 1388.75`.
+
+Therefore any visual result from this run is a valid test of the `3cc47634` Hor+ hypothesis, not a stale DLL or inactive hook.
+
+### Health-bar telemetry now gives a decisive coordinate relationship
+
+The current Mysterio QPoly fill is already in the same live-resolution rectangle as the compacted holder BEFORE the Mysterio QPoly wrapper applies the generic health-fill scaling again.
+
+Example pair:
+- holder texture after generic compaction: authored/panel rect `268..277 x 32..42`;
+- converting that holder rect to 2560x1440 by retail 512x240 scaling gives `1340..1385 x 192..252`;
+- immediately following Mysterio QPoly fill before generic compaction is exactly `1340..1385 x 192..252`.
+
+Frame example:
+- holder frame after compaction `416..428 x 32..42`;
+- live conversion = `2080..2140 x 192..252`;
+- following QPoly fill before generic compaction = exactly `2080..2140 x 192..252`.
+
+This repeats across the holder-frame segments.
+
+Conclusion:
+- the Mysterio QPoly fill sites `0x00464C8A`, `0x00464EA5`, `0x004650B0` are ALREADY live-resolution-scaled to match the holder's eventual live rectangle;
+- routing those live-space QPolys through `SpideyCompatHealthBarQPoly2D` applies an additional HUD compaction and causes the visible fill/holder separation;
+- the next health candidate should make the active-Mysterio QPoly path PASS THROUGH unchanged after telemetry;
+- keep authored-space flat/Gouraud handling separate; do not lump them together with the QPoly path.
+
+This is now a much stronger health-bar diagnosis than the earlier generic scaling hypothesis.
+
+Other objective telemetry from this run:
+- Mysterio laser SetPos sampling installed and executed: calls=16, retail_calls=6, held_calls=10, max_elapsed=3;
+- ordinary player web mode 1 again delivered destructive soft-spot flag `0x04` and 100 damage, confirming the web-node issue independently.

@@ -14285,3 +14285,26 @@ Expected log:
 - QuadBit install line should show both Hor+ call patches = 1;
 - `quadbit_horplus` samples should show scalar 0.75 at 2560x1440;
 - `mysterio_health_alignment` should give holder and fill bounds needed for the exact health fix.
+
+
+## 2026-10-06 17:04 — pending Hor+ test log captured before visual verdict
+
+Archive:
+`logs/20261006-170406/spidey-decomp.log`
+
+Runtime revision `c39b9a43` carries behavior commit `3cc47634`.
+
+Objective proof:
+- QuadBit camera anchor installed;
+- both Hor+ QPoly3D call patches installed and executed;
+- 2560x1440 aspect scalar = 0.75;
+- live samples show X correction occurred.
+
+Do not classify the visual effect result until user reports it.
+
+Mysterio health telemetry is decisive:
+- compacted holder rect `268..277 x 32..42` maps to live `1340..1385 x 192..252`;
+- Mysterio QPoly fill arrives BEFORE our current generic compactor at exactly `1340..1385 x 192..252`;
+- same exact relationship repeats for holder frame segments.
+
+Therefore Mysterio QPoly health geometry is already correctly live-scaled to the holder before the current wrapper; the current Mysterio QPoly wrapper double-compacts it. Next health fix should pass active-Mysterio QPoly calls through unchanged and treat authored flat/Gouraud calls separately.
