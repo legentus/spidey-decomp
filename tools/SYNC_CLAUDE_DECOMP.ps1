@@ -67,28 +67,10 @@ if ($branch -ne "dev") {
     Fail "Expected local branch 'dev', but current branch is '$branch'. Switch back to dev before syncing."
 }
 
-$dirtyParts = @()
-
-& git diff --quiet
-if ($LASTEXITCODE -ne 0) {
-    $dirtyParts += (& git diff --name-only)
-}
-
-& git diff --cached --quiet
-if ($LASTEXITCODE -ne 0) {
-    $dirtyParts += (& git diff --cached --name-only)
-}
-
-$untracked = @(& git ls-files --others --exclude-standard)
-if ($LASTEXITCODE -ne 0) {
-    Fail "Could not inspect untracked files."
-}
-$dirtyParts += $untracked
-
-$dirtyParts = @($dirtyParts | Where-Object { $_ } | Sort-Object -Unique)
-if ($dirtyParts.Count -gt 0) {
+$status = Git-Text @("status", "--porcelain=v1", "--untracked-files=all")
+if ($status) {
     Write-Host "[BLOCKED] Local working tree is not clean:" -ForegroundColor Yellow
-    $dirtyParts | ForEach-Object { Write-Host ("  " + $_) }
+    Write-Host $status
     Fail "Commit, stash, or intentionally remove local changes before syncing. Nothing was fetched/merged into the working tree."
 }
 
