@@ -21,8 +21,10 @@ New trace conclusions:
 Retail disassembly breakthrough:
 - type-3 code 10 does `player[0x260]=1` **and** `E2D=-127` every synth call;
 - the prior 20-Hz sample/hold wrapper preserved `E2D/E2E` on held native-60 frames but dropped the type-3 latch side effects;
-- the new candidate reasserts active type-3 latches on held frames without advancing their timers or changing the sampled final axes;
-- forced-clean VC6 matching build: **PASS**.
+- candidate commit `ee6022150a0911d5503495a8f1d04ded55097bc7` reasserts active type-3 latches on held frames without advancing their timers or changing the sampled final axes;
+- forced-clean VC6 matching build: **PASS**;
+- prepare/install: **PASS**;
+- installed proxy SHA-256: `F6F493370BE87F73F1FCBC9C920ADAB8A3EA078DFEFB3A323123616F350EE072`.
 
 New telemetry:
 - `type3_latch_calls`

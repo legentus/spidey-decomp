@@ -72,15 +72,23 @@ Direct retail disassembly of `CPlayer::SynthesizeAnalogueInput @ 0x004BC300`, ty
 
 The prior 20-Hz sample/hold wrapper preserved the analogue axes on the two held native-60 frames but did **not** reassert the type-3 latch bytes. The rest of `CPlayer` still runs at 60 Hz, so the scripted action latch could disappear on two out of every three frames even while the held analogue direction remained present.
 
-New working-tree candidate:
+New behavior candidate:
+- commit `ee6022150a0911d5503495a8f1d04ded55097bc7` — `timing: preserve Chase type3 held latches`;
 - reassert all active type-3 latch side effects on held synth frames without advancing worker timers;
 - preserve the already-sampled final `E2D/E2E` axes so worker-order precedence is unchanged;
 - add `type3_latch_calls`, `type3_latch_writes`, `type3_latch_dynamic`, and `type3_latch_directional` telemetry;
-- forced-clean VC6 matching build: **PASS**.
+- forced-clean VC6 matching build: **PASS**;
+- prepare/install pipeline: **PASS**, game intentionally not launched.
+
+Installed untested candidate identity:
+- behavior revision: `ee6022150a0911d5503495a8f1d04ded55097bc7`;
+- proxy SHA-256: `F6F493370BE87F73F1FCBC9C920ADAB8A3EA078DFEFB3A323123616F350EE072`;
+- renderer11 SHA-256: `4083E26D3086FDBB1F95ADBEF9DBF621DD250B1D4BB41034BA5388C0E85924FD`;
+- input11 SHA-256: `E6225CD5C67DDF3621B5B92554D4929D4D52697E777331E58E766657B398F256`.
 
 Detailed RE and opcode map: `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`.
 
-Next runtime action after this candidate is committed/installed: run `TEST_LATEST_BUILD.bat`, Level Select -> Chase Venom, and report whether Spider-Man now traverses the building and exits the correct far side. Exit normally so ChatGPT can inspect the new `type3_latch_*` counters and trace directly.
+Next runtime action: run `TEST_LATEST_BUILD.bat`, Level Select -> Chase Venom, and report whether Spider-Man now traverses the building and exits the correct far side. Exit normally so ChatGPT can inspect the new `type3_latch_*` counters and trace directly.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
