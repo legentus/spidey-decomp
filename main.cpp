@@ -4413,6 +4413,8 @@ static void __fastcall SpideyMysterioLaserMoveHighFps(
 		0);
 }
 
+static int SpideyIsMysterioBossActive();
+
 typedef void (__fastcall *SpideyRetailMysterioFireBoobiesFn)(
 		CMysterio*,
 		void*);

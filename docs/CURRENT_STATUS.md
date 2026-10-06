@@ -13876,3 +13876,21 @@ Purpose:
 - simultaneously sanity-check the new Mysterio health-fill alignment and retail-only boss-camera policy.
 
 The whole game running at about 20 FPS is intentional in this diagnostic and must be reverted after the reference log is captured.
+
+
+### 2026-10-06 — Mysterio 20-FPS reference build compile fix
+
+User's first build of temporary 20-FPS reference commit `f807ad2f` failed in `main.cpp`:
+- C2065 at the laser telemetry wrapper: `SpideyIsMysterioBossActive` undeclared;
+- C2373 later: helper redefinition/different type modifiers.
+
+Root cause:
+- the new telemetry wrapper is physically earlier in `main.cpp` than the helper definition added for the Mysterio boss-type gate.
+
+Fix:
+- added a forward declaration `static int SpideyIsMysterioBossActive();` immediately before the Mysterio FireBoobies telemetry typedef/wrapper;
+- no timing, HUD, camera, or gameplay logic changed;
+- restored generated `runtime_version.h` after the failed build;
+- `git diff --check` passes.
+
+The intended full-engine 20-FPS Mysterio reference behavior remains unchanged.

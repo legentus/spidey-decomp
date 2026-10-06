@@ -2846,3 +2846,8 @@ Do not change Venom Chase phase-lock behavior while working on Mysterio.
 Current diagnostic changes only timer delivery to full-engine 20 FPS (20 Hz callback / ~3 canonical ticks). Mysterio UI fix, retail-camera guard, and FireBoobies telemetry remain identical.
 
 After one Mysterio fight run, compare attack starts/tick spacing and restore timer to 60 before making the production laser fix.
+
+
+### Mysterio reference compile-order fix
+
+The first `f807ad2f` test build failed because `SpideyMysterioFireBoobiesTelemetry` called `SpideyIsMysterioBossActive` before the helper was declared. Fixed with a forward declaration only. No behavior changes.
