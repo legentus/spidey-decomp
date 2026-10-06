@@ -4883,6 +4883,10 @@ struct SpideyChaseSynthTraceSample
 	int angleY;
 	int headingTraceValid;
 	int cameraHeading;
+	int cameraMode;
+	int cameraInterpTicks;
+	unsigned int cameraNextShotPulsesSet;
+	unsigned int cameraNextShotPulses;
 	int inputBasisHeading;
 	int desiredRelativeHeading;
 	int desiredWorldHeading;
@@ -5367,6 +5371,161 @@ static void SpideyLogChaseCameraAI20Stats()
 		gSpideyChaseCameraAI20RetailCalls,
 		gSpideyChaseCameraAI20HeldCalls,
 		gSpideyChaseCameraAI20MaxElapsed);
+	fclose(f);
+}
+
+// Chase Venom world-actor cadence compatibility.
+//
+// Retail Logic updates BaddyList through:
+//   0x004554F5 -> Ob_AI(&BaddyList, 0)
+// and FindBaddyOfType proves BaddyList is the retail global at 0x0056E990.
+// CVenom also lives on that list.
+//
+// Player and camera cadence experiments alone still failed because Venom and
+// other baddies continued to advance on every 60-Hz Logic pass. That lets a
+// baddy cross/activate later L5A1 trigger volumes (including camera-shot
+// transitions) before the scripted player reaches the matching authored leg.
+//
+// During L5A1 synthesized player control only, hold two BaddyList dispatches
+// and call the untouched retail Ob_AI on the third canonical tick. Ob_AI then
+// runs each body's own EveryFrame(), which naturally observes ~3 elapsed
+// ticks. No baddy velocity/timer fields are manually scaled.
+typedef void (__cdecl *SpideyRetailObAIFn)(
+	CBody**,
+	int);
+
+static long gSpideyChaseBaddyAI20LastTick = 0;
+static int gSpideyChaseBaddyAI20TickValid = 0;
+static unsigned long gSpideyChaseBaddyAI20Calls = 0;
+static unsigned long gSpideyChaseBaddyAI20RetailCalls = 0;
+static unsigned long gSpideyChaseBaddyAI20HeldCalls = 0;
+static unsigned long gSpideyChaseBaddyAI20MaxElapsed = 0;
+static int gSpideyChaseBaddyAI20Installed = 0;
+
+static void SpideyResetChaseBaddyAI20State()
+{
+	gSpideyChaseBaddyAI20LastTick = 0;
+	gSpideyChaseBaddyAI20TickValid = 0;
+}
+
+static void __cdecl SpideyChaseBaddyAI20Hz(
+		CBody** list,
+		int arg)
+{
+	SpideyRetailObAIFn retail =
+		(SpideyRetailObAIFn)
+		0x00460FC0;
+
+	++gSpideyChaseBaddyAI20Calls;
+
+	CPlayer* player = 0;
+	__try
+	{
+		player =
+			*(CPlayer**)0x006A9038;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		player = 0;
+	}
+
+	const int chaseScripted =
+		player &&
+		SpideyRetailGetLevelId() == 0x501 &&
+		player->field_1AC;
+
+	if (!chaseScripted)
+	{
+		if (gSpideyChaseBaddyAI20TickValid)
+		{
+			SpideyResetChaseBaddyAI20State();
+		}
+
+		retail(
+			list,
+			arg);
+		return;
+	}
+
+	const long currentTick =
+		*(volatile long*)0x006B4CA8;
+
+	if (!gSpideyChaseBaddyAI20TickValid)
+	{
+		gSpideyChaseBaddyAI20LastTick =
+			currentTick;
+		gSpideyChaseBaddyAI20TickValid =
+			1;
+		++gSpideyChaseBaddyAI20HeldCalls;
+		return;
+	}
+
+	const long elapsed =
+		currentTick -
+		gSpideyChaseBaddyAI20LastTick;
+	if (elapsed < 3)
+	{
+		++gSpideyChaseBaddyAI20HeldCalls;
+		return;
+	}
+
+	gSpideyChaseBaddyAI20LastTick =
+		currentTick;
+
+	retail(
+		list,
+		arg);
+
+	++gSpideyChaseBaddyAI20RetailCalls;
+	if ((unsigned long)elapsed >
+		gSpideyChaseBaddyAI20MaxElapsed)
+	{
+		gSpideyChaseBaddyAI20MaxElapsed =
+			(unsigned long)elapsed;
+	}
+}
+
+static int SpideyInstallChaseBaddyAI20HzCompat()
+{
+	gSpideyChaseBaddyAI20Installed =
+		SpideyPatchDirectCall(
+			0x004554F5,
+			0x00460FC0,
+			(void*)&SpideyChaseBaddyAI20Hz,
+			"timing_chase_baddylist_20hz");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"chase_baddy_ai_20hz_install installed=%d call_site=0x004554F5 list=0x0056E990 retail=0x00460FC0 wrapper=0x%08lX policy=baddylist_20hz_only_during_l5a1_synthesized_player_control\\n",
+			gSpideyChaseBaddyAI20Installed,
+			(unsigned long)(void*)&SpideyChaseBaddyAI20Hz);
+		fclose(f);
+	}
+
+	return gSpideyChaseBaddyAI20Installed;
+}
+
+static void SpideyLogChaseBaddyAI20Stats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"chase_baddy_ai_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu level=0x501 list=0x0056E990 policy=venom_and_baddylist_authored_cadence\\n",
+		gSpideyChaseBaddyAI20Installed,
+		gSpideyChaseBaddyAI20Calls,
+		gSpideyChaseBaddyAI20RetailCalls,
+		gSpideyChaseBaddyAI20HeldCalls,
+		gSpideyChaseBaddyAI20MaxElapsed);
 	fclose(f);
 }
 
@@ -5939,6 +6098,27 @@ static void SpideyRecordChaseSynthTrace(
 			(unsigned long)player->mCollision;
 		sample->groundGrace =
 			player->field_EA4;
+
+		CCamera* traceCamera =
+			*(CCamera**)0x0056F3B8;
+		if (traceCamera)
+		{
+			sample->cameraMode =
+				(int)traceCamera->mCameraMode;
+			sample->cameraInterpTicks =
+				(int)traceCamera->field_2BC;
+		}
+
+		SCommandPoint* nextCameraShot =
+			GetCommandPoint(74);
+		if (nextCameraShot)
+		{
+			sample->cameraNextShotPulsesSet =
+				(unsigned int)nextCameraShot->NumPulsesSet;
+			sample->cameraNextShotPulses =
+				(unsigned int)nextCameraShot->NumPulses;
+		}
+
 		sample->workerMaskAfter =
 			SpideyChaseReadWorkerTypeMask(
 				player);
@@ -6444,7 +6624,7 @@ static void SpideyDumpChaseSynthTrace()
 			&gSpideyChaseSynthTrace[i];
 		fprintf(
 			f,
-			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u collision=0x%08lX ground_grace=%d worker_mask_before=0x%08lX worker_mask_after=0x%08lX head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
+			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d camera_mode=%d camera_interp=%d camera74_pulses_set=%u camera74_pulses=%u input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u collision=0x%08lX ground_grace=%d worker_mask_before=0x%08lX worker_mask_after=0x%08lX head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
 			i,
 			sample->tick,
 			sample->elapsed,
@@ -6462,6 +6642,10 @@ static void SpideyDumpChaseSynthTrace()
 			sample->angleY,
 			sample->headingTraceValid,
 			sample->cameraHeading,
+			sample->cameraMode,
+			sample->cameraInterpTicks,
+			sample->cameraNextShotPulsesSet,
+			sample->cameraNextShotPulses,
 			sample->inputBasisHeading,
 			sample->desiredRelativeHeading,
 			sample->desiredWorldHeading,
@@ -6613,6 +6797,7 @@ static void SpideyInstallHighFpsTimingCompat()
 
 	SpideyInstallChasePlayerAI20HzCompat();
 	SpideyInstallChaseCameraAI20HzCompat();
+	SpideyInstallChaseBaddyAI20HzCompat();
 	SpideyInstallChaseSynth20HzCompat();
 }
 
@@ -15133,20 +15318,15 @@ static void SpideyInstall2DPolyProvenanceCompat()
 // MyVSync work intact. The normal native-60 compatibility dispatcher uses a
 // 1 ms WinMM heartbeat and dispatches the untouched retail callback at 60 Hz.
 //
-// CHASE GROUND-TRUTH DIAGNOSTIC:
-// Temporarily dispatch the *entire retail engine timer* at 20 Hz instead.
-// TimerCallback converts elapsed milliseconds back into the canonical 60-Hz
-// clock, so a ~50 ms callback naturally advances about three vblanks:
+// The temporary full-engine 20-FPS Chase reference experiment is complete:
+// it proved the retail route works when the whole engine receives ~50 ms
+// timer callbacks. The live policy is restored to native 60-Hz timer delivery:
 //
-//   deadline_ms(n) = floor(n * 1000 / 20) + 1
-//   TimerCallback ticks ~= 50 ms * 60 / 1000 = 3
+//   deadline_ms(n) = floor(n * 1000 / 60) + 1
 //
-// This intentionally reproduces the known-good retail-style 20-FPS update
-// quantum across Logic, EveryFrame, animation, player, camera, collision,
-// triggers and level scripts at once. It is a diagnostic build, not the final
-// native-60 policy. Once a working Chase trace is captured, diff it against
-// the failing 60-Hz trace and restore only the subsystem that truly requires
-// the authored cadence.
+// Chase-specific authored-cadence compatibility now lives at narrower
+// subsystem seams (scripted player, active camera and BaddyList) instead of
+// slowing the entire engine.
 typedef void (CALLBACK *SpideyRetailTimerCallbackFn)(
 		UINT,
 		UINT,
@@ -15197,10 +15377,10 @@ static unsigned long gSpideyPacingUnexpectedVblankDelta = 0;
 static unsigned long gSpideyPacingLastIntervalMs = 0;
 static int gSpideyPacingBeginPeriodOne = 0;
 
-// Temporary ground-truth diagnostic. 20-Hz retail timer delivery should make
-// TimerCallback advance three canonical 60-Hz vblanks per active callback.
-static const unsigned long kSpideyPacingDiagnosticHz = 20UL;
-static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 3UL;
+// Native-60 retail timer delivery: one canonical vblank per active callback.
+// The names are retained to keep the completed 20-FPS reference diff small.
+static const unsigned long kSpideyPacingDiagnosticHz = 60UL;
+static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 1UL;
 
 static int SpideyPatchMainImport(
 		const char* dllName,
@@ -15402,8 +15582,8 @@ static void CALLBACK SpideyPacingTimerThunk(
 			gSpideyPacingVirtualTotalMs);
 	if (interval < 1)
 		interval = 1;
-	if (interval > 60)
-		interval = 60;
+	if (interval > 20)
+		interval = 20;
 
 	// Advance the delivery schedule regardless of retail pause state. Retail's
 	// original 16 ms periodic timer kept firing while paused too; TimerCallback
@@ -15576,7 +15756,7 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	{
 		fprintf(
 			f,
-			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=51 target_hz=20 expected_vblanks_per_callback=3 policy=diagnostic_periodic_1ms_dispatch_50ms_full_engine_20hz source_clock=%s retail_callback_preserved=1\n",
+			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=17 target_hz=60 expected_vblanks_per_callback=1 policy=periodic_1ms_dispatch_16_17ms_60hz source_clock=%s retail_callback_preserved=1\n",
 			delay,
 			resolution,
 			flags,
@@ -15629,6 +15809,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 
 		SpideyLogChasePlayerAI20Stats();
 		SpideyLogChaseCameraAI20Stats();
+		SpideyLogChaseBaddyAI20Stats();
 		SpideyLogChaseSynthStats();
 		SpideyDumpChaseSynthTrace();
 		SpideyLogChaseSchedulerStats();
@@ -15739,7 +15920,7 @@ static int SpideyInstallModernTimerPacing()
 	{
 		fprintf(
 			f,
-			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=20 expected_vblanks_per_callback=3 policy=diagnostic_periodic_1ms_source_dispatch_50ms_full_engine_20hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=60 expected_vblanks_per_callback=1 policy=periodic_1ms_source_dispatch_16_17ms_60hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
 			setInstalled,
 			killInstalled,
 			(unsigned long)gSpideyOriginalTimeSetEvent,
