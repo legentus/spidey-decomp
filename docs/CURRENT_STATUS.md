@@ -13789,3 +13789,25 @@ Behavior commit:
 `3ec28e4b2b7abb51f6166256df750690721fa475`
 
 Current HEAD may contain documentation-only commits after this behavior commit; gameplay behavior is unchanged unless explicitly noted.
+
+
+### Production promotion — Chase 60-FPS phase-lock policy
+
+The successful 60-FPS run was compared directly against the successful full-engine 20-FPS reference using `tools/research/compare_good20_good60.py`.
+
+Final type-3/code-9 worker equivalence:
+- both runs: 51 samples, timer 150 -> 0 in 3-tick steps;
+- both runs: camera heading locked at `1029` until worker completion;
+- both runs: desired world heading `2053`;
+- both runs: identical Z progression range through the building;
+- aligned maximum camera-heading difference: **0**;
+- aligned maximum desired-world-heading difference: **0**;
+- aligned maximum body-angle difference: **2**;
+- aligned maximum X difference: `109302` fixed-point (~26.7 world units), non-fatal and visually compatible.
+
+This confirms the phase-locked 60-FPS run reproduces the authored through-building route closely enough to be treated as the production compatibility solution.
+
+Production behavior remains exactly `3ec28e4b2b7abb51f6166256df750690721fa475` and is tagged:
+`chase60-known-good-20261006`
+
+No further gameplay-source cleanup is being applied at this checkpoint to avoid perturbing the runtime-proven behavior.

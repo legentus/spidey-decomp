@@ -2795,3 +2795,14 @@ Critical final code-9 proof:
 - Spider-Man traverses the building on +Z and exits naturally.
 
 Do not regress or remove `3ec28e4b` behavior without preserving this known-good checkpoint first.
+
+
+### Chase fix promoted to production policy
+
+Direct good20-vs-good60 comparison confirms the final code-9 worker is phase-equivalent:
+- camera heading 1029 in both;
+- desired world heading 2053 in both;
+- identical Z traversal;
+- max aligned camera/world-heading difference = 0.
+
+Keep behavior commit `3ec28e4b` / tag `chase60-known-good-20261006` as the authoritative known-good Chase 60-FPS implementation.
