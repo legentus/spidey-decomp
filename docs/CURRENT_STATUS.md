@@ -13950,3 +13950,81 @@ Expected healthy 60-FPS candidate stats:
 
 Next runtime test:
 run `TEST_LATEST_BUILD.bat`, enter Mysterio, confirm lasers match the 20-FPS reference while rendering/game remains 60 FPS. Health-bar alignment is a separate unresolved UI task.
+
+
+## 2026-10-06 — Mysterio whole-AI cadence experiment FAILED; narrowed to FireBoobies-only
+
+Crash archive:
+`logs/20261006-041611/spidey-decomp.log`
+
+Runtime revision:
+`dfb3ecf66b4120fcb0001880314fa4d530d87751`
+
+Observed result:
+- game crashed during Mysterio fight;
+- user also observed ordinary webbing destroying Mysterio body/soft-spot nodes, suspected incorrect;
+- this was the first run using the whole-`CMysterio::AI` 20-Hz wrapper.
+
+Whole-AI wrapper stats prove it was active:
+- calls=1727;
+- retail_calls=577;
+- held_calls=1150;
+- max_elapsed=6;
+- global timer remained native 60 Hz.
+
+Crash signature:
+- exception `0xC0000005`;
+- EIP `0x30007754`;
+- fault module `binkw32_.DLL`;
+- read target `0x0000021C`;
+- process exit `-1073741819`.
+
+The fault address itself is in Bink, but the whole-AI experiment is retired because it also changed unrelated boss behavior/state upkeep. Do not restore it as a production fix.
+
+### Narrow laser fix
+
+New candidate keeps `CMysterio::AI` at native 60 Hz and cadence-gates ONLY:
+`0x0045F489 -> CMysterio::FireBoobies @ 0x0045D200`
+
+Policy:
+- while boss type 311 is active, accumulate retail canonical ticks from `0x006B4CA8`;
+- hold FireBoobies until >=3 ticks;
+- then call untouched retail FireBoobies with temporary `field_80=accumulated` (normally 3);
+- immediately restore live `field_80`;
+- reset cadence state when FireBoobies exits AI state 6 or after a large call gap;
+- all other Mysterio AI/damage/state/object upkeep remains 60 Hz;
+- player, physics, retail boss camera, rendering, other baddies and world logic remain 60 Hz;
+- existing elapsed-time laser liveness fix remains active.
+
+New stats:
+`mysterio_laser_20hz_stats ... policy=fireboobies_only_20hz_global_ai_60hz`
+
+### Mysterio soft-spot damage RE
+
+Retail soft spot:
+- constructor `CSoftSpot @ 0x0045F700`;
+- retail mType = `0x149`;
+- vtable = `0x0053BB88`;
+- Hit slot = `0x0053BB94 -> CSoftSpot::Hit @ 0x0045F940`.
+
+Critical retail damage gate:
+- `CSoftSpot::Hit` begins by testing `SHitInfo.field_0 & 0x04`;
+- hits without bit `0x04` return without applying node damage.
+
+Confirmed destructive impact path:
+- `CSplat` builds `SHitInfo.field_0 = 0x1E`;
+- `0x1E` includes destructive bit `0x04`;
+- it then invokes the target virtual `Hit()`.
+
+A new telemetry-only vtable wrapper logs every soft-spot hit and then calls retail unchanged:
+- incoming hit flags;
+- whether bit `0x04` is present;
+- damage;
+- soft-spot part index;
+- HP before/after;
+- player `field_8F8` active web mode;
+- retail Hit result.
+
+This telemetry is intended to determine whether the user's ordinary web attack is really arriving with a destructive retail hit class before changing any damage behavior.
+
+Health-bar alignment remains unresolved and is not part of this laser/crash candidate.

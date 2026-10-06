@@ -2862,3 +2862,22 @@ Current source restores global timer to 60 Hz and cadence-gates only `CMysterio:
 Health bar remains unresolved despite the first Mysterio common-boss-fill scaling candidate. Do not mark it fixed.
 
 Next test: Mysterio fight at 60 FPS, compare lasers to 20-FPS reference, then inspect `mysterio_ai_20hz_stats` and corrected `mysterio_laser_attack` timing.
+
+
+## Mysterio crash recovery / narrow laser frontier
+
+Retire whole-`CMysterio::AI` 20-Hz experiment. Crash run:
+`logs/20261006-041611/spidey-decomp.log`
+
+Current candidate:
+- global timer 60 Hz;
+- CMysterio AI 60 Hz;
+- only `FireBoobies` call at `0x0045F489` cadence-gated to 3 canonical ticks;
+- retail Mysterio camera policy unchanged;
+- Venom Chase fix untouched.
+
+New CSoftSpot telemetry:
+- retail CSoftSpot::Hit requires `SHitInfo.field_0 & 0x04`;
+- telemetry-only wrapper at vtable slot `0x0053BB94` records hit flags, damage, part, HP and player web mode, then calls retail unchanged.
+
+Next run should test Mysterio long enough for several laser attacks and deliberately try the ordinary web attack on one soft spot. Exit normally if stable.
