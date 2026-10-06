@@ -4888,6 +4888,8 @@ struct SpideyChaseSynthTraceSample
 	int desiredWorldHeading;
 	unsigned int wall;
 	unsigned int ceiling;
+	unsigned long collision;
+	int groundGrace;
 	unsigned long workerMaskBefore;
 	unsigned long workerMaskAfter;
 	int headBeforeType;
@@ -5256,6 +5258,10 @@ static void SpideyRecordChaseSynthTrace(
 			(unsigned int)*(raw + 0x8E8);
 		sample->ceiling =
 			(unsigned int)*(raw + 0x8E9);
+		sample->collision =
+			(unsigned long)player->mCollision;
+		sample->groundGrace =
+			player->field_EA4;
 		sample->workerMaskAfter =
 			SpideyChaseReadWorkerTypeMask(
 				player);
@@ -5753,7 +5759,7 @@ static void SpideyDumpChaseSynthTrace()
 			&gSpideyChaseSynthTrace[i];
 		fprintf(
 			f,
-			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u worker_mask_before=0x%08lX worker_mask_after=0x%08lX head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
+			"chase_synth_trace i=%lu tick=%lu elapsed=%d field80=%d synth=%u script_active=%u script_clock=%d axes=%d,%d ramp=%d state=0x%08lX pos=%d,%d,%d angle_y=%d heading_valid=%d camera_heading=%d input_basis_e34=%d desired_relative_e32=%d desired_world=%d wall=%u ceiling=%u collision=0x%08lX ground_grace=%d worker_mask_before=0x%08lX worker_mask_after=0x%08lX head_before=%d,%d,%d,%d head_after=%d,%d,%d,%d\\n",
 			i,
 			sample->tick,
 			sample->elapsed,
@@ -5776,6 +5782,8 @@ static void SpideyDumpChaseSynthTrace()
 			sample->desiredWorldHeading,
 			sample->wall,
 			sample->ceiling,
+			sample->collision,
+			sample->groundGrace,
 			sample->workerMaskBefore,
 			sample->workerMaskAfter,
 			sample->headBeforeType,
@@ -11388,6 +11396,24 @@ static void __fastcall SpideyModernMode3Camera(
 		manualAimPlayer &&
 		SpideyModernAimIsEffectivelyActive(
 			manualAimPlayer);
+
+	// Synthesized/scripted player control is authored against the retail camera
+	// transform. Several synth worker opcodes are literal camera-relative stick
+	// directions (for example type-3 code 10 = left). Modern mode-3 ownership
+	// must therefore yield completely while field_1AC is active, otherwise a
+	// user/free-look camera heading silently changes the scripted world route.
+	if (manualAimPlayer &&
+		manualAimPlayer->field_1AC)
+	{
+		SpideyModernCameraRelease(
+			"scripted_player_input",
+			camera,
+			camera->mCameraMode);
+		retail(
+			camera,
+			0);
+		return;
+	}
 
 	// Modern manual aim now shares the ordinary mode-3 orbit camera instead of
 	// accumulating an independent free-view yaw/pitch. A third-person shooter

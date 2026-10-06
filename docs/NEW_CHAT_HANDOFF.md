@@ -2,44 +2,69 @@
 
 > **Workflow update:** the authoritative working repository is now the local Git checkout at `F:\Spider-Man 2000 Recomp\project main`. Normal TEST/FAST BATs build that local checkout directly and do not refresh from GitHub. `origin` remains a fallback/backup remote. Read the top of `docs/CURRENT_STATUS.md` before changing this workflow.
 
-## LIVE FRONTIER — TYPE-3 HELD-LATCH CANDIDATE
+## LIVE FRONTIER — SCRIPTED CAMERA OWNERSHIP A/B CANDIDATE
 
 This section supersedes the older Chase frontier notes immediately below it.
 
 Latest proper instrumented test:
-- installed behavior revision: `34c6f816a876e086b3e60cf99ee731bb709baf8f`;
-- archive: `logs/20261005-211946/spidey-decomp.log`;
-- result: **STILL WRONG** — Spider-Man does not follow Venom through the building and does not emerge from the far side;
-- cutscene/native-60 scheduler remains healthy.
+- runtime revision: `b77c529723c070933c13d67b0d49c02d48b1c8cb`;
+- behavior under test: type-3 latch commit `ee6022150a0911d5503495a8f1d04ded55097bc7`;
+- preserved archive: `logs/20261005-225403/spidey-decomp.log`;
+- result: **STILL WRONG** — type-3 latch preservation changed the scripted path but Spider-Man still did not traverse the building correctly;
+- first level start also suffered a one-off yellow-haze fall; later restarts did not.
 
-New trace conclusions:
-- 759 Chase synth samples were captured;
-- `E34` remained zero in every captured sample;
-- both observed type-2 X/Z targets reached the retail completion radius and retired normally;
-- the building sequence is dominated by a long type-3 `code=10` worker with an initial 490-tick countdown.
+Type-3 fix was active:
+- `type3_latch_calls=604`;
+- `type3_latch_writes=732`;
+- `type3_latch_dynamic=174`;
+- `type3_latch_directional=558`.
 
-Retail disassembly breakthrough:
-- type-3 code 10 does `player[0x260]=1` **and** `E2D=-127` every synth call;
-- the prior 20-Hz sample/hold wrapper preserved `E2D/E2E` on held native-60 frames but dropped the type-3 latch side effects;
-- candidate commit `ee6022150a0911d5503495a8f1d04ded55097bc7` reasserts active type-3 latches on held frames without advancing their timers or changing the sampled final axes;
-- forced-clean VC6 matching build: **PASS**;
-- prepare/install: **PASS**;
-- installed proxy SHA-256: `F6F493370BE87F73F1FCBC9C920ADAB8A3EA078DFEFB3A323123616F350EE072`.
+The long code-10 path moved materially versus the prior run, proving the correction was real but insufficient.
 
-New telemetry:
-- `type3_latch_calls`
-- `type3_latch_writes`
-- `type3_latch_dynamic`
-- `type3_latch_directional`
+### Yellow-haze event
 
-Exact retail opcode map and rationale:
-- `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`
+The first bad attempt and first normal restart are identical through relative sample 16.
 
-Next test after installation:
-- run `TEST_LATEST_BUILD.bat`;
+First divergence:
+- camera heading still `168` in both;
+- axes and desired heading still identical;
+- same route worker;
+- player state changes from `0x400` to `0x4` only on the bad run.
+
+`CPlayer::CheckGroundGone()` is the source path that sets `field_E1C=4` when ground collision bit `mCollision & 2` disappears after the `field_EA4` grace period.
+
+Conclusion:
+- the one-off yellow-haze fall is a **ground/collision loss**, not a camera-steering failure;
+- new trace fields `collision` and `ground_grace` are added for any recurrence.
+
+### Why the 3D camera can still explain the Chase route
+
+Camera telemetry proves modern mode-3 ownership was active during Chase due tiny mouse deltas.
+
+Retail type-3 codes 8..11 are literal **camera-relative** stick directions. In particular:
+- code 10: `E2D=-127` (hold left);
+- code 9: `E2E=+127`.
+
+Therefore the existing world-heading sample/hold can stabilize the wrong world direction if the fresh sample was produced while our free-look camera had already changed the authored camera transform.
+
+New generic behavior candidate:
+- while active player `field_1AC != 0` (synthesized/scripted control), `SpideyModernMode3Camera` releases modern ownership with reason `scripted_player_input`;
+- retail `CM_Normal @ 0x00418E00` owns the camera completely;
+- ordinary gameplay reacquires modern camera normally after scripted control ends;
+- no Chase-specific level check is used.
+
+Forced-clean VC6 build: **PASS**.
+
+New Chase trace telemetry:
+- `collision=0x...`;
+- `ground_grace=...`.
+
+Next test:
+- install/run the scripted-camera-yield candidate through `TEST_LATEST_BUILD.bat`;
 - Level Select -> Chase Venom;
-- verify whether Spider-Man now enters/traverses the building and exits the far side;
-- exit normally so the new latch counters can be inspected directly.
+- verify whether Spider-Man finally enters/traverses the building and exits the correct far side;
+- note whether the first-load yellow-haze fall recurs;
+- exit normally and inspect `modern_camera event=release reason=scripted_player_input` plus collision/grace trace fields.
 
 ## Start here
 

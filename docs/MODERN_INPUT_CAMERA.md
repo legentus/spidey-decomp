@@ -490,6 +490,7 @@ The prototype is intentionally conservative:
    - mode changing away from 3;
    - camera detach.
 6. Returning to mode 3 does not restore stale modern state; a new input intent reseeds from the then-current retail camera.
+7. While the active player is under synthesized/scripted control (`field_1AC != 0`), modern mode-3 ownership yields completely to retail. Scripted synth opcodes include literal camera-relative directions, so free-look must not change their authored world route.
 
 This means cinematics, bosses, special cameras, lookaround and other non-mode-3 ownership remain retail-controlled by default.
 

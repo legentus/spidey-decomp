@@ -88,7 +88,79 @@ Installed untested candidate identity:
 
 Detailed RE and opcode map: `docs/CHASE_VENOM_INPUT_PIPELINE_RE.md`.
 
-Next runtime action: run `TEST_LATEST_BUILD.bat`, Level Select -> Chase Venom, and report whether Spider-Man now traverses the building and exits the correct far side. Exit normally so ChatGPT can inspect the new `type3_latch_*` counters and trace directly.
+### 2026-10-05 22:54 instrumented result — type-3 latch fix active, route still wrong; one-off ground loss captured
+
+Authoritative session:
+- runtime revision: `b77c529723c070933c13d67b0d49c02d48b1c8cb` (documentation descendant of behavior commit `ee602215...`);
+- preserved log: `logs/20261005-225403/spidey-decomp.log`;
+- live log size: 6,813,018 bytes;
+- user result: first level start fell into the yellow haze immediately after the in-engine cutscene; subsequent restarts behaved normally, but the original Chase building route remained wrong.
+
+Type-3 held-latch correction definitely executed:
+- `synth_calls=2739`;
+- `retail_updates=916`;
+- `held_calls=1823`;
+- `type3_latch_calls=604`;
+- `type3_latch_writes=732`;
+- `type3_latch_dynamic=174`;
+- `type3_latch_directional=558`;
+- `ramp_unexpected=0`.
+
+The correction materially changed the long type-3 path but did not restore retail:
+- prior long code-10 segment ended near `(74195197, 53248, 15734966)`;
+- new long code-10 segment ended near `(75041216, 53248, 15735343)`;
+- therefore held type-3 latch preservation is real behavior, but is not sufficient by itself.
+
+#### Yellow-haze fall: camera ruled out as first cause
+
+Three starts from the same scripted spawn were present in the trace.
+
+Bad first attempt vs the first normal restart:
+- samples 0..16 are byte-for-byte equivalent across the traced control/camera fields and position;
+- at the first divergence (relative sample 17):
+  - camera heading remains exactly `168` in both;
+  - synthesized axes remain `124,29` in both;
+  - desired relative/world headings remain `1897/2065` in both;
+  - route worker remains the same type-2 target;
+  - **player state diverges from `0x400` to `0x4` on the bad run**;
+  - the body trajectory then falls away and reaches Y ~21 million before the level resets.
+
+Retail/decomp source confirms `CPlayer::CheckGroundGone()` sets `field_E1C = 4` when `mCollision & 2` (ground collision) is absent after the short `field_EA4` grace period.
+
+Conclusion:
+- the one-off yellow-haze death was a **grounding/collision loss**, not a camera steering failure;
+- modern camera heading had not diverged when the fall state was entered;
+- because it happened only on the first load, treat first-load collision/readiness or another transition-state race as the likely class until reproduced.
+
+The next trace now records:
+- `collision=0x...`;
+- `ground_grace=...`;
+so any recurrence can be attributed exactly.
+
+#### 3D camera is now a serious suspect for the remaining Chase route
+
+Separate from the fall, runtime camera telemetry proves modern mode-3 ownership was acquired during Chase from tiny mouse deltas (examples include `-2,-1`, `1,0`, etc.).
+
+This matters because retail type-3 synth codes 8..11 are **literal camera-relative analogue directions**:
+- code 10 = hold left (`E2D=-127`);
+- code 9 = hold forward/back axis counterpart, etc.
+
+The existing world-heading hold only preserves the sampled world direction between 20-Hz synth updates. If the **sample itself** was generated against our modern free-look camera rather than the authored retail camera, the stable world direction can still be the wrong one.
+
+New generic ownership rule in the working candidate:
+- while active player `field_1AC != 0` (synthesized/scripted control), modern mode-3 camera releases with reason `scripted_player_input`;
+- retail `CM_Normal` owns the camera completely for that call;
+- ordinary manual gameplay regains modern camera normally when scripted control ends;
+- this is not Chase-specific and matches the documented camera-ownership architecture.
+
+Forced-clean VC6 build with this change: **PASS**.
+
+Next runtime action:
+1. build/install the new scripted-camera-yield candidate;
+2. replay Chase Venom;
+3. verify whether Spider-Man now traverses the building and exits the correct far side;
+4. also note whether the first-load yellow-haze fall recurs;
+5. exit normally so camera release markers plus `collision/ground_grace` trace fields can be inspected.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
