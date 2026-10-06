@@ -1,12 +1,19 @@
 param(
     [switch]$PostUpdate,
     [switch]$Elevated,
-    [switch]$Fast
+    [switch]$Fast,
+    [switch]$PrepareOnly
 )
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
+
+if ($PrepareOnly) {
+    $env:SPIDEY_PREPARE_ONLY = "1"
+} elseif ($env:SPIDEY_PREPARE_ONLY -eq "1") {
+    $PrepareOnly = $true
+}
 
 function Stop-WithPause([string]$Message, [int]$Code = 1) {
     Write-Host ""
@@ -576,6 +583,15 @@ foreach ($legacyLogName in $legacyLogNames) {
     ("[SESSION] image_size=0x{0:X8}" -f $peInfo.SizeOfImage),
     "[SESSION] started=$(Get-Date -Format o)"
 ) | Set-Content -Path $consolidatedLog -Encoding ASCII
+
+if ($PrepareOnly) {
+    Write-Host ""
+    Write-Host "[OK] Latest local build is installed and ready." -ForegroundColor Green
+    Write-Host "[INFO] Game was not launched because -PrepareOnly was requested."
+    Write-Host "[INFO] Launch SpideyPC.exe normally when ready; diagnostics will append to:"
+    Write-Host ("  " + $consolidatedLog)
+    exit 0
+}
 
 Write-Host ""
 Write-Host "[RUN] $gameExe"
