@@ -15,6 +15,11 @@ if ($PrepareOnly) {
     $PrepareOnly = $true
 }
 
+$cmdExe = $env:ComSpec
+if (-not $cmdExe) {
+    $cmdExe = [System.IO.Path]::Combine($env:SystemRoot, "System32", "cmd.exe")
+}
+
 function Stop-WithPause([string]$Message, [int]$Code = 1) {
     Write-Host ""
     if ($Code -eq 0) {
@@ -320,7 +325,7 @@ try {
         Write-Host "[..] Building matching proxy (forced clean build)..."
     }
 
-    & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
+    & $cmdExe /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
     if ($LASTEXITCODE -ne 0) {
         Stop-WithPause "Matching build failed." $LASTEXITCODE
     }
@@ -341,7 +346,7 @@ try {
             Write-Host "[FAST] First NMAKE pass rebuilt objects without relinking the DLL."
             Write-Host "[FAST] Running a cheap second pass to catch up the link target..."
 
-            & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
+            & $cmdExe /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
             if ($LASTEXITCODE -ne 0) {
                 Stop-WithPause "Incremental relink pass failed." $LASTEXITCODE
             }
@@ -359,7 +364,7 @@ try {
             Write-Host "[INFO] Falling back to one clean matching build for safety."
 
             $env:SPIDEY_FORCE_CLEAN = "1"
-            & $env:ComSpec /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
+            & $cmdExe /d /c ('"' + (Join-Path $RepoRoot "build.bat") + '"')
             if ($LASTEXITCODE -ne 0) {
                 Stop-WithPause "Fallback clean matching build failed." $LASTEXITCODE
             }
