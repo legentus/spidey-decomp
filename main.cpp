@@ -5162,6 +5162,214 @@ static void SpideyLogChasePlayerAI20Stats()
 	fclose(f);
 }
 
+// Pair the scripted player cadence with the active retail camera cadence.
+//
+// Type-3 synthesized codes 8..11 are literal camera-relative directions.
+// In particular Chase code 10 writes E2D=-127.  CheckForwards later turns
+// that into a world-space desired heading using the camera transform heading
+// at CCamera+0x23A.  Therefore a 20-Hz SpideyAI0 still does not reproduce the
+// 20-FPS path if CCamera_AI continues solving the camera three times per 50 ms.
+//
+// The active camera's vtable is 0x0053B4BC and its AI slot (+8) is
+// 0x0053B4C4 -> retail CCamera_AI @ 0x00417CB0.
+//
+// During L5A1 synthesized player control only, run the active camera AI once
+// per three canonical ticks with accumulated field_80 (normally 3).  Other
+// cameras and all ordinary gameplay call retail every update.
+typedef void (__fastcall *SpideyRetailCameraAIFn)(
+	CCamera*,
+	void*);
+
+static CCamera* gSpideyChaseCameraAI20Camera = 0;
+static long gSpideyChaseCameraAI20LastTick = 0;
+static int gSpideyChaseCameraAI20TickValid = 0;
+static int gSpideyChaseCameraAI20AccumulatedTicks = 0;
+static unsigned long gSpideyChaseCameraAI20Calls = 0;
+static unsigned long gSpideyChaseCameraAI20RetailCalls = 0;
+static unsigned long gSpideyChaseCameraAI20HeldCalls = 0;
+static unsigned long gSpideyChaseCameraAI20MaxElapsed = 0;
+static int gSpideyChaseCameraAI20Installed = 0;
+
+static void SpideyResetChaseCameraAI20State(
+		CCamera* camera)
+{
+	gSpideyChaseCameraAI20Camera =
+		camera;
+	gSpideyChaseCameraAI20LastTick =
+		0;
+	gSpideyChaseCameraAI20TickValid =
+		0;
+	gSpideyChaseCameraAI20AccumulatedTicks =
+		0;
+}
+
+static void __fastcall SpideyChaseCameraAI20Hz(
+		CCamera* camera,
+		void*)
+{
+	SpideyRetailCameraAIFn retail =
+		(SpideyRetailCameraAIFn)
+		0x00417CB0;
+
+	++gSpideyChaseCameraAI20Calls;
+
+	CPlayer* player =
+		*(CPlayer**)0x006A9038;
+	CCamera* activeCamera =
+		*(CCamera**)0x0056F3B8;
+
+	const int chaseScripted =
+		camera &&
+		camera == activeCamera &&
+		player &&
+		SpideyRetailGetLevelId() == 0x501 &&
+		player->field_1AC;
+
+	if (!chaseScripted)
+	{
+		if (gSpideyChaseCameraAI20Camera != camera ||
+			gSpideyChaseCameraAI20TickValid)
+		{
+			SpideyResetChaseCameraAI20State(
+				camera);
+		}
+
+		retail(
+			camera,
+			0);
+		return;
+	}
+
+	if (gSpideyChaseCameraAI20Camera != camera)
+	{
+		SpideyResetChaseCameraAI20State(
+			camera);
+	}
+
+	const long currentTick =
+		*(volatile long*)0x006B4CA8;
+
+	if (!gSpideyChaseCameraAI20TickValid)
+	{
+		gSpideyChaseCameraAI20LastTick =
+			currentTick;
+		gSpideyChaseCameraAI20TickValid =
+			1;
+
+		int initialElapsed =
+			camera->field_80;
+		if (initialElapsed < 0)
+			initialElapsed = 0;
+		if (initialElapsed > 6)
+			initialElapsed = 6;
+		gSpideyChaseCameraAI20AccumulatedTicks =
+			initialElapsed;
+	}
+	else
+	{
+		int elapsed =
+			(int)(
+				currentTick -
+				gSpideyChaseCameraAI20LastTick);
+		gSpideyChaseCameraAI20LastTick =
+			currentTick;
+
+		if (elapsed < 0)
+			elapsed = 0;
+		if (elapsed > 6)
+			elapsed = 6;
+
+		gSpideyChaseCameraAI20AccumulatedTicks +=
+			elapsed;
+	}
+
+	if (gSpideyChaseCameraAI20AccumulatedTicks < 3)
+	{
+		++gSpideyChaseCameraAI20HeldCalls;
+		return;
+	}
+
+	int simElapsed =
+		gSpideyChaseCameraAI20AccumulatedTicks;
+	if (simElapsed < 1)
+		simElapsed = 1;
+	if (simElapsed > 6)
+		simElapsed = 6;
+
+	const int originalField80 =
+		camera->field_80;
+	camera->field_80 =
+		simElapsed;
+
+	retail(
+		camera,
+		0);
+
+	camera->field_80 =
+		originalField80;
+	gSpideyChaseCameraAI20AccumulatedTicks =
+		0;
+
+	++gSpideyChaseCameraAI20RetailCalls;
+	if ((unsigned long)simElapsed >
+		gSpideyChaseCameraAI20MaxElapsed)
+	{
+		gSpideyChaseCameraAI20MaxElapsed =
+			(unsigned long)simElapsed;
+	}
+}
+
+static int SpideyInstallChaseCameraAI20HzCompat()
+{
+	const unsigned long original =
+		0x00417CB0UL;
+	const unsigned long replacement =
+		(unsigned long)
+		(void*)&SpideyChaseCameraAI20Hz;
+
+	gSpideyChaseCameraAI20Installed =
+		SpideyPatchBytes(
+			0x0053B4C4,
+			(const unsigned char*)&original,
+			(const unsigned char*)&replacement,
+			sizeof(original),
+			"timing_chase_camera_ai_20hz_vtable");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"chase_camera_ai_20hz_install installed=%d vtable_slot=0x0053B4C4 retail=0x00417CB0 wrapper=0x%08lX policy=active_camera_20hz_only_during_l5a1_synthesized_player_control\\n",
+			gSpideyChaseCameraAI20Installed,
+			replacement);
+		fclose(f);
+	}
+
+	return gSpideyChaseCameraAI20Installed;
+}
+
+static void SpideyLogChaseCameraAI20Stats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"chase_camera_ai_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu level=0x501 policy=paired_scripted_player_and_active_camera_20hz\\n",
+		gSpideyChaseCameraAI20Installed,
+		gSpideyChaseCameraAI20Calls,
+		gSpideyChaseCameraAI20RetailCalls,
+		gSpideyChaseCameraAI20HeldCalls,
+		gSpideyChaseCameraAI20MaxElapsed);
+	fclose(f);
+}
+
 static CPlayer* gSpideyChaseRampPlayer = 0;
 static int gSpideyChaseRampRemainder = 0;
 static unsigned long gSpideyChaseRampCalls = 0;
@@ -6404,6 +6612,7 @@ static void SpideyInstallHighFpsTimingCompat()
 		0x023A);
 
 	SpideyInstallChasePlayerAI20HzCompat();
+	SpideyInstallChaseCameraAI20HzCompat();
 	SpideyInstallChaseSynth20HzCompat();
 }
 
@@ -15410,6 +15619,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 		}
 
 		SpideyLogChasePlayerAI20Stats();
+		SpideyLogChaseCameraAI20Stats();
 		SpideyLogChaseSynthStats();
 		SpideyDumpChaseSynthTrace();
 		SpideyLogChaseSchedulerStats();

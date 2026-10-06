@@ -412,11 +412,70 @@ Installed untested authored-cadence player-AI candidate:
 - modern-input 32-bit ABI preflight: **PASS**;
 - game intentionally not launched.
 
+### 2026-10-06 01:09 test — player-AI 20 Hz alone still fails
+
+Proper harness archive:
+- `logs/20261006-010753/spidey-decomp.log`;
+- runtime revision: `f4841e241602bcdf294fe01d333aea3bb055dbe0`;
+- result: **STILL WRONG** — Spider-Man does not physically follow Venom through the building.
+
+The player-AI cadence hook definitely worked:
+- `chase_player_ai_20hz_install installed=1`;
+- total wrapper calls: `4851`;
+- actual retail `SpideyAI0` calls while gated: `775`;
+- held callback opportunities: `1549`;
+- maximum elapsed passed to retail: `3`;
+- synth retail updates: `775`;
+- synth held calls inside `SpideyAI0`: **0**;
+- all recorded Chase synth samples use `field_80=3`.
+
+Therefore throttling only `SpideyAI0` to the real 20-FPS quantum is not sufficient.
+
+Important user observation now corroborated by telemetry:
+- after the visible cutscene ends, Spider-Man continues moving under script control for roughly 3–5 seconds and manual input is unavailable;
+- this is not a separate bug: `field_1AC` / synthesized control and the remaining worker chain stay active after the visible camera/cutscene presentation ends;
+- the script continues consuming type-3 workers until the final type-3/code-10 worker reaches zero;
+- only then does the trace change to `synth=0` and manual control returns.
+
+So the extra autonomous movement is the still-running Chase program, and the player is spending that period trying to finish the scripted route while physically displaced/stuck.
+
+### Remaining FPS dependency — active camera solve cadence
+
+Type-3 direction semantics remain critical:
+- code 10 writes `E2D=-127`;
+- this is a literal camera-relative direction;
+- `CheckForwards` converts that through the current transform-derived `CCamera+0x23A`;
+- the latest building approach shows the code-10 world heading tracking the active camera heading while Spider-Man approaches/collides with the building.
+
+Retail camera RE:
+- active camera vtable base: `0x0053B4BC`;
+- virtual AI slot `+8`: `0x0053B4C4`;
+- retail target: `CCamera_AI @ 0x00417CB0`;
+- `CCamera_AI` owns heading interpolation and calls `CM_Normal @ 0x00418E00`;
+- the simple `field_236` interpolation is elapsed-tick aware, but `CM_Normal` performs nonlinear camera position/focus/collision solving every camera AI invocation.
+
+Thus one 20-FPS camera solve with `field_80=3` is not guaranteed equivalent to three 60-Hz camera solves with `field_80=1`. Because type-3 code 10 uses the resulting camera transform as the player's world direction, this can directly change the building-entry angle.
+
+Implemented next candidate:
+- keep scripted `SpideyAI0` at the authored 20-Hz cadence;
+- additionally cadence-gate **only the active retail camera AI** during L5A1 synthesized player control;
+- camera wrapper accumulates canonical ticks and calls retail `CCamera_AI` once every three ticks with `camera->field_80=3`;
+- inactive cameras and all ordinary gameplay remain unchanged;
+- rendering/presentation and all other bodies remain 60 Hz;
+- forced Wait trigger recovery remains disabled.
+
+New telemetry:
+- `chase_camera_ai_20hz_install`;
+- `chase_camera_ai_20hz_stats`.
+
+Forced-clean matching VC6 build of the paired player+camera source: **PASS**.
+
 Next runtime action:
-1. run `TEST_LATEST_BUILD.bat` using the already-installed authored-cadence player-AI candidate;
+1. install the paired player+camera authored-cadence candidate;
+2. run `TEST_LATEST_BUILD.bat`;
 3. replay Chase Venom;
-4. watch whether Spider-Man's approach angle/path through the black wall changes;
-5. exit normally so the player-AI cadence counters and route trace can be compared.
+4. watch specifically whether the code-10 approach angle and path through the building change;
+5. exit normally so player/camera cadence stats and the route trace can be compared.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 

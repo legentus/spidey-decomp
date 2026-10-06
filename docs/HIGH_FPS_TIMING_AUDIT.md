@@ -389,3 +389,15 @@ Implemented compatibility experiment:
 - downstream forced Wait recovery is disabled so original trigger faces must be hit naturally.
 
 Forced-clean matching VC6 build: PASS.
+
+## 2026-10-06 01:09 — synthesized-control tail + camera cadence
+
+Latest harness: `logs/20261006-010753/spidey-decomp.log`, revision `f4841e241602bcdf294fe01d333aea3bb055dbe0`. The player-AI 20-Hz wrapper was active (`retail_calls=775`, `held_calls=1549`, `max_elapsed=3`) and Chase still failed.
+
+The user's longstanding observation that Spider-Man remains uncontrollable and continues moving for ~3–5 seconds after the visible cutscene is correlated with the script state: `field_1AC` remains active and type-3 workers continue to run until the final worker expires, at which point `synth=0` and control returns.
+
+Type-3 code 10 is camera-relative (`E2D=-127`). The building-approach trace shows its desired world heading following `CCamera+0x23A`. Retail camera AI is `0x00417CB0` via camera vtable `0x0053B4BC`, slot `0x0053B4C4`; it calls `CM_Normal @ 0x00418E00`.
+
+Simple `field_236` camera interpolation scales with `field_80`, but `CM_Normal` performs nonlinear camera solve/collision/focus work per AI invocation. Therefore three 60-Hz camera solves can produce a different transform heading path from one 20-FPS solve with `field_80=3`.
+
+Next candidate pairs scripted `SpideyAI0` and the active retail camera at 20 Hz during L5A1 synthesized control while leaving rendering, other bodies, inactive cameras, and ordinary gameplay at 60 Hz. Forced-clean VC6 build: PASS.
