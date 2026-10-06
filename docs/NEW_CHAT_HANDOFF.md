@@ -2806,3 +2806,20 @@ Direct good20-vs-good60 comparison confirms the final code-9 worker is phase-equ
 - max aligned camera/world-heading difference = 0.
 
 Keep behavior commit `3ec28e4b` / tag `chase60-known-good-20261006` as the authoritative known-good Chase 60-FPS implementation.
+
+
+## Venom Chase bar UI frontier — 2026-10-06
+
+The Chase gameplay fix remains known-good and untouched.
+
+New L5A1 HUD finding:
+- `Venom_DisplayProgressBar @ 0x004E7E10` is the top Chase meter;
+- it is one composite made from many independent panel quads;
+- our generic high-resolution HUD scaler was assigning different left/center/right anchors to adjacent meter pieces, causing the visible fragmentation.
+
+Candidate now forces all five progress-bar coordinate calls to one shared top-center anchor in level `0x501` only.
+
+See:
+`docs/VENOM_CHASE_BAR_RE_2026-10-06.md`
+
+Next test: run `TEST_LATEST_BUILD.bat`, enter Venom Chase, inspect the top chase bar, then exit normally for log inspection.

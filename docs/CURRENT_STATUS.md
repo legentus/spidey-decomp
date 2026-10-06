@@ -13811,3 +13811,30 @@ Production behavior remains exactly `3ec28e4b2b7abb51f6166256df750690721fa475` a
 `chase60-known-good-20261006`
 
 No further gameplay-source cleanup is being applied at this checkpoint to avoid perturbing the runtime-proven behavior.
+
+
+## 2026-10-06 — Venom Chase bar fragmentation fix candidate
+
+Scope is specifically Venom Chase / L5A1 (`0x501`).
+
+Retail `Venom_DisplayProgressBar @ 0x004E7E10` constructs the top chase meter from separate textured quads. The repeated strip uses `Panel_SetStretchedScreenCoords(Texture*)` at `0x004E837E`, with four additional helper calls for the surrounding chase-meter elements.
+
+The fresh `logs/20261006-031423/spidey-decomp.log` proves the breakup is caused by the existing gameplay-HUD compactor choosing left/center/right anchors independently for adjacent pieces. At 2560x1440 / UI scale 180%:
+- authored adjacent `192..211` -> left-anchored `86..95`;
+- next `210..229` -> center-anchored `235..244`;
+- authored adjacent `282..301` -> center `268..276`;
+- next `300..319` -> right `417..425`.
+
+Implemented candidate:
+- override all five `Venom_DisplayProgressBar` texture-coordinate calls after the generic HUD patch;
+- L5A1 only uses one shared top-center anchor `256,0`;
+- all existing gameplay UI density/user-scale behavior is preserved;
+- non-L5A1 behavior falls back to the generic HUD wrapper;
+- Chase timing/gameplay source is untouched.
+
+Full RE:
+`docs/VENOM_CHASE_BAR_RE_2026-10-06.md`
+
+Static validation:
+- `git diff --check`: PASS.
+- local compilation from chat is currently blocked by Local Commander's executable allowlist; next test must use `TEST_LATEST_BUILD.bat`.
