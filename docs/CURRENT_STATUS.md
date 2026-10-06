@@ -1,5 +1,14 @@
 # CURRENT STATUS
 
+## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
+
+Dedicated recovery document:
+- `docs/NEW_CHAT_HANDOFF_2026-10-05_CHASE_VENOM_CAMERA_STEERING_FRONTIER.md`
+- created at commit `79cabf84f85c7cb6bf1790ddde7aa7c1b0e33fdc`.
+
+This checkpoint preserves the current generalized synthesized-steering behavior source `0ab2efb34...`, the E32/E34/camera-heading ownership probe, worker timing classification, last tested `df0b1d62...` baseline, and the exact next Chase Venom runtime test.
+
+
 ## CHASE VENOM — SYNTH WORKER TIMING CLASSIFIED; GENERALIZED WORLD-HEADING HOLD READY (2026-10-05)
 
 Latest tested runtime is still `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`:
