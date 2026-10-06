@@ -40,9 +40,20 @@ Installed untested runtime identity:
 - input11 SHA-256: `12DD9983D27BB20426D632A558BB93C1BEA3A0621F18AE959E4D8E210A884DB3`;
 - consolidated log path: `C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`.
 
-The latest **runtime-tested** revision is still `df0b1d62...`. Do not promote `34c6f816...` to tested until the user runs Chase Venom and reports the result.
+### Direct-launch Chase observation (2026-10-05)
 
-Next runtime action is unchanged: launch Spider-Man normally, Level Select -> Chase Venom, verify 60-FPS cutscene remains intact, then judge the building-entry route as fixed / improved / unchanged / worse. After exit, ChatGPT can read the consolidated log directly from the game folder; the user no longer needs to upload it manually unless local-PC access is unavailable.
+The user manually launched the already-installed `34c6f816...` candidate by starting `SpideyPC.exe` directly. This bypassed the test-session harness, so the consolidated log remained at its 9-line seeded header and no per-run repo archive was created.
+
+Gameplay observation is still valid evidence:
+- Chase behavior remains **non-vanilla**;
+- overall route behavior was effectively the same;
+- the user could jump back out from the side of the building where Spider-Man entered;
+- based on retail memory/expected Venom route, Spider-Man should emerge on the other side of the building;
+- this suggests the current compatibility layer is still preserving the wrong route/path sequence rather than reproducing retail Chase traversal.
+
+Treat this as **TESTED — BEHAVIOR STILL WRONG / LOGGING INCOMPLETE** for the installed `34c6f816...` candidate. A proper instrumented rerun through `TEST_LATEST_BUILD.bat` is required before the next code change so the synthesized-worker/heading trace can be evaluated.
+
+Next runtime action: run `TEST_LATEST_BUILD.bat` from the local authoritative checkout, then Level Select -> Chase Venom, verify the 60-FPS cutscene remains intact, and judge the building-entry route as fixed / improved / unchanged / worse. In local-authoritative mode this BAT does **not** download or mirror GitHub; it builds the current local files, seeds/cleans the consolidated log, launches the game, waits for exit, and archives the completed log. Do not launch `SpideyPC.exe` directly for instrumented tests because that bypasses the test-session setup/archive step. After exit, ChatGPT can read the consolidated log directly from the game folder or repo logs; the user does not need to upload it unless local-PC access is unavailable.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
