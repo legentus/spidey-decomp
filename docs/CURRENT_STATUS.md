@@ -470,11 +470,20 @@ New telemetry:
 
 Forced-clean matching VC6 build of the paired player+camera source: **PASS**.
 
+Installed untested paired player+camera authored-cadence candidate:
+- behavior commit: `bf3bc6430ea86ddd0da077d70c9f66abb44bac1c`;
+- proxy SHA-256: `8C0A262F709BC1A3B6A66DD188DCF6AFC0C17EA32A69BF6FEA3664FEC663F9DE`;
+- renderer11 SHA-256: `52C32CE38F78A2161C9A9CF1361DD25EA58D2A701629D16763699B28F6E1F18A`;
+- input11 SHA-256: `B566BCE7B07FB9727121766A781ABE106A71BBE7588A0FB4B7DDCD4E24D51BE2`;
+- prepare/install pipeline: **PASS**;
+- modern-input 32-bit ABI preflight: **PASS**;
+- game intentionally not launched.
+
 Next runtime action:
-1. install the paired player+camera authored-cadence candidate;
-2. run `TEST_LATEST_BUILD.bat`;
-3. replay Chase Venom;
-4. watch specifically whether the code-10 approach angle and path through the building change;
+1. run `TEST_LATEST_BUILD.bat`;
+2. replay Chase Venom;
+3. watch specifically whether the code-10 approach angle/path through the building changes;
+4. note whether the 3–5 second post-cutscene autonomous movement changes;
 5. exit normally so player/camera cadence stats and the route trace can be compared.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
