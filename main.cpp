@@ -4413,6 +4413,117 @@ static void __fastcall SpideyMysterioLaserMoveHighFps(
 		0);
 }
 
+typedef void (__fastcall *SpideyRetailMysterioFireBoobiesFn)(
+		CMysterio*,
+		void*);
+
+static unsigned long gSpideyMysterioLaserAttackCalls =
+	0;
+static unsigned long gSpideyMysterioLaserAttackStarts =
+	0;
+static unsigned long gSpideyMysterioLaserStageTwoCalls =
+	0;
+static unsigned long gSpideyMysterioLaserLastCallTick =
+	0;
+static int gSpideyMysterioLaserAttackInProgress =
+	0;
+
+// @Ok
+// Diagnostic only: count authored Mysterio state-6 laser attacks at their one
+// retail dispatch point. This does not alter attack cadence or state.
+static void __fastcall SpideyMysterioFireBoobiesTelemetry(
+		CMysterio* mysterio,
+		void*)
+{
+	SpideyRetailMysterioFireBoobiesFn retail =
+		(SpideyRetailMysterioFireBoobiesFn)0x0045D200;
+
+	if (!mysterio)
+	{
+		retail(
+			mysterio,
+			0);
+		return;
+	}
+
+	const unsigned long now =
+		(unsigned long)gTimerRelated;
+	const int stateBefore =
+		(int)mysterio->field_31C.bothFlags;
+	const int substateBefore =
+		mysterio->dumbAssPad;
+	const int elapsed =
+		(int)mysterio->field_80;
+	const int cooldown39C =
+		mysterio->field_39C;
+	const int leftArm =
+		mysterio->field_34C != 0;
+	const int rightArm =
+		mysterio->field_350 != 0;
+
+	++gSpideyMysterioLaserAttackCalls;
+
+	if (!gSpideyMysterioLaserAttackInProgress)
+	{
+		++gSpideyMysterioLaserAttackStarts;
+		gSpideyMysterioLaserAttackInProgress =
+			1;
+	}
+
+	if (substateBefore ==
+		2)
+	{
+		++gSpideyMysterioLaserStageTwoCalls;
+	}
+
+	retail(
+		mysterio,
+		0);
+
+	const int stateAfter =
+		(int)mysterio->field_31C.bothFlags;
+	const int substateAfter =
+		mysterio->dumbAssPad;
+
+	if (stateAfter !=
+		6)
+	{
+		gSpideyMysterioLaserAttackInProgress =
+			0;
+	}
+
+	FILE* log =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (log)
+	{
+		fprintf(
+			log,
+			"mysterio_laser_attack call=%lu attack=%lu stage2_calls=%lu tick=%lu delta_from_last=%lu state=%d->%d substate=%d->%d field80=%d cooldown39c=%d arms=%d,%d boss_active=%d policy=telemetry_only\n",
+			gSpideyMysterioLaserAttackCalls,
+			gSpideyMysterioLaserAttackStarts,
+			gSpideyMysterioLaserStageTwoCalls,
+			now,
+			gSpideyMysterioLaserLastCallTick ?
+				now -
+					gSpideyMysterioLaserLastCallTick :
+				0,
+			stateBefore,
+			stateAfter,
+			substateBefore,
+			substateAfter,
+			elapsed,
+			cooldown39C,
+			leftArm,
+			rightArm,
+			SpideyIsMysterioBossActive());
+		fclose(log);
+	}
+
+	gSpideyMysterioLaserLastCallTick =
+		now;
+}
+
 static void SpideyLogHighFpsRetailBytes(
 		const char* label,
 		unsigned long address,
@@ -4604,6 +4715,34 @@ static int SpideyRetailGetLevelId()
 	SpideyRetailTrigGetLevelIdFn fn =
 		(SpideyRetailTrigGetLevelIdFn)0x004DE770;
 	return fn();
+}
+
+static int SpideyIsMysterioBossActive()
+{
+	int itemType =
+		0;
+	void* boss =
+		0;
+
+	__try
+	{
+		itemType =
+			*(volatile int*)0x0060F654;
+		boss =
+			*(void* volatile*)0x0060F788;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		itemType =
+			0;
+		boss =
+			0;
+	}
+
+	return itemType ==
+			311 &&
+		boss !=
+			0;
 }
 
 struct SpideyChaseSchedulerStats
@@ -6782,6 +6921,12 @@ static void SpideyInstallHighFpsTimingCompat()
 
 	int mysterioLaserInstalled =
 		0;
+	const int mysterioLaserAttackTelemetryInstalled =
+		SpideyPatchDirectCall(
+			0x0045F489,
+			0x0045D200,
+			(void*)&SpideyMysterioFireBoobiesTelemetry,
+			"mysterio_laser_attack_telemetry");
 	const unsigned long foundDestructor =
 		(unsigned long)mysterioLaserVtable[0];
 	const unsigned long foundMove =
@@ -6827,8 +6972,9 @@ static void SpideyInstallHighFpsTimingCompat()
 	{
 		fprintf(
 			f,
-			"high_fps_compat mysterio_laser=%d vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness\n",
+			"high_fps_compat mysterio_laser=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_attack_state_telemetry\n",
 			mysterioLaserInstalled,
+			mysterioLaserAttackTelemetryInstalled,
 			expectedDestructor,
 			foundDestructor,
 			expectedMove,
@@ -6888,8 +7034,11 @@ static unsigned long gSpideyModernAimLocomotionRestoreCount = 0;
 static int SpideyModernAimIsEffectivelyActive(
 		CPlayer* player)
 {
-	if (!player)
+	if (!player ||
+		SpideyIsMysterioBossActive())
+	{
 		return 0;
+	}
 
 	if (player->field_8EA)
 		return 1;
@@ -11030,6 +11179,145 @@ static void __cdecl SpideyCompatHealthBarFlatPoly(
 		option10);
 }
 
+static unsigned long gSpideyMysterioBossUiScaledDraws =
+	0;
+
+// @Ok
+static void __cdecl SpideyCompatMysterioBossQPoly2D(
+		float x0,
+		float y0,
+		float u0,
+		float v0,
+		u32 color0,
+		float x1,
+		float y1,
+		float u1,
+		float v1,
+		u32 color1,
+		float x2,
+		float y2,
+		float u2,
+		float v2,
+		u32 color2,
+		float x3,
+		float y3,
+		float u3,
+		float v3,
+		u32 color3,
+		float z)
+{
+	if (SpideyIsMysterioBossActive())
+	{
+		++gSpideyMysterioBossUiScaledDraws;
+		SpideyCompatHealthBarQPoly2D(
+			x0, y0, u0, v0, color0,
+			x1, y1, u1, v1, color1,
+			x2, y2, u2, v2, color2,
+			x3, y3, u3, v3, color3,
+			z);
+		return;
+	}
+
+	SpideyRetailQPoly2DFn retail =
+		(SpideyRetailQPoly2DFn)0x00507910;
+	retail(
+		x0, y0, u0, v0, color0,
+		x1, y1, u1, v1, color1,
+		x2, y2, u2, v2, color2,
+		x3, y3, u3, v3, color3,
+		z);
+}
+
+// @Ok
+static void __cdecl SpideyCompatMysterioBossFlatPoly(
+		float z,
+		i32 x,
+		i32 y,
+		i32 width,
+		i32 height,
+		u8 red,
+		u8 green,
+		u8 blue,
+		i32 option9,
+		i32 option10)
+{
+	if (SpideyIsMysterioBossActive())
+	{
+		++gSpideyMysterioBossUiScaledDraws;
+		SpideyCompatPanelFlatPoly(
+			z,
+			x,
+			y,
+			width,
+			height,
+			red,
+			green,
+			blue,
+			option9,
+			option10);
+		return;
+	}
+
+	SpideyRetailFlatUiPolyFn retail =
+		(SpideyRetailFlatUiPolyFn)0x00462D60;
+	retail(
+		z,
+		x,
+		y,
+		width,
+		height,
+		red,
+		green,
+		blue,
+		option9,
+		option10);
+}
+
+// @Ok
+static void __cdecl SpideyCompatMysterioBossGouraudPoly(
+		float z,
+		i32 x,
+		i32 y,
+		i32 width,
+		i32 height,
+		u32 color0,
+		u32 color1,
+		u32 color2,
+		u32 color3,
+		i32 option10)
+{
+	if (SpideyIsMysterioBossActive())
+	{
+		++gSpideyMysterioBossUiScaledDraws;
+		SpideyCompatPanelGouraudPoly(
+			z,
+			x,
+			y,
+			width,
+			height,
+			color0,
+			color1,
+			color2,
+			color3,
+			option10);
+		return;
+	}
+
+	SpideyRetailGouraudUiPolyFn retail =
+		(SpideyRetailGouraudUiPolyFn)0x00462FB0;
+	retail(
+		z,
+		x,
+		y,
+		width,
+		height,
+		color0,
+		color1,
+		color2,
+		color3,
+		option10);
+}
+
 // @Ok
 static void SpideyInstallGameplayUiScaleCompat()
 {
@@ -11112,6 +11400,47 @@ static void SpideyInstallGameplayUiScaleCompat()
 			(void*)&SpideyCompatHealthBarFlatPoly,
 			"health_fill_flat_2");
 
+	const unsigned long mysterioBossQPolySites[] =
+	{
+		0x00464C8A,
+		0x00464EA5,
+		0x004650B0
+	};
+	int mysterioBossQPolyCalls =
+		0;
+	for (int mysterioQPolyIndex = 0;
+			mysterioQPolyIndex <
+				(int)(sizeof(mysterioBossQPolySites) /
+				 sizeof(mysterioBossQPolySites[0]));
+			++mysterioQPolyIndex)
+	{
+		mysterioBossQPolyCalls +=
+			SpideyPatchDirectCall(
+				mysterioBossQPolySites[mysterioQPolyIndex],
+				0x00507910,
+				(void*)&SpideyCompatMysterioBossQPoly2D,
+				"mysterio_boss_fill_qpoly");
+	}
+
+	const int mysterioBossFlatCall =
+		SpideyPatchDirectCall(
+			0x004650EB,
+			0x00462D60,
+			(void*)&SpideyCompatMysterioBossFlatPoly,
+			"mysterio_boss_fill_flat");
+	const int mysterioBossGouraudOne =
+		SpideyPatchDirectCall(
+			0x0046512D,
+			0x00462FB0,
+			(void*)&SpideyCompatMysterioBossGouraudPoly,
+			"mysterio_boss_fill_gouraud_1");
+	const int mysterioBossGouraudTwo =
+		SpideyPatchDirectCall(
+			0x00465162,
+			0x00462FB0,
+			(void*)&SpideyCompatMysterioBossGouraudPoly,
+			"mysterio_boss_fill_gouraud_2");
+
 	const unsigned long panelQPolySites[] =
 	{
 		0x00465D08,
@@ -11182,7 +11511,7 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
 			frameCalls,
 			textureCalls,
 			venomChaseBarCoordCalls,
@@ -11193,6 +11522,10 @@ static void SpideyInstallGameplayUiScaleCompat()
 			healthQPolyThree,
 			healthFlatOne,
 			healthFlatTwo,
+			mysterioBossQPolyCalls,
+			mysterioBossFlatCall,
+			mysterioBossGouraudOne,
+			mysterioBossGouraudTwo,
 			panelQPolyCalls,
 			panelGouraudCalls,
 			panelFlatCalls,
@@ -12490,6 +12823,18 @@ static void __fastcall SpideyModernMode3Camera(
 		return;
 	}
 
+	if (SpideyIsMysterioBossActive())
+	{
+		SpideyModernCameraRelease(
+			"mysterio_retail_boss_camera",
+			camera,
+			camera->mCameraMode);
+		retail(
+			camera,
+			0);
+		return;
+	}
+
 	if (camera->mCameraMode !=
 		CAMERAMODE_DEMO)
 	{
@@ -12922,6 +13267,18 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 
 	if (!camera)
 	{
+		retail(
+			camera,
+			0);
+		return;
+	}
+
+	if (SpideyIsMysterioBossActive())
+	{
+		SpideyModernCameraRelease(
+			"mysterio_retail_boss_postprocess",
+			camera,
+			camera->mCameraMode);
 		retail(
 			camera,
 			0);

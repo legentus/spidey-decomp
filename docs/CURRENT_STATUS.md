@@ -13838,3 +13838,20 @@ Full RE:
 Static validation:
 - `git diff --check`: PASS.
 - local compilation from chat is currently blocked by Local Commander's executable allowlist; next test must use `TEST_LATEST_BUILD.bat`.
+
+
+## 2026-10-06 — Mysterio boss UI/camera + laser timing frontier
+
+Latest Mysterio run: `logs/20261006-033344/spidey-decomp.log`.
+
+Implemented but not yet runtime-tested:
+- Mysterio boss type 311 common-health fill geometry now follows the same high-resolution HUD transform as its holder;
+- modern camera/manual-aim ownership is explicitly disabled while the Mysterio boss bar is active, preserving the original retail boss camera;
+- telemetry at `0x0045F489 -> CMysterio::FireBoobies` counts distinct state-6 laser attacks and canonical timing without changing behavior.
+
+Static RE proves `FireBoobies` is staged and does not simply create two new beams every 60-Hz frame. Existing beam liveness fix remains untouched.
+
+Full details:
+`docs/MYSTERIO_60FPS_FRONTIER_2026-10-06.md`
+
+Next: checkpoint this 60-FPS candidate, then make a temporary full-engine 20-FPS reference variant with the same telemetry to compare actual laser attack cadence.

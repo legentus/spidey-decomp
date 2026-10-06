@@ -2823,3 +2823,17 @@ See:
 `docs/VENOM_CHASE_BAR_RE_2026-10-06.md`
 
 Next test: run `TEST_LATEST_BUILD.bat`, enter Venom Chase, inspect the top chase bar, then exit normally for log inspection.
+
+
+## Mysterio frontier — 2026-10-06
+
+User requires:
+1. boss health fill aligned with holder;
+2. retail/default game camera only during Mysterio;
+3. verify suspected over-frequent lasers with a 20-FPS ground-truth comparison.
+
+60-FPS source candidate now contains the UI + camera fixes and telemetry-only wrapper at `0x0045F489 -> FireBoobies`.
+
+See `docs/MYSTERIO_60FPS_FRONTIER_2026-10-06.md`.
+
+Do not change Venom Chase phase-lock behavior while working on Mysterio.
