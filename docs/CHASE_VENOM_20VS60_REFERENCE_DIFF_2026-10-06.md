@@ -196,3 +196,23 @@ New telemetry:
 Forced-clean VC6 matching build of this phase-locked two-list source: **PASS**.
 
 This candidate is implemented and built but **not yet runtime-tested**.
+
+### Full L5A1 script-only camera rail chain confirmed
+
+Automated traversal of all type-203 nodes shows node 76 is the beginning of a long timed camera-control chain, not an isolated trigger.
+
+High-signal sequence:
+- node 76 delay 32 -> camera node 74 (128-frame fixed shot) + node 87;
+- node 87 delay 128 -> camera node 86 (128-frame fixed shot) + node 78;
+- node 78 delay 256 -> camera node 79 (128-frame fixed shot) + node 95;
+- node 95 delay 128 -> camera node 96 (16-frame shot) + node 98;
+- node 98 delay 4 -> camera node 99 (16-frame shot) + later script-only stages;
+- many subsequent type-203 stages continue the camera rail.
+
+Each `0x4280` delay writes `field_230`, which is decremented by `field_80` and therefore preserves nominal canonical duration. However, completion/pulse propagation happens only when `CScriptOnlyBaddy::AI` is dispatched. Every transition to the next controller is therefore quantized by ControlBaddyList update cadence.
+
+At authored 20 FPS, a completed stage can only hand off on a 3-canonical-tick Logic boundary. At 60 Hz, the same stage can hand off on the next 1-tick Logic pass. Repeating this across a long chain can cumulatively advance the camera rail relative to the player synth program even though each individual timer has the correct elapsed duration.
+
+This exactly fits the direct runtime diff: the failing 60-Hz camera rail is already far ahead by the final code-9 worker, while the full-engine 20-FPS reference still holds the intended heading near 1029.
+
+Tracked analysis: `tools/research/map_l5a1_scriptonly_camera_chain.py`.

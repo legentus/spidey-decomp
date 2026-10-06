@@ -13726,3 +13726,9 @@ New retail proof supersedes the BaddyList-only hypothesis:
 Current source phase-locks **both** list dispatches to the same 20-Hz-equivalent canonical tick during L5A1 synthesized control. Global engine/timer remains 60 Hz. Forced-clean VC6 build: PASS. Runtime test is still pending.
 
 Full RE: `docs/CHASE_VENOM_20VS60_REFERENCE_DIFF_2026-10-06.md`.
+
+### Static root-cause refinement
+
+The L5A1 camera path is a long chain of type-203 `CScriptOnlyBaddy` controllers on ControlBaddyList. Each stage uses elapsed-time-correct `field_230`, but stage completion/pulse handoff is quantized to that list's AI dispatch. At 60 Hz repeated handoffs can occur up to two canonical ticks earlier per stage, cumulatively advancing the camera rail. This explains why the final code-9 worker sees camera heading ~2080+ instead of the working ~1029.
+
+The current phase-locked BaddyList + ControlBaddyList candidate is therefore the strongest 60-Hz fix candidate so far.
