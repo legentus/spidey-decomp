@@ -4449,7 +4449,7 @@ static void __fastcall SpideyMysterioFireBoobiesTelemetry(
 	}
 
 	const unsigned long now =
-		(unsigned long)gTimerRelated;
+		(unsigned long)*(volatile long*)0x006B4CA8;
 	const int stateBefore =
 		(int)mysterio->field_31C.bothFlags;
 	const int substateBefore =
@@ -4745,6 +4745,211 @@ static int SpideyIsMysterioBossActive()
 			311 &&
 		boss !=
 			0;
+}
+
+// Mysterio authored-cadence compatibility.
+//
+// Retail CMysterio::AI is the sole dispatcher of the state-6 FireBoobies laser
+// attack. At the authored 20-FPS update quantum the active beam-refresh stage
+// runs once every ~50 ms. Native 60-Hz Logic otherwise services the same AI
+// roughly three times in that interval, changing the attack/beam behavior even
+// though the individual cooldown timers are elapsed-time aware.
+//
+// Keep only the Mysterio boss AI on the authored 3-canonical-tick boundary.
+// CBody::EveryFrame/animation, player, retail boss camera, physics, rendering,
+// other baddies and the rest of the engine continue at native 60 Hz.
+typedef void (__fastcall *SpideyRetailMysterioAIFn)(
+		CMysterio*,
+		void*);
+
+static CMysterio* gSpideyMysterioAI20Boss =
+	0;
+static long gSpideyMysterioAI20LastTick =
+	0;
+static int gSpideyMysterioAI20TickValid =
+	0;
+static int gSpideyMysterioAI20AccumulatedTicks =
+	0;
+static unsigned long gSpideyMysterioAI20Calls =
+	0;
+static unsigned long gSpideyMysterioAI20RetailCalls =
+	0;
+static unsigned long gSpideyMysterioAI20HeldCalls =
+	0;
+static unsigned long gSpideyMysterioAI20MaxElapsed =
+	0;
+static int gSpideyMysterioAI20Installed =
+	0;
+
+static void SpideyResetMysterioAI20State(
+		CMysterio* mysterio)
+{
+	gSpideyMysterioAI20Boss =
+		mysterio;
+	gSpideyMysterioAI20LastTick =
+		0;
+	gSpideyMysterioAI20TickValid =
+		0;
+	gSpideyMysterioAI20AccumulatedTicks =
+		0;
+}
+
+static void __fastcall SpideyMysterioAI20Hz(
+		CMysterio* mysterio,
+		void*)
+{
+	SpideyRetailMysterioAIFn retail =
+		(SpideyRetailMysterioAIFn)0x0045EF10;
+
+	++gSpideyMysterioAI20Calls;
+
+	if (!mysterio ||
+		!SpideyIsMysterioBossActive())
+	{
+		if (gSpideyMysterioAI20Boss != mysterio ||
+			gSpideyMysterioAI20TickValid)
+		{
+			SpideyResetMysterioAI20State(
+				mysterio);
+		}
+
+		retail(
+			mysterio,
+			0);
+		return;
+	}
+
+	if (gSpideyMysterioAI20Boss !=
+		mysterio)
+	{
+		SpideyResetMysterioAI20State(
+			mysterio);
+	}
+
+	const long currentTick =
+		*(volatile long*)0x006B4CA8;
+
+	if (!gSpideyMysterioAI20TickValid)
+	{
+		gSpideyMysterioAI20LastTick =
+			currentTick;
+		gSpideyMysterioAI20TickValid =
+			1;
+
+		int initialElapsed =
+			mysterio->field_80;
+		if (initialElapsed < 0)
+			initialElapsed = 0;
+		if (initialElapsed > 6)
+			initialElapsed = 6;
+
+		gSpideyMysterioAI20AccumulatedTicks =
+			initialElapsed;
+	}
+	else
+	{
+		int elapsed =
+			(int)(
+				currentTick -
+				gSpideyMysterioAI20LastTick);
+		gSpideyMysterioAI20LastTick =
+			currentTick;
+
+		if (elapsed < 0)
+			elapsed = 0;
+		if (elapsed > 6)
+			elapsed = 6;
+
+		gSpideyMysterioAI20AccumulatedTicks +=
+			elapsed;
+	}
+
+	if (gSpideyMysterioAI20AccumulatedTicks <
+		3)
+	{
+		++gSpideyMysterioAI20HeldCalls;
+		return;
+	}
+
+	int simElapsed =
+		gSpideyMysterioAI20AccumulatedTicks;
+	if (simElapsed < 1)
+		simElapsed = 1;
+	if (simElapsed > 6)
+		simElapsed = 6;
+
+	const int originalField80 =
+		mysterio->field_80;
+	mysterio->field_80 =
+		simElapsed;
+
+	retail(
+		mysterio,
+		0);
+
+	mysterio->field_80 =
+		originalField80;
+	gSpideyMysterioAI20AccumulatedTicks =
+		0;
+
+	++gSpideyMysterioAI20RetailCalls;
+	if ((unsigned long)simElapsed >
+		gSpideyMysterioAI20MaxElapsed)
+	{
+		gSpideyMysterioAI20MaxElapsed =
+			(unsigned long)simElapsed;
+	}
+}
+
+static int SpideyInstallMysterioAI20HzCompat()
+{
+	const unsigned long original =
+		0x0045EF10UL;
+	const unsigned long replacement =
+		(unsigned long)
+		(void*)&SpideyMysterioAI20Hz;
+
+	gSpideyMysterioAI20Installed =
+		SpideyPatchBytes(
+			0x0053BABC,
+			(const unsigned char*)&original,
+			(const unsigned char*)&replacement,
+			sizeof(original),
+			"timing_mysterio_ai_20hz_vtable");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"mysterio_ai_20hz_install installed=%d vtable=0x0053BAB4 slot=0x0053BABC retail=0x0045EF10 wrapper=0x%08lX boss_type=311 policy=mysterio_ai_only_3_canonical_tick_boundary_render_world_camera_60hz\n",
+			gSpideyMysterioAI20Installed,
+			replacement);
+		fclose(f);
+	}
+
+	return gSpideyMysterioAI20Installed;
+}
+
+static void SpideyLogMysterioAI20Stats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"mysterio_ai_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu boss_type=311 policy=mysterio_ai_only_20hz_field80_accumulated_global_timer_60hz\n",
+		gSpideyMysterioAI20Installed,
+		gSpideyMysterioAI20Calls,
+		gSpideyMysterioAI20RetailCalls,
+		gSpideyMysterioAI20HeldCalls,
+		gSpideyMysterioAI20MaxElapsed);
+	fclose(f);
 }
 
 struct SpideyChaseSchedulerStats
@@ -7007,6 +7212,7 @@ static void SpideyInstallHighFpsTimingCompat()
 		0x73A0,
 		0x023A);
 
+	SpideyInstallMysterioAI20HzCompat();
 	SpideyInstallChasePlayerAI20HzCompat();
 	SpideyInstallChaseCameraAI20HzCompat();
 	SpideyInstallChaseBaddyAI20HzCompat();
@@ -15994,13 +16200,10 @@ static unsigned long gSpideyPacingUnexpectedVblankDelta = 0;
 static unsigned long gSpideyPacingLastIntervalMs = 0;
 static int gSpideyPacingBeginPeriodOne = 0;
 
-// Temporary Mysterio ground-truth reference: deliver the untouched retail
-// TimerCallback at ~20 Hz. Retail converts each ~50 ms interval to roughly
-// three canonical 60-Hz ticks, reproducing the authored full-engine 20-FPS
-// update quantum while preserving canonical elapsed time. Revert to 60/1
-// after the Mysterio laser reference trace is captured.
-static const unsigned long kSpideyPacingDiagnosticHz = 20UL;
-static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 3UL;
+// Native-60 retail timer delivery: one canonical vblank per active callback.
+// Mysterio's authored attack cadence is handled locally in CMysterio::AI.
+static const unsigned long kSpideyPacingDiagnosticHz = 60UL;
+static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 1UL;
 
 static int SpideyPatchMainImport(
 		const char* dllName,
@@ -16202,8 +16405,8 @@ static void CALLBACK SpideyPacingTimerThunk(
 			gSpideyPacingVirtualTotalMs);
 	if (interval < 1)
 		interval = 1;
-	if (interval > 60)
-		interval = 60;
+	if (interval > 20)
+		interval = 20;
 
 	// Advance the delivery schedule regardless of retail pause state. Retail's
 	// original 16 ms periodic timer kept firing while paused too; TimerCallback
@@ -16376,7 +16579,7 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	{
 		fprintf(
 			f,
-			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=51 target_hz=20 expected_vblanks_per_callback=3 policy=mysterio_reference_periodic_1ms_dispatch_50ms_full_engine_20hz source_clock=%s retail_callback_preserved=1\n",
+			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=17 target_hz=60 expected_vblanks_per_callback=1 policy=periodic_1ms_dispatch_16_17ms_60hz source_clock=%s retail_callback_preserved=1\n",
 			delay,
 			resolution,
 			flags,
@@ -16427,6 +16630,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 				0;
 		}
 
+		SpideyLogMysterioAI20Stats();
 		SpideyLogChasePlayerAI20Stats();
 		SpideyLogChaseCameraAI20Stats();
 		SpideyLogChaseBaddyAI20Stats();
@@ -16540,7 +16744,7 @@ static int SpideyInstallModernTimerPacing()
 	{
 		fprintf(
 			f,
-			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=20 expected_vblanks_per_callback=3 policy=mysterio_reference_periodic_1ms_source_dispatch_50ms_full_engine_20hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=60 expected_vblanks_per_callback=1 policy=periodic_1ms_source_dispatch_16_17ms_60hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
 			setInstalled,
 			killInstalled,
 			(unsigned long)gSpideyOriginalTimeSetEvent,

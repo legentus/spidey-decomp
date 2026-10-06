@@ -13894,3 +13894,59 @@ Fix:
 - `git diff --check` passes.
 
 The intended full-engine 20-FPS Mysterio reference behavior remains unchanged.
+
+
+## 2026-10-06 — Mysterio 20-FPS reference result and 60-FPS AI cadence candidate
+
+Successful full-engine 20-FPS reference archive:
+`logs/20261006-040238/spidey-decomp.log`
+
+Reference identity:
+- runtime revision: `47cd318d` source lineage from temporary `f807ad2f` 20-FPS timer mode;
+- timer telemetry confirms `target_hz=20`, expected 3 canonical vblanks/callback;
+- Mysterio laser liveness and FireBoobies telemetry both installed.
+
+User result:
+- Mysterio health fill still does NOT align with its holder. The first common-boss fill hook hypothesis is therefore NOT sufficient and remains unresolved.
+- Mysterio lasers visibly behave differently/correctly at the authored 20-FPS reference cadence.
+- production goal: reproduce that laser behavior at 60 FPS without lowering the rest of the engine.
+
+Static RE:
+- Mysterio vtable: `0x0053BAB4`;
+- virtual AI slot: `0x0053BABC`;
+- retail target: `CMysterio::AI @ 0x0045EF10`;
+- the state-6 `FireBoobies @ 0x0045D200` dispatcher is inside this AI;
+- in the 20-FPS reference, telemetry observed 224 FireBoobies calls across four distinct state-6 attack entries;
+- 198 of those calls occurred in substate 2, the active beam create/refresh stage;
+- at authored 20 FPS those active refresh opportunities occur about every 50 ms;
+- at native 60 Hz the same AI state would otherwise be serviced about three times in that interval.
+
+Telemetry correction:
+- the first reference wrapper accidentally read the proxy-linked `gTimerRelated` symbol and logged tick 0;
+- production telemetry now reads retail canonical clock directly from `0x006B4CA8`.
+
+New production candidate:
+- global timer restored to native 60 Hz / one canonical vblank per callback;
+- only Mysterio's virtual AI is cadence-gated while boss type 311 is active;
+- accumulate retail canonical ticks from `0x006B4CA8`;
+- hold AI until >=3 ticks;
+- call untouched retail `CMysterio::AI` once with `field_80=accumulated` (normally 3), then restore the live field;
+- CBody EveryFrame/animation, player, physics, retail boss camera, rendering, other baddies, and all other engine systems remain 60 Hz;
+- existing elapsed-time laser-liveness fix remains active;
+- Mysterio retail-camera-only guards remain active;
+- Venom Chase phase-lock behavior is untouched.
+
+New telemetry:
+- `mysterio_ai_20hz_install`
+- `mysterio_ai_20hz_stats`
+- corrected `mysterio_laser_attack ... tick=...`
+
+Expected healthy 60-FPS candidate stats:
+- Mysterio AI wrapper calls at ~60 Hz while active;
+- retail AI calls approximately 1/3 of active wrapper calls;
+- held calls approximately 2/3;
+- max elapsed normally 3;
+- global timer telemetry remains target_hz=60.
+
+Next runtime test:
+run `TEST_LATEST_BUILD.bat`, enter Mysterio, confirm lasers match the 20-FPS reference while rendering/game remains 60 FPS. Health-bar alignment is a separate unresolved UI task.

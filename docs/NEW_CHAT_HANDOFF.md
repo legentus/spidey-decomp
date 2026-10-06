@@ -2851,3 +2851,14 @@ After one Mysterio fight run, compare attack starts/tick spacing and restore tim
 ### Mysterio reference compile-order fix
 
 The first `f807ad2f` test build failed because `SpideyMysterioFireBoobiesTelemetry` called `SpideyIsMysterioBossActive` before the helper was declared. Fixed with a forward declaration only. No behavior changes.
+
+
+## Mysterio laser production candidate — native 60 FPS
+
+The full-engine 20-FPS reference `logs/20261006-040238/spidey-decomp.log` produced visibly different/correct laser behavior.
+
+Current source restores global timer to 60 Hz and cadence-gates only `CMysterio::AI` via vtable slot `0x0053BABC` to one retail call per three canonical ticks while boss type 311 is active. This directly reduces state-6 FireBoobies/beam-refresh service cadence to the authored rate without lowering rendering or the rest of the world.
+
+Health bar remains unresolved despite the first Mysterio common-boss-fill scaling candidate. Do not mark it fixed.
+
+Next test: Mysterio fight at 60 FPS, compare lasers to 20-FPS reference, then inspect `mysterio_ai_20hz_stats` and corrected `mysterio_laser_attack` timing.
