@@ -14285,4 +14285,3 @@ Expected log:
 - QuadBit install line should show both Hor+ call patches = 1;
 - `quadbit_horplus` samples should show scalar 0.75 at 2560x1440;
 - `mysterio_health_alignment` should give holder and fill bounds needed for the exact health fix.
-
