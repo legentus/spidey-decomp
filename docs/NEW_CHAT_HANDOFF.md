@@ -2714,3 +2714,11 @@ The paired scripted-player + active-camera 20-Hz experiment still failed. The ne
 Purpose: capture one instrumented WORKING Chase run from the same executable/logging stack. Then diff its player position, camera heading, synth workers, collision state, level-script state and trigger timing against the failing 60-Hz trace to find the first true divergence.
 
 This build is deliberately temporary and should not be mistaken for the final native-60 policy.
+
+Installed reference build identity:
+- behavior commit `85ae7108eaaf19b826a1fe924904c89cd62ed380`
+- proxy `3543F54E9E79CF70603AE5ED2397A243ED1F383B309AD07A42D56E85B2EE55E5`
+- renderer `A1F6E5C21892DAA82555C8620B2FA9FFE822B7F917E7197289BB927688DFD458`
+- input `44680FE5EBE1CD63CDDD14B3423745A4DBE6707BE2506EDC37E5C27671D31F50`
+
+Use `TEST_LATEST_BUILD.bat` for the reference run. The whole game running around 20 FPS is expected and intentional.

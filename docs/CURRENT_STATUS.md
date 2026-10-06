@@ -13655,3 +13655,17 @@ This intentionally makes the whole retail engine run at the authored 20-FPS quan
 This is NOT the final native-60 solution. If Chase works here, this run becomes the working reference trace. The next step is to diff it against the failing 60-Hz trace and identify the first state divergence, then restore only that dependency to authored cadence while returning the rest of the engine to 60 Hz.
 
 Forced-clean matching VC6 build: PASS.
+
+### Installed full-engine 20-FPS ground-truth build
+
+- behavior commit: `85ae7108eaaf19b826a1fe924904c89cd62ed380`
+- proxy SHA-256: `3543F54E9E79CF70603AE5ED2397A243ED1F383B309AD07A42D56E85B2EE55E5`
+- renderer11 SHA-256: `A1F6E5C21892DAA82555C8620B2FA9FFE822B7F917E7197289BB927688DFD458`
+- input11 SHA-256: `44680FE5EBE1CD63CDDD14B3423745A4DBE6707BE2506EDC37E5C27671D31F50`
+- forced-clean matching proxy build: PASS
+- renderer11 rebuild: PASS
+- input11 rebuild + 32-bit ABI preflight: PASS
+- prepare/install into game folder: PASS
+- game intentionally not launched.
+
+TEST INSTRUCTION: run `TEST_LATEST_BUILD.bat`, not direct `SpideyPC.exe`, so the harness seeds and archives the full reference log. This diagnostic intentionally runs the whole engine at about 20 FPS/Hz. Test Chase Venom and report whether Spider-Man physically follows Venom through the building. Exit normally afterward so the working/broken reference trace can be captured.
