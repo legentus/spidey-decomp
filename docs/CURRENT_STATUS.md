@@ -413,8 +413,7 @@ Installed untested authored-cadence player-AI candidate:
 - game intentionally not launched.
 
 Next runtime action:
-1. install the authored-cadence player-AI candidate;
-2. run `TEST_LATEST_BUILD.bat`;
+1. run `TEST_LATEST_BUILD.bat` using the already-installed authored-cadence player-AI candidate;
 3. replay Chase Venom;
 4. watch whether Spider-Man's approach angle/path through the black wall changes;
 5. exit normally so the player-AI cadence counters and route trace can be compared.
