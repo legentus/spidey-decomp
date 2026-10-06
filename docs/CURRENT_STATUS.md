@@ -18,6 +18,32 @@ Workflow rules:
 
 At conversion time, the real checkout was reconciled to `dev` HEAD `3686276c7c868685791fd48813732868b2b04082`, with latest tested runtime still `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`. The Chase camera-relative/world-heading steering source remains implemented but runtime-untested.
 
+### Local conversion/build checkpoint
+
+Local-only workflow commits:
+- `de858d4eadfa4439dce290860d35d3f2dc6313f9` — make the real local checkout authoritative and replace the normal BAT entry points with updater-bypassing local wrappers.
+- `12e7e750445a34337d9db50796a2e9684f20aee5` — add prepare/build/install-without-launch support.
+- `34c6f816a876e086b3e60cf99ee731bb709baf8f` — make the existing test pipeline robust when invoked through Remote Desktop Commander, where `ComSpec` may be unset.
+
+A forced-clean prepare/install completed successfully from `34c6f816...`:
+- matching VC6 proxy: PASS;
+- renderer11 rebuild: PASS;
+- input11 rebuild + 32-bit preflight: PASS;
+- proxy installed into the real game folder: PASS;
+- renderer/input bridges installed: PASS;
+- game intentionally **not launched**.
+
+Installed untested runtime identity:
+- revision: `34c6f816a876e086b3e60cf99ee731bb709baf8f`;
+- proxy SHA-256: `6225AFAE8F5C5BC72DBE2320F0DC02848150B2CFADB66BDB3F1ED30EAA2AEAD0`;
+- renderer11 SHA-256: `50237510B0F1B3F45B1A18FCF563CEFF951AAAE44A767662F93CE756C734CBE6`;
+- input11 SHA-256: `12DD9983D27BB20426D632A558BB93C1BEA3A0621F18AE959E4D8E210A884DB3`;
+- consolidated log path: `C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`.
+
+The latest **runtime-tested** revision is still `df0b1d62...`. Do not promote `34c6f816...` to tested until the user runs Chase Venom and reports the result.
+
+Next runtime action is unchanged: launch Spider-Man normally, Level Select -> Chase Venom, verify 60-FPS cutscene remains intact, then judge the building-entry route as fixed / improved / unchanged / worse. After exit, ChatGPT can read the consolidated log directly from the game folder; the user no longer needs to upload it manually unless local-PC access is unavailable.
+
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
 Dedicated recovery document:
