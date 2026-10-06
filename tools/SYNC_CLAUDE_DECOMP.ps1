@@ -22,7 +22,7 @@ function Fail([string]$Message, [int]$Code = 1) {
 }
 
 function Git([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args) {
-    $output = & git.exe @Args 2>&1
+    $output = & git @Args 2>&1
     $code = $LASTEXITCODE
     if ($code -ne 0) {
         if ($output) { $output | ForEach-Object { Write-Host $_ } }
@@ -36,7 +36,7 @@ function Git-Text([string[]]$Args) {
 }
 
 function Test-Ancestor([string]$Older, [string]$Newer) {
-    & git.exe merge-base --is-ancestor $Older $Newer 2>$null
+    & git merge-base --is-ancestor $Older $Newer 2>$null
     return ($LASTEXITCODE -eq 0)
 }
 
@@ -49,7 +49,7 @@ Write-Host "[POLICY] Claude works only on origin/claude-decomp."
 Write-Host "[POLICY] No force pushes, no automatic conflict resolution."
 Write-Host ""
 
-if (-not (Get-Command git.exe -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     Fail "git was not found on PATH."
 }
 
@@ -69,17 +69,17 @@ if ($branch -ne "dev") {
 
 $dirtyParts = @()
 
-& git.exe diff --quiet
+& git diff --quiet
 if ($LASTEXITCODE -ne 0) {
-    $dirtyParts += (& git.exe diff --name-only)
+    $dirtyParts += (& git diff --name-only)
 }
 
-& git.exe diff --cached --quiet
+& git diff --cached --quiet
 if ($LASTEXITCODE -ne 0) {
-    $dirtyParts += (& git.exe diff --cached --name-only)
+    $dirtyParts += (& git diff --cached --name-only)
 }
 
-$untracked = @(& git.exe ls-files --others --exclude-standard)
+$untracked = @(& git ls-files --others --exclude-standard)
 if ($LASTEXITCODE -ne 0) {
     Fail "Could not inspect untracked files."
 }
@@ -150,11 +150,11 @@ if (Test-Ancestor $claudeTip $localHead) {
     }
 
     Write-Host ("[4/7] Merging pinned Claude snapshot " + $claudeTip.Substring(0,8) + " ...")
-    & git.exe merge --no-ff --no-edit $claudeTip
+    & git merge --no-ff --no-edit $claudeTip
     $mergeCode = $LASTEXITCODE
 
     if ($mergeCode -ne 0) {
-        $conflicts = (& git.exe diff --name-only --diff-filter=U 2>$null) -join [Environment]::NewLine
+        $conflicts = (& git diff --name-only --diff-filter=U 2>$null) -join [Environment]::NewLine
         Write-Host ""
         Write-Host "[CONFLICT] Claude changes overlap our local work." -ForegroundColor Yellow
         if ($conflicts) {
@@ -162,7 +162,7 @@ if (Test-Ancestor $claudeTip $localHead) {
             Write-Host $conflicts
         }
         Write-Host ("Rollback branch preserved: " + $backupBranch)
-        & git.exe merge --abort 2>$null
+        & git merge --abort 2>$null
         if ($LASTEXITCODE -ne 0) {
             Fail "Merge conflicted and git merge --abort also failed. Do not continue editing; ask ChatGPT to inspect the repo." 3
         }
@@ -170,7 +170,7 @@ if (Test-Ancestor $claudeTip $localHead) {
     }
 
     Write-Host "[5/7] Merge completed successfully."
-    $diffCheck = & git.exe diff --check HEAD^1..HEAD 2>&1
+    $diffCheck = & git diff --check HEAD^1..HEAD 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[WARNING] git diff --check reported whitespace/errors in the merged change:" -ForegroundColor Yellow
         $diffCheck | ForEach-Object { Write-Host $_ }
