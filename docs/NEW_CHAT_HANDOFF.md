@@ -2774,3 +2774,24 @@ The earlier BaddyList-only candidate was incomplete. Node 76 is now proven to be
 Retail Logic updates the two lists back-to-back before pending trigger commands. Current source therefore cadence-gates both lists with a **single shared phase**, so Venom and the node-76 camera controller advance together every third canonical tick while the rest of the engine remains at native 60 Hz.
 
 Forced-clean matching build: PASS. Not runtime-tested yet.
+
+
+## 2026-10-06 03:00 — FIRST KNOWN-GOOD 60-FPS CHASE BUILD
+
+The phase-locked world-list candidate at behavior commit `3ec28e4b2b7abb51f6166256df750690721fa475` is runtime-proven **WORKING**.
+
+Successful archive:
+`logs/20261006-030007/spidey-decomp.log`
+
+The game timer is still 60 Hz. The fix keeps the authored Chase subsystems in phase:
+- player/synth authored cadence;
+- active scripted camera cadence;
+- Venom's `BaddyList`;
+- script-only camera controller `ControlBaddyList`.
+
+Critical final code-9 proof:
+- camera heading = 1029 throughout;
+- desired world heading = 2053;
+- Spider-Man traverses the building on +Z and exits naturally.
+
+Do not regress or remove `3ec28e4b` behavior without preserving this known-good checkpoint first.

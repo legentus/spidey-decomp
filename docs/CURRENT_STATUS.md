@@ -13732,3 +13732,60 @@ Full RE: `docs/CHASE_VENOM_20VS60_REFERENCE_DIFF_2026-10-06.md`.
 The L5A1 camera path is a long chain of type-203 `CScriptOnlyBaddy` controllers on ControlBaddyList. Each stage uses elapsed-time-correct `field_230`, but stage completion/pulse handoff is quantized to that list's AI dispatch. At 60 Hz repeated handoffs can occur up to two canonical ticks earlier per stage, cumulatively advancing the camera rail. This explains why the final code-9 worker sees camera heading ~2080+ instead of the working ~1029.
 
 The current phase-locked BaddyList + ControlBaddyList candidate is therefore the strongest 60-Hz fix candidate so far.
+
+
+## 2026-10-06 03:00 — RUNTIME-PROVEN 60-FPS CHASE FIX
+
+Authoritative successful 60-Hz session:
+- archive: `logs/20261006-030007/spidey-decomp.log`;
+- runtime revision: `3ec28e4b`;
+- session start: `2026-10-06T03:00:07-04:00`;
+- proxy SHA-256: `34678FF856BEF480FAEDB5F7F37F1AE13B023FFF251040F0C6A3EE1BF68AC657`;
+- renderer11 SHA-256: `7FF6D9C594AD9DCE81442FBD1982EA7725FBAFBD313AA6711A8102AFEBC59A35`;
+- input11 SHA-256: `9A5C3933049A03CA7FA4318F28FF55C9280BE442FC845C81F4570E319A5DC4F5`.
+
+User result: **WORKS at 60 FPS** — Spider-Man physically follows Venom through the building correctly.
+
+Global timing proof:
+- modern timer remains `target_hz=60`;
+- expected vblanks per callback = 1;
+- this is NOT the temporary full-engine 20-FPS diagnostic.
+
+Phase-lock stats:
+- BaddyList installed = 1;
+- BaddyList calls = 5452;
+- BaddyList retail dispatches = 850;
+- BaddyList held dispatches = 1708;
+- ControlBaddyList installed = 1;
+- ControlBaddyList calls = 5452;
+- ControlBaddyList retail dispatches = 850;
+- ControlBaddyList held dispatches = 1708;
+- shared gate events = 850;
+- max shared elapsed = 3 canonical ticks.
+
+Existing Chase compatibility in the successful run:
+- scripted player AI retail calls = 854;
+- active camera AI retail calls = 853;
+- synth retail updates = 854;
+- render/physics presentation remains 60 Hz.
+
+Decisive final-worker proof:
+- final type-3/code-9 worker begins at trace sample ~693;
+- camera transform heading remains exactly `1029` through the worker;
+- desired world heading remains `2053`;
+- Spider-Man advances almost purely +Z through the building;
+- collision remains ground-only then drops to 0 as he clears the interior;
+- worker reaches timer 0 naturally.
+
+This matches the successful full-engine 20-FPS reference and directly fixes the prior failure where the same code-9 input was interpreted against a camera heading that had already advanced to ~2080 and kept rotating.
+
+Root cause:
+- Venom lives on `BaddyList @ 0x0056E990`;
+- the L5A1 script-only camera-rail controller lives on `ControlBaddyList @ 0x0056E994`;
+- at 60 Hz, allowing these lists to hand off independently every Logic pass lets the long script-only camera chain quantize transitions on 1-tick boundaries and cumulatively outrun the authored player/synth phase;
+- phase-locking both list dispatches to the same 3-canonical-tick authored boundary keeps Venom and the camera rail synchronized while the rest of the game remains 60 Hz.
+
+Behavior commit:
+`3ec28e4b2b7abb51f6166256df750690721fa475`
+
+Current HEAD may contain documentation-only commits after this behavior commit; gameplay behavior is unchanged unless explicitly noted.
