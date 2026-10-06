@@ -2706,3 +2706,11 @@ Normal user-side flow is BAT-first:
 - Modern input/camera design: https://github.com/legentus/spidey-decomp/blob/dev/docs/MODERN_INPUT_CAMERA.md
 - Upstream decomp: https://github.com/krystalgamer/spidey-decomp
 - Google Drive full game/files: https://drive.google.com/drive/u/0/folders/1xtk0kTTi9LNQnVLo3_NHkB5mkfzmfGKx
+
+## FULL-ENGINE 20-FPS GROUND-TRUTH DIAGNOSTIC FRONTIER
+
+The paired scripted-player + active-camera 20-Hz experiment still failed. The next diagnostic changes the modern timer dispatcher itself from 60-Hz retail callback delivery to 20-Hz delivery (~50 ms). Retail `TimerCallback` then naturally advances ~3 canonical vblanks per callback, so the entire engine observes the authored 20-FPS update quantum.
+
+Purpose: capture one instrumented WORKING Chase run from the same executable/logging stack. Then diff its player position, camera heading, synth workers, collision state, level-script state and trigger timing against the failing 60-Hz trace to find the first true divergence.
+
+This build is deliberately temporary and should not be mistaken for the final native-60 policy.

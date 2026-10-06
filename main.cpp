@@ -15130,20 +15130,23 @@ static void SpideyInstall2DPolyProvenanceCompat()
 // one ~32 ms present almost exactly every 24 frames / 0.4 s.
 //
 // Keep the retail TimerCallback, pause state, fractional accumulator and
-// MyVSync work intact. Replace the fixed 16 ms source with one 1 ms periodic
-// WinMM heartbeat and dispatch the untouched retail callback only when an
-// absolute elapsed-time deadline reaches the next 60 Hz boundary. The
-// cumulative integer-millisecond delivery schedule stays just *after* the
-// ideal 60 Hz deadline:
+// MyVSync work intact. The normal native-60 compatibility dispatcher uses a
+// 1 ms WinMM heartbeat and dispatches the untouched retail callback at 60 Hz.
 //
-//   deadline_ms(n) = floor(n * 1000 / 60) + 1
+// CHASE GROUND-TRUTH DIAGNOSTIC:
+// Temporarily dispatch the *entire retail engine timer* at 20 Hz instead.
+// TimerCallback converts elapsed milliseconds back into the canonical 60-Hz
+// clock, so a ~50 ms callback naturally advances about three vblanks:
 //
-// This yields intervals such as 17,17,17,16,17,17,16... . The 1 ms heartbeat
-// is checked against timeGetTime rather than counted as perfect milliseconds,
-// so scheduler jitter cannot accumulate into the 58-59 Hz drift observed in
-// the first phased-timer runtime. Because cumulative retail timer milliseconds
-// stay just above exact integer boundaries, gTimerVblankRelated advances one
-// vblank per active delivery instead of reproducing the old 32 ms hole.
+//   deadline_ms(n) = floor(n * 1000 / 20) + 1
+//   TimerCallback ticks ~= 50 ms * 60 / 1000 = 3
+//
+// This intentionally reproduces the known-good retail-style 20-FPS update
+// quantum across Logic, EveryFrame, animation, player, camera, collision,
+// triggers and level scripts at once. It is a diagnostic build, not the final
+// native-60 policy. Once a working Chase trace is captured, diff it against
+// the failing 60-Hz trace and restore only the subsystem that truly requires
+// the authored cadence.
 typedef void (CALLBACK *SpideyRetailTimerCallbackFn)(
 		UINT,
 		UINT,
@@ -15193,6 +15196,11 @@ static unsigned long gSpideyPacingPausedCallbackCount = 0;
 static unsigned long gSpideyPacingUnexpectedVblankDelta = 0;
 static unsigned long gSpideyPacingLastIntervalMs = 0;
 static int gSpideyPacingBeginPeriodOne = 0;
+
+// Temporary ground-truth diagnostic. 20-Hz retail timer delivery should make
+// TimerCallback advance three canonical 60-Hz vblanks per active callback.
+static const unsigned long kSpideyPacingDiagnosticHz = 20UL;
+static const unsigned long kSpideyPacingExpectedVblanksPerCallback = 3UL;
 
 static int SpideyPatchMainImport(
 		const char* dllName,
@@ -15379,7 +15387,7 @@ static void CALLBACK SpideyPacingTimerThunk(
 	const unsigned long targetTotalMs =
 		(unsigned long)(
 			((nextVirtualTick * 1000UL) /
-			 60UL) +
+			 kSpideyPacingDiagnosticHz) +
 			1UL);
 
 	if (gSpideyPacingSourceMs <
@@ -15394,8 +15402,8 @@ static void CALLBACK SpideyPacingTimerThunk(
 			gSpideyPacingVirtualTotalMs);
 	if (interval < 1)
 		interval = 1;
-	if (interval > 20)
-		interval = 20;
+	if (interval > 60)
+		interval = 60;
 
 	// Advance the delivery schedule regardless of retail pause state. Retail's
 	// original 16 ms periodic timer kept firing while paused too; TimerCallback
@@ -15445,7 +15453,8 @@ static void CALLBACK SpideyPacingTimerThunk(
 	{
 		++gSpideyPacingPausedCallbackCount;
 	}
-	else if (deltaVblanks > 1)
+	else if (deltaVblanks !=
+		kSpideyPacingExpectedVblanksPerCallback)
 	{
 		++gSpideyPacingUnexpectedVblankDelta;
 	}
@@ -15567,7 +15576,7 @@ static UINT WINAPI SpideyCompatTimeSetEvent(
 	{
 		fprintf(
 			f,
-			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=17 policy=periodic_1ms_dispatch_16_17ms_60hz source_clock=%s retail_callback_preserved=1\n",
+			"timer_pacing event=intercept retail_delay=%u retail_resolution=%u retail_flags=0x%08X callback=0x%08lX user=0x%08lX synthetic_id=%u source_period_ms=%u first_delivery_target_ms=51 target_hz=20 expected_vblanks_per_callback=3 policy=diagnostic_periodic_1ms_dispatch_50ms_full_engine_20hz source_clock=%s retail_callback_preserved=1\n",
 			delay,
 			resolution,
 			flags,
@@ -15730,7 +15739,7 @@ static int SpideyInstallModernTimerPacing()
 	{
 		fprintf(
 			f,
-			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe policy=periodic_1ms_source_dispatch_16_17ms_60hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
+			"timer_pacing_install set_event=%d kill_event=%d original_set=0x%08lX original_kill=0x%08lX begin_period=0x%08lX end_period=0x%08lX time_get_time=0x%08lX retail_match=16ms_periodic_main_exe target_hz=20 expected_vblanks_per_callback=3 policy=diagnostic_periodic_1ms_source_dispatch_50ms_full_engine_20hz install_order=kill_then_set atomic_cleanup=1 fallback=retail\n",
 			setInstalled,
 			killInstalled,
 			(unsigned long)gSpideyOriginalTimeSetEvent,

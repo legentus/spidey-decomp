@@ -13631,3 +13631,27 @@ Static structure after edit:
 Next action:
 - rerun `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat`;
 - if it compiles, continue with the current runtime test for pause crash, aggro/non-aggro web targeting, blob-shadow anchoring, and dynamic pause box.
+
+## 2026-10-06 — TRUE FULL-ENGINE 20-FPS GROUND-TRUTH DIAGNOSTIC
+
+Previous targeted cadence experiments are closed as insufficient:
+- scripted SpideyAI0 at authored 20 Hz: still fails;
+- scripted SpideyAI0 + active camera at authored 20 Hz: still fails;
+- forced Wait05->Wait06 trigger recovery: fired and still failed.
+
+Latest paired player+camera runtime proved the route still fails while synthesized control remains active for several seconds after the visible cutscene, matching the user's observation that Spider-Man keeps moving/jumping autonomously in the building hole until control returns.
+
+New diagnostic goal: stop guessing individual consumers and reproduce the known-good 20-FPS engine cadence globally with all existing logging still active.
+
+Retail timer behavior makes this exact:
+- `TimerCallback` converts callback milliseconds into canonical 60-Hz ticks with `interval_ms * 60 / 1000`;
+- a ~50 ms callback therefore produces about 3 canonical ticks;
+- the modern timer compatibility layer previously dispatched untouched retail TimerCallback at ~60 Hz using `floor(n*1000/60)+1` deadlines;
+- diagnostic mode changes that dispatcher to `floor(n*1000/20)+1`, allowing 50/51 ms intervals;
+- expected active callback delta becomes 3 vblanks instead of 1.
+
+This intentionally makes the whole retail engine run at the authored 20-FPS quantum for the diagnostic: Logic, EveryFrame, animation, player, camera, collision, triggers, level scripts, and presentation scheduling. Existing Chase player/camera wrappers naturally collapse to one retail call per engine update because `field_80` is already about 3.
+
+This is NOT the final native-60 solution. If Chase works here, this run becomes the working reference trace. The next step is to diff it against the failing 60-Hz trace and identify the first state divergence, then restore only that dependency to authored cadence while returning the rest of the engine to 60 Hz.
+
+Forced-clean matching VC6 build: PASS.

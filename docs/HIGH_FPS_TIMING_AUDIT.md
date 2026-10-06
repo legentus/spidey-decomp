@@ -401,3 +401,14 @@ Type-3 code 10 is camera-relative (`E2D=-127`). The building-approach trace show
 Simple `field_236` camera interpolation scales with `field_80`, but `CM_Normal` performs nonlinear camera solve/collision/focus work per AI invocation. Therefore three 60-Hz camera solves can produce a different transform heading path from one 20-FPS solve with `field_80=3`.
 
 Next candidate pairs scripted `SpideyAI0` and the active retail camera at 20 Hz during L5A1 synthesized control while leaving rendering, other bodies, inactive cameras, and ordinary gameplay at 60 Hz. Forced-clean VC6 build: PASS.
+
+## Full-engine 20-FPS reference experiment
+
+Targeted 20-Hz ownership of player AI and then player+camera did not restore Chase Venom. The remaining uncertainty is cross-system update ordering among world objects, level scripts, animation, collision and trigger state.
+
+The timer layer provides an exact ground-truth mechanism. Retail `TimerCallback` computes virtual 60-Hz time from callback milliseconds. Dispatching it every ~50 ms gives ~3 canonical ticks at once, reproducing the known working 20-FPS quantum across the complete engine instead of selectively throttling consumers.
+
+Diagnostic timer dispatcher:
+`deadline_ms(n) = floor(n * 1000 / 20) + 1`
+
+Expected callback interval: 50/51 ms. Expected retail vblank advance per active callback: 3. The diagnostic must be reverted after the reference trace is captured.
