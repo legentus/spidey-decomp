@@ -4963,6 +4963,205 @@ static unsigned long gSpideyChaseBuildingEntryRecoveryFires = 0;
 
 static int gSpideyChaseSynthInstalled = 0;
 
+// True authored-cadence player-AI compatibility.
+//
+// CPlayer::AI @ 0x004C65C0 performs ordinary per-frame housekeeping and then
+// calls the callback stored at player+0x554.  CPlayer_CPlayer writes retail
+// SpideyAI0 (0x004B13F0) into that slot at 0x004BA2AF/0x004BA2B5.
+//
+// The previous native-60 compatibility kept SpideyAI0 itself at 60 Hz and
+// corrected selected subsystems (synth sample/hold, analogue ramp, movement
+// half-steps).  That preserves elapsed time but not authored update order:
+// turning, friction, collision, surface-state, trigger sweeps and other
+// feedback systems are evaluated three times per 50 ms instead of once.
+//
+// During synthesized Chase control only, run the retail callback once per
+// three canonical 60-Hz ticks with field_80 set to the accumulated elapsed
+// ticks.  CPlayer::AI housekeeping, CSuper animation, rendering, cameras and
+// every other body remain on the normal 60-Hz simulation cadence.
+typedef void (__cdecl *SpideyRetailPlayerAIFn)(
+	CPlayer*);
+
+static CPlayer* gSpideyChasePlayerAI20Player = 0;
+static long gSpideyChasePlayerAI20LastTick = 0;
+static int gSpideyChasePlayerAI20TickValid = 0;
+static int gSpideyChasePlayerAI20AccumulatedTicks = 0;
+static unsigned long gSpideyChasePlayerAI20Calls = 0;
+static unsigned long gSpideyChasePlayerAI20RetailCalls = 0;
+static unsigned long gSpideyChasePlayerAI20HeldCalls = 0;
+static unsigned long gSpideyChasePlayerAI20MaxElapsed = 0;
+static int gSpideyChasePlayerAI20Installed = 0;
+
+static void SpideyResetChasePlayerAI20State(
+		CPlayer* player)
+{
+	gSpideyChasePlayerAI20Player =
+		player;
+	gSpideyChasePlayerAI20LastTick =
+		0;
+	gSpideyChasePlayerAI20TickValid =
+		0;
+	gSpideyChasePlayerAI20AccumulatedTicks =
+		0;
+}
+
+static void __cdecl SpideyChasePlayerAI20Hz(
+		CPlayer* player)
+{
+	SpideyRetailPlayerAIFn retail =
+		(SpideyRetailPlayerAIFn)
+		0x004B13F0;
+
+	++gSpideyChasePlayerAI20Calls;
+
+	if (!player ||
+		SpideyRetailGetLevelId() != 0x501 ||
+		!player->field_1AC)
+	{
+		if (gSpideyChasePlayerAI20Player != player ||
+			gSpideyChasePlayerAI20TickValid)
+		{
+			SpideyResetChasePlayerAI20State(
+				player);
+		}
+
+		retail(
+			player);
+		return;
+	}
+
+	if (gSpideyChasePlayerAI20Player != player)
+	{
+		SpideyResetChasePlayerAI20State(
+			player);
+	}
+
+	const long currentTick =
+		*(volatile long*)0x006B4CA8;
+
+	if (!gSpideyChasePlayerAI20TickValid)
+	{
+		gSpideyChasePlayerAI20LastTick =
+			currentTick;
+		gSpideyChasePlayerAI20TickValid =
+			1;
+
+		int initialElapsed =
+			player->field_80;
+		if (initialElapsed < 0)
+			initialElapsed = 0;
+		if (initialElapsed > 6)
+			initialElapsed = 6;
+		gSpideyChasePlayerAI20AccumulatedTicks =
+			initialElapsed;
+	}
+	else
+	{
+		int elapsed =
+			(int)(
+				currentTick -
+				gSpideyChasePlayerAI20LastTick);
+		gSpideyChasePlayerAI20LastTick =
+			currentTick;
+
+		if (elapsed < 0)
+			elapsed = 0;
+		if (elapsed > 6)
+			elapsed = 6;
+
+		gSpideyChasePlayerAI20AccumulatedTicks +=
+			elapsed;
+	}
+
+	if (gSpideyChasePlayerAI20AccumulatedTicks < 3)
+	{
+		++gSpideyChasePlayerAI20HeldCalls;
+		return;
+	}
+
+	int simElapsed =
+		gSpideyChasePlayerAI20AccumulatedTicks;
+	if (simElapsed < 1)
+		simElapsed = 1;
+	if (simElapsed > 6)
+		simElapsed = 6;
+
+	const int originalField80 =
+		player->field_80;
+	player->field_80 =
+		simElapsed;
+
+	retail(
+		player);
+
+	player->field_80 =
+		originalField80;
+	gSpideyChasePlayerAI20AccumulatedTicks =
+		0;
+
+	++gSpideyChasePlayerAI20RetailCalls;
+	if ((unsigned long)simElapsed >
+		gSpideyChasePlayerAI20MaxElapsed)
+	{
+		gSpideyChasePlayerAI20MaxElapsed =
+			(unsigned long)simElapsed;
+	}
+}
+
+static int SpideyInstallChasePlayerAI20HzCompat()
+{
+	// Patch only the immediate callback written by CPlayer_CPlayer:
+	//   C7 86 54 05 00 00 F0 13 4B 00
+	//                     ^ immediate at 0x004BA2B5
+	const unsigned long original =
+		0x004B13F0UL;
+	const unsigned long replacement =
+		(unsigned long)
+		(void*)&SpideyChasePlayerAI20Hz;
+
+	gSpideyChasePlayerAI20Installed =
+		SpideyPatchBytes(
+			0x004BA2B5,
+			(const unsigned char*)&original,
+			(const unsigned char*)&replacement,
+			sizeof(original),
+			"timing_chase_player_ai_20hz_callback");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"chase_player_ai_20hz_install installed=%d constructor_immediate=0x004BA2B5 retail=0x004B13F0 wrapper=0x%08lX policy=cplayer_housekeeping_60hz_scripted_spideyai0_20hz_field80_3\\n",
+			gSpideyChasePlayerAI20Installed,
+			replacement);
+		fclose(f);
+	}
+
+	return gSpideyChasePlayerAI20Installed;
+}
+
+static void SpideyLogChasePlayerAI20Stats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"chase_player_ai_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu level=0x501 policy=cplayer_housekeeping_60hz_scripted_spideyai0_20hz_field80_accumulated downstream_trigger_recovery=disabled\\n",
+		gSpideyChasePlayerAI20Installed,
+		gSpideyChasePlayerAI20Calls,
+		gSpideyChasePlayerAI20RetailCalls,
+		gSpideyChasePlayerAI20HeldCalls,
+		gSpideyChasePlayerAI20MaxElapsed);
+	fclose(f);
+}
+
 static CPlayer* gSpideyChaseRampPlayer = 0;
 static int gSpideyChaseRampRemainder = 0;
 static unsigned long gSpideyChaseRampCalls = 0;
@@ -5609,12 +5808,9 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 			player);
 	}
 
-	// mCollision describes the preceding player-physics result at this point.
-	// Use it to detect the exact authored building-entry failure before the
-	// next scripted input sample is consumed.
-	SpideyChaseRecoverBuildingEntryIfMissed(
-		player);
-
+	// Do not synthesize downstream trigger recovery while the authored-cadence
+	// player-AI experiment is active.  The purpose of this candidate is to let
+	// the natural 20-Hz player trajectory cross the retail trigger faces.
 	const long currentTick =
 		*(volatile long*)0x006B4CA8;
 	int elapsedSinceCall =
@@ -6207,6 +6403,7 @@ static void SpideyInstallHighFpsTimingCompat()
 		0x73A0,
 		0x023A);
 
+	SpideyInstallChasePlayerAI20HzCompat();
 	SpideyInstallChaseSynth20HzCompat();
 }
 
@@ -15212,6 +15409,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 				0;
 		}
 
+		SpideyLogChasePlayerAI20Stats();
 		SpideyLogChaseSynthStats();
 		SpideyDumpChaseSynthTrace();
 		SpideyLogChaseSchedulerStats();

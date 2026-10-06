@@ -334,11 +334,81 @@ Installed untested corrected Wait05->Wait06 candidate:
 - modern-input 32-bit ABI preflight: **PASS**;
 - game intentionally not launched.
 
+### 2026-10-06 00:48 test — Wait06 recovery fired and still did not fix route
+
+Proper harness log:
+- runtime revision: `b1174ba0935aa512641d7e4fdafe42aa6ed6df25`;
+- preserved log: `logs/20261006-004842/spidey-decomp.log`;
+- result: **STILL WRONG**.
+
+Critical proof:
+- `chase_building_entry_recovery fired=1`;
+- recovered stage: `wait05_to_wait06`;
+- node: `298`;
+- checksum: `0x6B450F4B`;
+- Wait05 persistent state: completed (`NumPulsesSet=1, NumPulses=0`);
+- Wait06 had not completed before recovery;
+- recovery fired at approximately `(74563756, 53248, 15833957)`;
+- blocking model checksum: **`0x1AD2FBED` = `Inside01`**;
+- collision: `0x0003`;
+- active head worker: type 3 / code 10.
+
+Therefore the trigger-stage hypothesis is downstream, not causal: even forcing the exact authored Wait06 command point while blocked does not make Spider-Man traverse the building.
+
+### Root cause pivot — reproduce 20-FPS player update order, not just elapsed time
+
+Deeper retail RE identified the exact player-AI seam:
+- `Ob_AI @ 0x00460FC0` calls `CBody::EveryFrame()`, then the object's virtual AI;
+- CPlayer vtable `0x0053C464` routes virtual AI to `CPlayer::AI @ 0x004C65C0`;
+- `CPlayer::AI` performs ordinary per-frame housekeeping, then loads the callback from `player+0x554` at `0x004C684F`;
+- `CPlayer_CPlayer` writes retail `SpideyAI0 @ 0x004B13F0` to `player+0x554` using the immediate at `0x004BA2B5`.
+
+Turn-controller RE also proves why three 60-Hz updates are not generally equivalent to one 20-Hz update:
+- `SetTargetTorsoAngle` computes a target step and remaining-call budget in `field_DF4/field_DF8`;
+- retail `SpideyAI0` later integrates with `angle += field_DF4 * field_80` and `field_DF8 -= field_80`;
+- however `CheckForwards` can reevaluate/retarget the turn controller on subsequent AI passes;
+- movement, friction, collision, surface-state and trigger feedback are likewise re-entered between the native-60 half-steps.
+
+So preserving total elapsed ticks is insufficient: update **order and feedback cadence** differ.
+
+### Implemented authored-cadence player-AI candidate
+
+New policy:
+- ordinary CPlayer housekeeping remains 60 Hz;
+- CSuper animation remains 60 Hz;
+- renderer remains 60 Hz;
+- camera/global engine and every other object remain on the normal native-60 path;
+- only the default Spider-Man callback `SpideyAI0` is cadence-gated while:
+  - level is `0x501`; and
+  - synthesized control `field_1AC` is active.
+
+During that state:
+- canonical 60-Hz ticks are accumulated;
+- two intermediate callback invocations are held;
+- on the third tick, retail `SpideyAI0` runs once with `player->field_80 = 3`;
+- the original `field_80` is restored afterward.
+
+This makes turning, movement integration, friction, collision, trigger sweeps and scripted-player state transitions see the same single three-tick quantum as the known-good 20-FPS case.
+
+The existing synth/ramp wrappers naturally collapse to their retail 20-Hz behavior under this owner:
+- synth sees one call every three ticks with `field_80=3`;
+- the raw analogue ramp correction becomes one `0x20` increment per 50 ms;
+- there are no held player-AI frames inside SpideyAI0 itself.
+
+The downstream Wait05->Wait06 forced recovery is **disabled** for this candidate so the runtime tests whether the natural authored path crosses the original trigger faces.
+
+New telemetry:
+- `chase_player_ai_20hz_install`;
+- `chase_player_ai_20hz_stats` with total wrapper calls, actual retail calls, held calls, and max elapsed ticks.
+
+Forced-clean matching VC6 build of this source: **PASS**.
+
 Next runtime action:
-1. install the corrected Wait05->Wait06 candidate;
-2. run `TEST_LATEST_BUILD.bat` (not direct `SpideyPC.exe`) so the harness preserves the full runtime log;
-3. replay Chase Venom and watch the black wall;
-4. exit normally so the persistent Wait-state/recovery telemetry can be inspected.
+1. install the authored-cadence player-AI candidate;
+2. run `TEST_LATEST_BUILD.bat`;
+3. replay Chase Venom;
+4. watch whether Spider-Man's approach angle/path through the black wall changes;
+5. exit normally so the player-AI cadence counters and route trace can be compared.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 

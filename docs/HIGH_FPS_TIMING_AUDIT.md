@@ -365,3 +365,27 @@ The next runtime performs startup-only xref scans over `SpideyAI0 @ 0x004B13F0 +
 - `+0x23A`.
 
 This remains consistent with the project rule: do not globally scale the engine. Convert only proven cross-cadence behavior at the narrowest ownership seam.
+
+## Chase Venom authored-cadence player-AI finding — 2026-10-06
+
+Latest proper harness run proved the forced Wait05->Wait06 recovery fired at the black wall and still did not restore traversal. The blocker was `Inside01` (`0x1AD2FBED`), so trigger progression is downstream of the trajectory failure.
+
+Deeper retail RE identifies a cleaner cadence seam:
+- `Ob_AI @ 0x00460FC0` runs `CBody::EveryFrame()` then virtual AI;
+- CPlayer virtual AI is `CPlayer::AI @ 0x004C65C0`;
+- `CPlayer::AI` performs ordinary per-frame bookkeeping and then calls the function pointer at `player+0x554`;
+- `CPlayer_CPlayer` initializes that pointer to `SpideyAI0 @ 0x004B13F0` using the immediate at `0x004BA2B5`.
+
+Turn-controller RE explains why elapsed-time scaling alone is insufficient:
+- `SetTargetTorsoAngle` computes `field_DF4` and `field_DF8` from current heading error;
+- later `SpideyAI0` integrates `angle += field_DF4 * field_80` and `field_DF8 -= field_80`;
+- `CheckForwards` can retarget on later AI passes, so three one-tick updates can recompute nonlinear steering between substeps whereas one three-tick update does not;
+- the same ordering issue applies to friction, collision, surface transition and trigger feedback.
+
+Implemented compatibility experiment:
+- ordinary CPlayer housekeeping, animation, camera/global systems and all other objects remain 60 Hz;
+- only the default `SpideyAI0` callback is gated to one execution per three canonical 60-Hz ticks while level `0x501` and synthesized control are active;
+- the retail callback runs with accumulated `field_80` (normally 3);
+- downstream forced Wait recovery is disabled so original trigger faces must be hit naturally.
+
+Forced-clean matching VC6 build: PASS.

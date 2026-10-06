@@ -1,73 +1,85 @@
-# CHASE VENOM BUILDING-ENTRY TRIGGER FRONTIER (2026-10-05)
+# CHASE VENOM AUTHORED-CADENCE PLAYER-AI FRONTIER (2026-10-06)
 
 > **Workflow update:** the authoritative working repository is now the local Git checkout at `F:\Spider-Man 2000 Recomp\project main`. Normal TEST/FAST BATs build that local checkout directly and do not refresh from GitHub. `origin` remains a fallback/backup remote. Read the top of `docs/CURRENT_STATUS.md` before changing this workflow.
 
-## LIVE FRONTIER — WAIT05→WAIT06 STAGE-AWARE BUILDING RECOVERY
+## LIVE FRONTIER — SCRIPTED SPIDEYAI0 AT AUTHORED 20-HZ CADENCE
 
 This section supersedes the older Chase frontier notes immediately below it.
 
 Latest proper instrumented test:
-- runtime revision: `b1a72d62b2ed2a2690e68478e9e441fff6318633`;
-- behavior under test: scripted-camera-yield commit `bbacc44edc799d896e6223832b5e9b5e0c56f500`;
-- preserved archive: `logs/20261005-230941/spidey-decomp.log`;
-- result: **STILL WRONG** — Spider-Man reaches the black wall in the building, receives real forward collision, and does not continue through the authored passage.
+- runtime revision: `b1174ba0935aa512641d7e4fdafe42aa6ed6df25`;
+- preserved archive: `logs/20261006-004842/spidey-decomp.log`;
+- result: **STILL WRONG**.
 
-New runtime proof:
-- `mCollision & 1` repeatedly sets during the long type-3 code-10 worker;
-- `mCollision=0x3` is common at the failure;
-- player enters retail `CheckRunIntoWall` state `0x80000` and later surface-transition states while the scripted worker remains active.
+Most important proof from that run:
+- the Wait05->Wait06 recovery **did fire**;
+- node `298` / checksum `0x6B450F4B` was invoked;
+- Wait05 persistent pulse state was complete;
+- Spider-Man still failed to traverse the building;
+- the blocking model checksum was **`0x1AD2FBED` = `Inside01`**;
+- collision was `0x0003`;
+- active worker was type 3 / code 10.
 
-Deep L5A1 retail-data RE located the actual transition:
-- `L5A1_T.trg` is a 344-node trigger graph;
-- node **44** is a physical type-6 command point with no incoming links;
-- node 44 checksum: **`0x854B6E67`**;
-- node 44 links: `21,48,53,196,292,300,338,305`;
-- node 338 contains the `Inside` visibility-on command;
-- node 44 command list is `[134,1,3,FFFF]`, which initializes one pulse then pulses its linked building-state nodes.
+Conclusion:
+- trigger progression is downstream;
+- the root issue is the physical/scripted player trajectory reaching `Inside01` incorrectly.
 
-PSX correlation:
-- `0x854B6E67` appears exactly once in `L5A1_G.psx`;
-- retail trigger checksum table starts at file offset `0x3D76C`;
-- **trigger table index 2 = node-44 checksum `0x854B6E67`**.
+### FPS / update-order RE
 
-Retail trigger path was reconstructed end-to-end:
-- `SpideyAI0` snapshots `mPos` to `field_E8`;
-- after movement it sweeps a trigger-only line from the previous position toward the current position with `RecordTriggerZoneHits=1`;
-- `M3dColij_LineToThisItem` records a trigger-face index;
-- retail resolves that index through the PSX checksum table;
-- retail calls `Trig_TriggerCommandPoint(checksum,true)`.
+Retail call chain:
+- `Ob_AI @ 0x00460FC0` -> `CBody::EveryFrame()` -> virtual AI;
+- CPlayer vtable: `0x0053C464`;
+- CPlayer virtual AI: `CPlayer::AI @ 0x004C65C0`;
+- `CPlayer::AI` performs ordinary per-frame housekeeping, then at `0x004C684F` loads `player+0x554` and calls it;
+- CPlayer construction writes `SpideyAI0 @ 0x004B13F0` into `player+0x554` via immediate `0x004BA2B5`.
 
-Therefore the intended building transition is:
-**trigger face index 2 -> 0x854B6E67 -> node 44 -> linked Inside/window/building state commands**.
+Turn-controller RE:
+- `CheckForwards @ 0x004BF8A0` calls `SetTargetTorsoAngle @ 0x004C6970`;
+- `SetTargetTorsoAngle` computes turn target/step/budget in `field_DF0/DF4/DF8`;
+- later in `SpideyAI0`, retail performs:
+  - `angle += field_DF4 * field_80`;
+  - `field_DF8 -= field_80`;
+- the integration is elapsed-time-aware, but the AI can reevaluate steering/collision feedback between calls.
 
-Implemented candidate:
-- behavior commit: `335dd7e51eb1baba785a96da7d81782fac683c28`;
-- if node 44 already executed naturally, compatibility does nothing;
-- otherwise recovery requires level `0x501`, synthesized control, type-3 code 10, forward collision, the observed building-entry cluster, exact node/checksum identity, and two consecutive blocked samples;
-- it then calls the **authored** `Trig_TriggerCommandPoint(0x854B6E67,true)`;
-- no noclip, teleport, arbitrary collision removal, or direct visibility forcing is used.
+Therefore:
+- one 20-FPS player update with `field_80=3` is not generally equivalent to three 60-Hz updates with `field_80=1`;
+- the native-60 half-step movement preserves approximate displacement but changes update order, turning feedback, friction/collision sequencing, surface transitions and trigger sweep inputs.
 
-Installed untested artifacts:
-- proxy SHA-256: `DF2FBDDD7DA53DEFA8CB114D3FB2E26298185479093BE9E930ACC06C73E63A28`;
-- renderer11 SHA-256: `4D78B3B931E9DD80142A4C342832008199EB127EDE9A33E9313E24353D69C057`;
-- input11 SHA-256: `3C4A9974B8D02B15A938528CFD22BC97EB245A37C3B2522A1AA7BB4E7601862F`;
-- forced-clean VC6 build: **PASS**;
-- prepare/install + modern-input preflight: **PASS**;
-- game intentionally not launched.
+### Implemented candidate
 
-New telemetry:
-- `building_entry_checks`;
-- `building_entry_blocked_matches`;
-- `building_entry_natural_seen`;
-- `building_entry_recovery_attempts`;
-- `building_entry_recovery_fires`;
-- one-time `chase_building_entry_recovery` event including the actual blocking model/region/flags/face flags.
+The constructor's default `SpideyAI0` callback immediate is patched to a wrapper.
 
-Next test:
-- launch the installed local build;
-- Level Select -> Chase Venom;
-- observe whether the black-wall transition now changes/opens and Spider-Man follows Venom through the building;
-- exit normally; ChatGPT can read the resulting consolidated log directly.
+Policy:
+- ordinary CPlayer housekeeping: 60 Hz;
+- CSuper animation: 60 Hz;
+- render/presentation: 60 Hz;
+- other game bodies: unchanged 60 Hz;
+- only default Spider-Man `SpideyAI0` callback is gated while:
+  - retail level ID is `0x501`; and
+  - synthesized input `field_1AC != 0`.
+
+During synthesized Chase control:
+- canonical 60-Hz ticks accumulate;
+- two callback opportunities are held;
+- on the third tick retail `SpideyAI0` runs once with accumulated `field_80` (normally 3);
+- original `field_80` is restored after the callback.
+
+The old Wait05->Wait06 forced recovery is disabled for this experiment so natural authored trigger hits determine success.
+
+Existing synth/ramp compatibility naturally reduces to original 20-Hz behavior because those functions are now entered once every three ticks with `field_80=3`.
+
+Telemetry:
+- `chase_player_ai_20hz_install`;
+- `chase_player_ai_20hz_stats` with total calls, actual retail calls, held calls, max elapsed.
+
+Forced-clean matching VC6 build: **PASS**.
+
+Next action:
+- commit/install this authored-cadence player-AI candidate;
+- test via `TEST_LATEST_BUILD.bat`;
+- replay Chase Venom;
+- verify whether the approach angle/path to `Inside01` changes and whether Spider-Man naturally enters/exits the building;
+- exit normally and inspect the AI20 stats plus Chase trace.
 
 ## Start here
 
