@@ -11473,6 +11473,104 @@ static void __cdecl SpideyCompatHealthBarFlatPoly(
 
 static unsigned long gSpideyMysterioBossUiScaledDraws =
 	0;
+static unsigned long gSpideyMysterioHealthTelemetrySamples =
+	0;
+
+static void SpideyLogMysterioHealthRect(
+		const char* source,
+		float x0,
+		float y0,
+		float x1,
+		float y1)
+{
+	if (gSpideyMysterioHealthTelemetrySamples >= 96)
+		return;
+
+	FILE* log =
+		SpideyOpenConsolidatedLog(
+			"COMPAT");
+	if (log)
+	{
+		fprintf(
+			log,
+			"mysterio_health_alignment source=%s sample=%lu logical=%lux%lu density_user=%d rect=%.2f,%.2f,%.2f,%.2f live_if_512x240=%.2f,%.2f,%.2f,%.2f\n",
+			source ? source : "unknown",
+			gSpideyMysterioHealthTelemetrySamples,
+			gSpideyModernLogicalWidth,
+			gSpideyModernLogicalHeight,
+			gSpideyGameplayUiScalePercent,
+			(double)x0,
+			(double)y0,
+			(double)x1,
+			(double)y1,
+			(double)x0 * (double)gSpideyModernLogicalWidth / 512.0,
+			(double)y0 * (double)gSpideyModernLogicalHeight / 240.0,
+			(double)x1 * (double)gSpideyModernLogicalWidth / 512.0,
+			(double)y1 * (double)gSpideyModernLogicalHeight / 240.0);
+		fclose(log);
+	}
+
+	++gSpideyMysterioHealthTelemetrySamples;
+}
+
+
+// @Ok
+static void __cdecl SpideyCompatMysterioBossHolderTexture(
+		i32 x,
+		i32 y,
+		POLY_FT4* poly,
+		void* texture,
+		i32 width,
+		i32 height)
+{
+	SpideyCompatPanelSetCoordsTexture(
+		x,
+		y,
+		poly,
+		texture,
+		width,
+		height);
+
+	if (SpideyIsMysterioBossActive() &&
+		poly)
+	{
+		SpideyLogMysterioHealthRect(
+			"holder_texture_authored_after_compact",
+			(float)poly->x0,
+			(float)poly->y0,
+			(float)poly->x3,
+			(float)poly->y3);
+	}
+}
+
+// @Ok
+static void __cdecl SpideyCompatMysterioBossHolderFrame(
+		i32 x,
+		i32 y,
+		POLY_FT4* poly,
+		void* frame,
+		i32 width,
+		i32 height)
+{
+	SpideyCompatPanelSetCoordsFrame(
+		x,
+		y,
+		poly,
+		frame,
+		width,
+		height);
+
+	if (SpideyIsMysterioBossActive() &&
+		poly)
+	{
+		SpideyLogMysterioHealthRect(
+			"holder_frame_authored_after_compact",
+			(float)poly->x0,
+			(float)poly->y0,
+			(float)poly->x3,
+			(float)poly->y3);
+	}
+}
 
 // @Ok
 static void __cdecl SpideyCompatMysterioBossQPoly2D(
@@ -11501,6 +11599,12 @@ static void __cdecl SpideyCompatMysterioBossQPoly2D(
 	if (SpideyIsMysterioBossActive())
 	{
 		++gSpideyMysterioBossUiScaledDraws;
+		SpideyLogMysterioHealthRect(
+			"fill_qpoly_live_before_compact",
+			x0,
+			y0,
+			x3,
+			y3);
 		SpideyCompatHealthBarQPoly2D(
 			x0, y0, u0, v0, color0,
 			x1, y1, u1, v1, color1,
@@ -11536,6 +11640,12 @@ static void __cdecl SpideyCompatMysterioBossFlatPoly(
 	if (SpideyIsMysterioBossActive())
 	{
 		++gSpideyMysterioBossUiScaledDraws;
+		SpideyLogMysterioHealthRect(
+			"fill_flat_authored_before_compact",
+			(float)x,
+			(float)y,
+			(float)(x + width),
+			(float)(y + height));
 		SpideyCompatPanelFlatPoly(
 			z,
 			x,
@@ -11581,6 +11691,12 @@ static void __cdecl SpideyCompatMysterioBossGouraudPoly(
 	if (SpideyIsMysterioBossActive())
 	{
 		++gSpideyMysterioBossUiScaledDraws;
+		SpideyLogMysterioHealthRect(
+			"fill_gouraud_authored_before_compact",
+			(float)x,
+			(float)y,
+			(float)(x + width),
+			(float)(y + height));
 		SpideyCompatPanelGouraudPoly(
 			z,
 			x,
@@ -11621,6 +11737,19 @@ static void SpideyInstallGameplayUiScaleCompat()
 		SpideyPatchAllRetailDirectCalls(
 			0x00462CD0,
 			(void*)&SpideyCompatPanelSetCoordsTexture);
+
+	const int mysterioHolderTextureCall =
+		SpideyPatchDirectCall(
+			0x00464CDE,
+			(unsigned long)(void*)&SpideyCompatPanelSetCoordsTexture,
+			(void*)&SpideyCompatMysterioBossHolderTexture,
+			"mysterio_health_holder_texture");
+	const int mysterioHolderFrameCall =
+		SpideyPatchDirectCall(
+			0x00464EF8,
+			(unsigned long)(void*)&SpideyCompatPanelSetCoordsFrame,
+			(void*)&SpideyCompatMysterioBossHolderFrame,
+			"mysterio_health_holder_frame");
 
 	const unsigned long venomChaseBarCoordSites[] =
 	{
@@ -11803,7 +11932,7 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_holders=texture:%d,frame:%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
 			frameCalls,
 			textureCalls,
 			venomChaseBarCoordCalls,
@@ -11818,6 +11947,8 @@ static void SpideyInstallGameplayUiScaleCompat()
 			mysterioBossFlatCall,
 			mysterioBossGouraudOne,
 			mysterioBossGouraudTwo,
+			mysterioHolderTextureCall,
+			mysterioHolderFrameCall,
 			panelQPolyCalls,
 			panelGouraudCalls,
 			panelFlatCalls,
@@ -13717,6 +13848,97 @@ static unsigned long gSpideyQuadBitCameraRestoreCalls =
 	0;
 static unsigned long gSpideyQuadBitDcxMismatchCalls =
 	0;
+static unsigned long gSpideyQuadBitHorPlusDrawCalls =
+	0;
+
+typedef void (__cdecl *SpideyRetailQPoly3DFn)(
+		float, float, float, float, float, u32,
+		float, float, float, float, float, u32,
+		float, float, float, float, float, u32,
+		float, float, float, float, float, u32);
+
+// Retail model projection applies the aspect scalar at 0x00550064 to the
+// horizontal projection coefficient. CQuadBit instead projects through
+// gte_rtps, whose single GeomScreen value is shared by X and Y and therefore
+// cannot receive the Hor+ correction without also changing vertical FOV.
+//
+// DisplayQuadBitList already converts the fixed 512x240 GTE screen canvas into
+// gGameResolutionX/Y before its two QPoly3D calls. Apply the same aspect scalar
+// only to horizontal displacement from the modern logical screen center here.
+// This keeps vertical placement, depth/RHW, UVs, colors, world coordinates and
+// all non-QuadBit rendering untouched.
+static float SpideyQuadBitHorPlusX(
+		float x)
+{
+	const float scalar =
+		*(float*)0x00550064;
+	const float width =
+		(float)*(DWORD*)0x00568154;
+
+	if (width <= 0.0f ||
+		scalar <= 0.0f)
+	{
+		return x;
+	}
+
+	const float center =
+		width * 0.5f;
+
+	return center +
+		(x - center) * scalar;
+}
+
+static void __cdecl SpideyQuadBitQPoly3DHorPlus(
+		float x0, float y0, float z0, float u0, float v0, u32 color0,
+		float x1, float y1, float z1, float u1, float v1, u32 color1,
+		float x2, float y2, float z2, float u2, float v2, u32 color2,
+		float x3, float y3, float z3, float u3, float v3, u32 color3)
+{
+	SpideyRetailQPoly3DFn retail =
+		(SpideyRetailQPoly3DFn)0x00508550;
+
+	const float fixedX0 =
+		SpideyQuadBitHorPlusX(x0);
+	const float fixedX1 =
+		SpideyQuadBitHorPlusX(x1);
+	const float fixedX2 =
+		SpideyQuadBitHorPlusX(x2);
+	const float fixedX3 =
+		SpideyQuadBitHorPlusX(x3);
+
+	++gSpideyQuadBitHorPlusDrawCalls;
+
+	if (gSpideyQuadBitHorPlusDrawCalls <= 8)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"DRAW");
+		if (f)
+		{
+			fprintf(
+				f,
+				"quadbit_horplus sample=%lu scalar=%.6f logical_width=%lu x0=%.3f->%.3f x1=%.3f->%.3f x2=%.3f->%.3f x3=%.3f->%.3f\n",
+				gSpideyQuadBitHorPlusDrawCalls,
+				(double)*(float*)0x00550064,
+				(unsigned long)*(DWORD*)0x00568154,
+				(double)x0,
+				(double)fixedX0,
+				(double)x1,
+				(double)fixedX1,
+				(double)x2,
+				(double)fixedX2,
+				(double)x3,
+				(double)fixedX3);
+			fclose(f);
+		}
+	}
+
+	retail(
+		fixedX0, y0, z0, u0, v0, color0,
+		fixedX1, y1, z1, u1, v1, color1,
+		fixedX2, y2, z2, u2, v2, color2,
+		fixedX3, y3, z3, u3, v3, color3);
+}
 
 // Retail DisplayQuadBitList uses two camera-side transform paths.
 //
@@ -13781,6 +14003,18 @@ static void __cdecl SpideyDisplayQuadBitListCameraAnchored(
 
 static void SpideyInstallQuadBitCameraAnchorCompat()
 {
+	const int horPlusCallOne =
+		SpideyPatchDirectCall(
+			0x0040A1A9,
+			0x00508550,
+			(void*)&SpideyQuadBitQPoly3DHorPlus,
+			"quadbit_horplus_qpoly3d_1");
+	const int horPlusCallTwo =
+		SpideyPatchDirectCall(
+			0x0040A367,
+			0x00508550,
+			(void*)&SpideyQuadBitQPoly3DHorPlus,
+			"quadbit_horplus_qpoly3d_2");
 	unsigned char* pushOpcode =
 		(unsigned char*)0x004081D4;
 	unsigned long* displayPointer =
@@ -13823,9 +14057,12 @@ static void SpideyInstallQuadBitCameraAnchorCompat()
 	{
 		fprintf(
 			f,
-			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 reason=%s\n",
+			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 horplus_calls=%d,%d horplus_qpoly_wrapper=0x%08lX reason=%s\n",
 			installed,
 			(unsigned long)&SpideyDisplayQuadBitListCameraAnchored,
+			horPlusCallOne,
+			horPlusCallTwo,
+			(unsigned long)&SpideyQuadBitQPoly3DHorPlus,
 			reason);
 		fclose(f);
 	}

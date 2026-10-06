@@ -2909,3 +2909,28 @@ before untouched DisplayQuadBitList.
 Forced-clean VC6 build/link PASS.
 
 CVenomWrap is CNonRenderedBit, so its tentacle/wrap drift is a separate renderer path.
+
+
+## 2026-10-06 QuadBit Hor+ + Mysterio health telemetry frontier
+
+Latest tested `4cdd1669` still had drifting Mysterio helmet CQuadBit and blob shadows; full GTE+DCX camera restore installed but did not fix them. Retail LOOKAROUND camera was active, so modern camera is not the root cause.
+
+New RE:
+- gte_rtps fixed projection canvas: 512x240; GeomScreen default 276.
+- DisplayQuadBitList scales 512x240 to gGameResolutionX/Y.
+- model M3d_RenderSetup additionally applies aspect scalar 0x00550064.
+- gte_rtps does not.
+- therefore CQuadBit effects still use old horizontal FOV while models are Hor+.
+
+New candidate patches DisplayQuadBitList QPoly3D calls 0x0040A1A9 and 0x0040A367 and transforms only X:
+`center + (x-center)*aspectScalar`.
+Y/depth/RHW/UV/colors unchanged. Forced-clean VC6 build/link PASS.
+
+Mysterio health:
+- QPoly boss fill sites are already projected into live resolution before the hooks.
+- flat/Gouraud sites remain 512x240 authored domain.
+- current all-in-one generic scale is therefore not a grounded final fix.
+- exact holder calls 0x00464CDE and 0x00464EF8 plus fill sites now emit `mysterio_health_alignment` telemetry.
+- health behavior otherwise unchanged pending one runtime trace.
+
+Next test: TEST_LATEST_BUILD.bat -> Mysterio -> orbit camera to inspect helmet/blob, inspect health holder, normal exit.

@@ -14159,3 +14159,130 @@ Validation:
 - forced-clean matching VC6 compile/link PASS.
 
 No runtime test of the full DCX+GTE QuadBit restore yet.
+
+
+## 2026-10-06 — latest Mysterio/effect run + GTE Hor+ root-cause candidate
+
+Latest tested runtime:
+`logs/20261006-052334/spidey-decomp.log`
+
+Session revision:
+`4cdd166921307f5b6c92d736c7c4e873ae5e328f`
+
+User result:
+- Mysterio helmet/head effect still moves relative to Mysterio as the camera moves.
+- Standard character/NPC blob shadows still move away from their owners with camera movement.
+- Mysterio health fill is still not inside its holder.
+
+### Negative result: full QuadBit camera-matrix restore is not sufficient
+
+The latest log proves the `4cdd1669` candidate was actually running:
+- runtime revision matches `4cdd1669`;
+- `quadbit_camera_anchor installed=1`.
+
+The Mysterio fight also runs retail camera mode 17 / LOOKAROUND with modern camera inactive, yet the helmet effect still drifts. Therefore:
+- not a stale DLL;
+- not primarily modern camera ownership;
+- restoring GTE rotation + rebuilding the DCX camera/projection matrix alone does not solve the drift.
+
+### New root-cause evidence: model Hor+ projection and GTE projection are different domains
+
+Retail `gte_rtps @ 0x0046DBC0` uses:
+- projection scale / GeomScreen: `0x0054F03C`;
+- horizontal GTE canvas basis: `0x0054F040`;
+- vertical GTE canvas basis: `0x0054F044`.
+
+Retail executable defaults:
+- `0x0054F03C = 276`;
+- `0x0054F040 = 512`;
+- `0x0054F044 = 240`.
+
+`SetGeomScreen @ 0x00470610` writes only `0x0054F03C`.
+
+`M3dInit_InitAtStart @ 0x00453200` initializes:
+- `0x0061B5FC = 512`;
+- `0x00628614 = 240`.
+
+`DisplayQuadBitList @ 0x004097E0`:
+1. projects each CQuadBit world corner through `gte_rtps`;
+2. converts the fixed 512x240 projected canvas to current output using:
+   - X scale = `gGameResolutionX / 512`;
+   - Y scale = `gGameResolutionY / 240`;
+3. submits through `PCGfx_DrawQPoly3D @ 0x00508550`.
+
+`PCGfx_DrawQPoly3D` does not apply another X/Y projection transform; supplied X/Y become the transformed-screen coordinates.
+
+Critical mismatch:
+- model/floating-point projection in `M3d_RenderSetup @ 0x00472DC0` reads widescreen/aspect scalar `0x00550064` at `0x00473504`;
+- `gte_rtps` never reads `0x00550064`;
+- therefore models can be Hor+ while CQuadBit effects remain on original 4:3 horizontal FOV.
+- standard floor/blob shadows and Mysterio helmet ring are both CQuadBit, matching the shared symptom.
+
+### New QuadBit Hor+ candidate
+
+Do NOT scale GeomScreen globally: it is shared by X and Y and would change vertical FOV.
+
+Instead patch only the two retail DisplayQuadBitList -> PCGfx_DrawQPoly3D calls:
+- `0x0040A1A9 -> 0x00508550`;
+- `0x0040A367 -> 0x00508550`.
+
+New wrapper keeps all Y/depth/RHW/UV/color data unchanged and applies only:
+
+`fixedX = screenCenterX + (x - screenCenterX) * *(float*)0x00550064`
+
+where `screenCenterX = gGameResolutionX / 2`.
+
+At:
+- 4:3 scalar 1.0 => no change;
+- 16:9 scalar 0.75 => horizontal displacement contracts to match the widened Hor+ model projection;
+- wider/narrower supported aspect modes inherit their existing scalar automatically.
+
+Telemetry:
+- `quadbit_horplus ... x0=before->after ...`;
+- QuadBit install line now records both patched QPoly3D callsites.
+
+Forced-clean matching VC6 compile/link: PASS.
+
+### Mysterio health-bar coordinate-domain split
+
+Latest log shows Mysterio QPoly health geometry reaching the existing generic fill scaler already in live 2560x1440 coordinates, e.g.:
+- before `2415..2515 x 168..276`;
+- current generic scaler changes it to `2494.75..2539.75 x 100.8..165.6`.
+
+Retail common boss branch confirms:
+- QPoly sites `0x00464C8A`, `0x00464EA5`, `0x004650B0` explicitly multiply source geometry by `gGameResolutionX/512` and `gGameResolutionY/240` BEFORE `PCGfx_DrawQPoly2D`;
+- flat `0x004650EB` and Gouraud `0x0046512D/0x00465162` remain authored in the 512x240 panel coordinate domain.
+
+Therefore the first Mysterio fix incorrectly treated all six boss-fill calls as one coordinate domain.
+
+Do not guess another health transform yet. Added dedicated telemetry for exact boss holder/fill relationships:
+- holder texture call `0x00464CDE` after generic holder compaction;
+- holder frame call `0x00464EF8` after generic holder compaction;
+- three live-space QPoly fill inputs;
+- flat/Gouraud authored-space inputs.
+
+Telemetry prefix:
+`mysterio_health_alignment`
+
+This health telemetry is observation-only; no new Mysterio health-bar transform has been promoted yet.
+
+### Separate useful finding from latest runtime
+
+Mysterio soft-spot telemetry confirms ordinary player web mode 1 can arrive with destructive hit flag `0x04` and reduce a 100-HP soft spot to zero. Keep this separate from renderer/UI work; user previously observed ordinary webbing destroying nodes and expected only web balls to do so.
+
+### Next runtime test
+
+Run the normal harness:
+`F:\Spider-Man 2000 Recomp\project main\TEST_LATEST_BUILD.bat`
+
+In Mysterio:
+1. rotate/move camera and watch helmet effect;
+2. watch any standard floor/blob shadow while moving camera;
+3. check Mysterio health fill vs holder;
+4. exit normally.
+
+Expected log:
+- QuadBit install line should show both Hor+ call patches = 1;
+- `quadbit_horplus` samples should show scalar 0.75 at 2560x1440;
+- `mysterio_health_alignment` should give holder and fill bounds needed for the exact health fix.
+
