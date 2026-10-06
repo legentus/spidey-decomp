@@ -44,36 +44,6 @@ The latest **runtime-tested** revision is still `df0b1d62...`. Do not promote `3
 
 Next runtime action is unchanged: launch Spider-Man normally, Level Select -> Chase Venom, verify 60-FPS cutscene remains intact, then judge the building-entry route as fixed / improved / unchanged / worse. After exit, ChatGPT can read the consolidated log directly from the game folder; the user no longer needs to upload it manually unless local-PC access is unavailable.
 
-## PARALLEL CLAUDE DECOMP WORKER (2026-10-05)
-
-A second GitHub-only worker is now supported for parallel decompilation while ChatGPT continues local-authoritative work.
-
-Branch ownership:
-- ChatGPT/local work: `dev`;
-- Claude: `claude-decomp`;
-- Claude must never push directly to `dev` or `master`.
-
-Sync entry point:
-- `SYNC_CLAUDE_DECOMP.bat`;
-- implementation: `tools/SYNC_CLAUDE_DECOMP.ps1`;
-- worker rules: `docs/CLAUDE_DECOMP_WORKFLOW.md`.
-
-The sync workflow is intentionally conservative:
-- requires a clean local tree;
-- fetches and pins Claude's current remote commit;
-- refuses unexpected `origin/dev` divergence;
-- publishes our local `dev` first so Claude has the current frontier;
-- creates a local `backup/pre-claude-sync-<timestamp>` branch before a real merge;
-- merges Claude's pinned commit with `--no-ff`;
-- automatically aborts on conflicts rather than resolving them blindly;
-- never force-pushes;
-- re-fetches before publishing integrated `dev` to catch races;
-- leaves any newer Claude commit that arrived mid-sync for the next sync.
-
-The sync helper was dry-tested end to end at local `dev` commit `4585359231e61b80076cbbfc51d38ebab1f1201f`; it successfully fetched, published a local-ahead `dev`, recognized the then-unchanged Claude branch as already contained, re-fetched, and completed without changing source.
-
-Main collaboration risk remains overlapping edits to the same function/subsystem. Prefer assigning Claude untouched decomp targets while ChatGPT works on live behavior fixes.
-
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
 Dedicated recovery document:
