@@ -168,12 +168,127 @@ Git note:
 - local commit is authoritative and safe;
 - the immediate `git push origin dev` attempt failed with remote access/authentication, so do **not** assume GitHub contains `bbacc44e...` yet.
 
+### 2026-10-05 23:09 instrumented result — camera yield did not fix route; black-wall trigger transition identified
+
+Authoritative failing session:
+- runtime revision: `b1a72d62b2ed2a2690e68478e9e441fff6318633`;
+- behavior under test: `bbacc44edc799d896e6223832b5e9b5e0c56f500`;
+- preserved log: `logs/20261005-230941/spidey-decomp.log`;
+- result: **STILL WRONG** — scripted-camera ownership yield did not restore the building traversal;
+- user observation: Spider-Man reaches the black wall inside the building but does not pass through it to continue after Venom.
+
+#### Runtime collision proof
+
+The new `collision` trace changes the diagnosis from steering-only to an actual environment transition failure.
+
+During the long active type-3 `code=10` worker:
+- repeated samples have `mCollision & 1`, proving the normal forward/world collision sweep is hitting geometry;
+- repeated samples have `mCollision=0x3`, i.e. wall + ground;
+- the player enters `field_E1C=0x80000`, exactly the state set by retail `CPlayer::CheckRunIntoWall()`;
+- later samples enter `0x1000`/surface-transition behavior while the script continues to command code 10;
+- representative blocked position is approximately `(74.6M, 0, 15.9M)` in fixed-point coordinates.
+
+Retail `CPlayer::DoPhysics @ 0x00466CE0` has no generic `field_1AC` scripted noclip branch. Therefore the correct retail behavior is not “scripted movement ignores every wall.” The building environment state/trigger is supposed to change.
+
+#### L5A1 retail level-data reconstruction
+
+The packed retail archive was parsed and the exact L5A1 assets were extracted locally for RE:
+- `L5A1_G.psx`;
+- `L5A1_L.psx`;
+- `L5A1_O.psx`;
+- `L5A1_T.trg`;
+- `l5a1.kat`.
+
+The TRG file is valid `_TRG`, version 2/1, with 344 nodes.
+
+High-signal embedded names include:
+- `Inside`;
+- `Outside`;
+- `CutBldg_Win`;
+- `TRGP_Wait`;
+- `Chase Venom to his Hideout`;
+- `You Lost Venom`.
+
+Relevant decoded nodes:
+- node 45: type 6, visibility command that turns `Inside` **off**;
+- node 338: type 6, visibility command that turns `Inside` **on**;
+- node 312: `Outside`;
+- nodes 293/295/296: `CutBldg_Win`;
+- **node 44**: type 6 physical command point, no incoming links, links to `21,48,53,196,292,300,338,305`.
+
+Node 44:
+- checksum: **`0x854B6E67`**;
+- command list: `[134, 1, 3, FFFF]`;
+- opcode 134 initializes the one-pulse requirement;
+- opcode 3 pulses its linked nodes;
+- therefore node 44 is the authored physical building-state transition that fans out to the `Inside` and window/building nodes.
+
+The checksum appears exactly once in `L5A1_G.psx`.
+Retail PSX trigger-table reconstruction proves:
+- checksum table begins at file offset `0x3D76C`;
+- **trigger-table index 2 = `0x854B6E67` = node 44**.
+
+#### Retail trigger-collision path
+
+Retail `SpideyAI0 @ 0x004B13F0`:
+1. snapshots `mPos` into `CBody::field_E8` near `0x004B1AE2`;
+2. after player movement, computes `mPos - field_E8`;
+3. normalizes the movement direction;
+4. creates a trigger-only swept line approximately from `previous_position - 16 units along movement direction` to `current_position`;
+5. sets `SLineInfo::RecordTriggerZoneHits = 1`;
+6. calls retail `M3dZone_LineToItem`.
+
+Retail `M3dColij_LineToThisItem @ 0x004529C0`:
+- when that sweep hits a trigger-marked face, it reads the face's trigger index;
+- resolves the index through the PSX checksum table;
+- calls `Trig_TriggerCommandPoint(checksum, true)`.
+
+Thus the intended building sequence is:
+**Spider-Man crosses trigger face index 2 -> checksum 0x854B6E67 -> node 44 -> pulse linked building-state nodes -> Inside transition.**
+
+The current native-60 Chase reaches normal solid wall collision while the real node-44 command point is still unexecuted.
+
+#### Implemented recovery candidate
+
+A narrow compatibility recovery is now implemented in `main.cpp`.
+
+It does **not**:
+- noclip Spider-Man;
+- remove arbitrary collision;
+- teleport/reposition him;
+- directly force `Inside01` visibility.
+
+It only acts when all of these are simultaneously true:
+- retail level ID is `0x501`;
+- synthesized player control `field_1AC` is active;
+- the active worker is type 3 / code 10;
+- `mCollision & 1` proves Spider-Man is physically blocked;
+- position is inside the observed building-entry cluster;
+- the real retail `GetCommandPoint(44)` exists;
+- its checksum is exactly `0x854B6E67`;
+- node 44 is still unexecuted;
+- the blocked state is observed on two consecutive samples.
+
+Then it invokes:
+`Trig_TriggerCommandPoint(0x854B6E67, true)`
+
+That schedules the exact authored node-44 command list and its original linked `Inside`/window/building state fanout.
+
+New telemetry:
+- `building_entry_checks`;
+- `building_entry_blocked_matches`;
+- `building_entry_natural_seen`;
+- `building_entry_recovery_attempts`;
+- `building_entry_recovery_fires`;
+- one-time `chase_building_entry_recovery` event with player state, collision bits, worker, blocking item checksum/region/model/flags, and face flags.
+
+Forced-clean VC6 matching build of this source: **PASS**.
+
 Next runtime action:
-1. run/test the installed scripted-camera-yield candidate;
+1. install/test the node-44 authored-commandpoint recovery candidate;
 2. replay Chase Venom;
-3. verify whether Spider-Man now traverses the building and exits the correct far side;
-4. also note whether the first-load yellow-haze fall recurs;
-5. exit normally so camera release markers plus `collision/ground_grace` trace fields can be inspected.
+3. watch specifically whether the black-wall/building transition now opens/changes and Spider-Man continues through the building after Venom;
+4. exit normally so the new recovery counters and blocking-model telemetry can be inspected.
 
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 

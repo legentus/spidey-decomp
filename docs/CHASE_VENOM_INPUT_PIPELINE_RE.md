@@ -498,3 +498,43 @@ In Chase Venom:
 6. exit cleanly so the updated synth stats and trace are archived.
 
 The most important new counters are the four `type3_latch_*` fields. If they are non-zero during the failing sequence but behavior is still unchanged, the next RE target is the consumer/clear path for the type-3 latch bytes rather than another camera-heading correction.
+
+## L5A1 BUILDING-ENTRY PHYSICAL COMMAND POINT — NODE 44 / CHECKSUM 0x854B6E67 (2026-10-05)
+
+The latest camera-yield runtime still failed, but new collision telemetry changed the diagnosis materially: Spider-Man is not merely steering toward the wrong visual route. During the long type-3 code-10 worker he repeatedly receives normal forward world collision (`mCollision & 1`), enters `CPlayer::CheckRunIntoWall` state `0x80000`, and then surface-transition states while the synth command remains active.
+
+### Retail level-data extraction
+
+`data.pkr` was parsed directly and the exact L5A1 retail assets `L5A1_G.psx`, `L5A1_L.psx`, `L5A1_O.psx`, `L5A1_T.trg`, and `l5a1.kat` were extracted with verified CRCs.
+
+`L5A1_T.trg` is `_TRG` version 2/1 with 344 nodes. High-signal names include `Inside`, `Outside`, `CutBldg_Win`, `TRGP_Wait`, and `Chase Venom to his Hideout`.
+
+### Building-state node graph
+
+- node 45: type-6 command list containing `SetVisibilityByName("Inside", ..., false)`
+- node 338: type-6 command list containing `SetVisibilityByName("Inside", ..., true)`
+- node 312: `Outside`
+- nodes 293/295/296: `CutBldg_Win`
+- **node 44: physical type-6 command point**
+
+Node 44 has no incoming node links, links to `21,48,53,196,292,300,338,305`, checksum **`0x854B6E67`**, and command words `134,1,3,FFFF`.
+
+Retail `ExecuteCommandList` reconstruction proves opcode 134 initializes the pulse requirement/count, opcode 3 pulses linked nodes/queues linked type-6 commands, and opcode 191 calls retail `Utils_SetVisibilityByName`. Thus node 44 is the authored physical transition that fans into the building's `Inside`/window/state changes.
+
+### PSX trigger identity
+
+The checksum `0x854B6E67` appears exactly once in `L5A1_G.psx`. Retail `Spool_PSX` walks trailing PSX blocks to a `0xFFFFFFFF` sentinel and then publishes the trigger-checksum table. For L5A1_G: sentinel `0x3D768`, checksum table `0x3D76C`, and **index 2 = `0x854B6E67`**. Therefore the collision face tagged with trigger index 2 resolves directly to node 44.
+
+### Retail trigger sweep
+
+Retail `SpideyAI0` copies current `mPos` to `CBody::field_E8` near `0x004B1AE2`, runs player movement, derives `mPos - field_E8`, normalizes it, builds a trigger-only line roughly `previous_position - 16 units along movement direction -> current_position`, sets `SLineInfo::RecordTriggerZoneHits = 1`, and calls retail `M3dZone_LineToItem`.
+
+Retail `M3dColij_LineToThisItem` records a trigger-marked face's 16-bit trigger index, resolves it through the PSX checksum array, and invokes `Trig_TriggerCommandPoint(checksum, true)`.
+
+So the building-entry path is now grounded end-to-end: **trigger face index 2 -> `0x854B6E67` -> node 44 -> linked Inside/building state commands**.
+
+### Compatibility recovery
+
+The candidate does not create noclip, delete collision, force visibility, or reposition Spider-Man. If level `0x501`, synthesized control, type-3 code-10 worker, forward collision, the observed building-entry cluster, the real node-44 checksum, an unexecuted command point, and two consecutive blocked samples all agree, it invokes the exact authored `Trig_TriggerCommandPoint(0x854B6E67, true)`.
+
+Telemetry records recovery counts and the blocking item's model checksum/region/model/flags plus face flags, so the next runtime remains diagnostic even if another issue remains.

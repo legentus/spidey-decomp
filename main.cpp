@@ -4930,6 +4930,31 @@ static unsigned long gSpideyChaseType3HeldLatchCalls = 0;
 static unsigned long gSpideyChaseType3HeldLatchWrites = 0;
 static unsigned long gSpideyChaseType3HeldLatchDynamic = 0;
 static unsigned long gSpideyChaseType3HeldLatchDirectional = 0;
+
+// L5A1 authored building-entry command point.
+// L5A1_T.trg node 44:
+//   checksum 0x854B6E67
+//   links 21,48,53,196,292,300,338,305
+//   commands: [134,1,3,FFFF]
+// Trigger-table index 2 in L5A1_G.psx maps to this checksum.  The linked
+// commands switch the building into its "Inside" state, including node 338's
+// SetVisibilityByName("Inside", 1, 1, true).  At native 60 the current Chase
+// path can reach the solid entry geometry while this physical command point
+// is still unexecuted.  The recovery below does not alter collision or
+// teleport the player: it invokes the exact authored retail command point
+// only after the missed-transition state is proven at runtime.
+static const unsigned long kSpideyChaseBuildingEntryChecksum =
+	0x854B6E67UL;
+static const int kSpideyChaseBuildingEntryNode = 44;
+static CPlayer* gSpideyChaseBuildingEntryPlayer = 0;
+static int gSpideyChaseBuildingEntryRecovered = 0;
+static int gSpideyChaseBuildingEntryBlockedSamples = 0;
+static unsigned long gSpideyChaseBuildingEntryChecks = 0;
+static unsigned long gSpideyChaseBuildingEntryBlockedMatches = 0;
+static unsigned long gSpideyChaseBuildingEntryNaturalSeen = 0;
+static unsigned long gSpideyChaseBuildingEntryRecoveryAttempts = 0;
+static unsigned long gSpideyChaseBuildingEntryRecoveryFires = 0;
+
 static int gSpideyChaseSynthInstalled = 0;
 
 static CPlayer* gSpideyChaseRampPlayer = 0;
@@ -5041,6 +5066,222 @@ static void SpideyChaseReadWorkerHead(
 	}
 	__except(EXCEPTION_EXECUTE_HANDLER)
 	{
+	}
+}
+
+// Recover the authored L5A1 building-entry transition only when the retail
+// physical command point has demonstrably been missed.
+//
+// This is deliberately not a no-clip or position correction.  Node 44 is the
+// retail trigger behind the transition: its checksum is stored as trigger
+// table index 2 in L5A1_G.psx, and its command list pulses the exact authored
+// Inside/window/building state nodes.  Native-60 can leave Spider-Man pushing
+// into the solid entry geometry while node 44 remains unexecuted.  In that
+// state, invoke the same command point retail would have fired from the
+// trigger face.
+static void SpideyChaseRecoverBuildingEntryIfMissed(
+		CPlayer* player)
+{
+	if (!player)
+		return;
+
+	++gSpideyChaseBuildingEntryChecks;
+
+	if (gSpideyChaseBuildingEntryPlayer !=
+		player)
+	{
+		gSpideyChaseBuildingEntryPlayer =
+			player;
+		gSpideyChaseBuildingEntryRecovered =
+			0;
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+	}
+
+	if (SpideyRetailGetLevelId() !=
+		0x501)
+	{
+		gSpideyChaseBuildingEntryRecovered =
+			0;
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+		return;
+	}
+
+	if (!player->field_1AC ||
+		gSpideyChaseBuildingEntryRecovered)
+	{
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+		return;
+	}
+
+	SCommandPoint* entry =
+		GetCommandPoint(
+			kSpideyChaseBuildingEntryNode);
+	if (!entry ||
+		entry->Checksum !=
+			kSpideyChaseBuildingEntryChecksum)
+	{
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+		return;
+	}
+
+	// If retail already reached the face, never duplicate it.
+	if (entry->Executed)
+	{
+		++gSpideyChaseBuildingEntryNaturalSeen;
+		gSpideyChaseBuildingEntryRecovered =
+			1;
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+		return;
+	}
+
+	int headType = -1;
+	int headSize = 0;
+	int headCode = 0;
+	int headTimer = 0;
+	SpideyChaseReadWorkerHead(
+		player,
+		&headType,
+		&headSize,
+		&headCode,
+		&headTimer);
+
+	const int inBuildingEntryCluster =
+		player->mPos.vx >= 73500000 &&
+		player->mPos.vx <= 76000000 &&
+		player->mPos.vy >= -2000000 &&
+		player->mPos.vy <= 3000000 &&
+		player->mPos.vz >= 14500000 &&
+		player->mPos.vz <= 17500000;
+
+	const int blockedOnAuthoredWorker =
+		(player->mCollision & 1) &&
+		headType == 3 &&
+		headSize > 3 &&
+		headCode == 10 &&
+		inBuildingEntryCluster;
+
+	if (!blockedOnAuthoredWorker)
+	{
+		gSpideyChaseBuildingEntryBlockedSamples =
+			0;
+		return;
+	}
+
+	++gSpideyChaseBuildingEntryBlockedMatches;
+	++gSpideyChaseBuildingEntryBlockedSamples;
+
+	// Require two consecutive observed wall-collision samples.  A transient
+	// brush against nearby geometry is not enough to synthesize the trigger.
+	if (gSpideyChaseBuildingEntryBlockedSamples <
+		2)
+	{
+		return;
+	}
+
+	++gSpideyChaseBuildingEntryRecoveryAttempts;
+
+	unsigned long itemChecksum = 0;
+	unsigned long itemFlags = 0;
+	int itemRegion = -1;
+	int itemModel = -1;
+	unsigned long faceFlags = 0;
+
+	__try
+	{
+		CItem* item =
+			player->mLineInfo.pItem;
+		if (item)
+		{
+			itemFlags =
+				(unsigned long)item->mFlags;
+			itemRegion =
+				(int)item->mRegion;
+			itemModel =
+				(int)item->mModel;
+			itemChecksum =
+				(unsigned long)
+				Spool_GetModelChecksum(
+					item);
+		}
+		if (player->mLineInfo.pFace)
+		{
+			faceFlags =
+				(unsigned long)
+				player->mLineInfo.pFace[3];
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		itemChecksum = 0;
+		itemFlags = 0;
+		itemRegion = -1;
+		itemModel = -1;
+		faceFlags = 0;
+	}
+
+	SCommandPoint* fired =
+		Trig_TriggerCommandPoint(
+			kSpideyChaseBuildingEntryChecksum,
+			true);
+
+	if (fired)
+	{
+		++gSpideyChaseBuildingEntryRecoveryFires;
+		gSpideyChaseBuildingEntryRecovered =
+			1;
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"chase_building_entry_recovery fired=1 node=%d checksum=0x%08lX pos=%d,%d,%d state=0x%08lX collision=0x%04X head=%d,%d,%d,%d item_checksum=0x%08lX item_region=%d item_model=%d item_flags=0x%08lX face_flags=0x%08lX policy=invoke_authored_commandpoint_no_noclip_no_teleport\\n",
+				kSpideyChaseBuildingEntryNode,
+				kSpideyChaseBuildingEntryChecksum,
+				player->mPos.vx,
+				player->mPos.vy,
+				player->mPos.vz,
+				(unsigned long)player->field_E1C,
+				(unsigned int)player->mCollision,
+				headType,
+				headSize,
+				headCode,
+				headTimer,
+				itemChecksum,
+				itemRegion,
+				itemModel,
+				itemFlags,
+				faceFlags);
+			fclose(f);
+		}
+	}
+	else
+	{
+		// A natural hit may have raced us between the pre-check and trigger
+		// call.  Treat that as resolved if the real command point now says it
+		// executed; otherwise allow another guarded attempt next sample.
+		entry =
+			GetCommandPoint(
+				kSpideyChaseBuildingEntryNode);
+		if (entry &&
+			entry->Executed)
+		{
+			++gSpideyChaseBuildingEntryNaturalSeen;
+			gSpideyChaseBuildingEntryRecovered =
+				1;
+		}
+		else
+		{
+			gSpideyChaseBuildingEntryBlockedSamples =
+				1;
+		}
 	}
 }
 
@@ -5338,6 +5579,12 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 		SpideyResetChaseSynthState(
 			player);
 	}
+
+	// mCollision describes the preceding player-physics result at this point.
+	// Use it to detect the exact authored building-entry failure before the
+	// next scripted input sample is consumed.
+	SpideyChaseRecoverBuildingEntryIfMissed(
+		player);
 
 	const long currentTick =
 		*(volatile long*)0x006B4CA8;
@@ -5720,7 +5967,7 @@ static void SpideyLogChaseSynthStats()
 
 	fprintf(
 		f,
-		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu type3_latch_calls=%lu type3_latch_writes=%lu type3_latch_dynamic=%lu type3_latch_directional=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3\\n",
+		"chase_synth_20hz_stats synth_installed=%d synth_calls=%lu active_calls=%lu retail_updates=%lu held_calls=%lu max_elapsed=%lu type3_latch_calls=%lu type3_latch_writes=%lu type3_latch_dynamic=%lu type3_latch_directional=%lu heading_samples=%lu heading_corrections=%lu heading_max_pre_correction_drift=%lu building_entry_checks=%lu building_entry_blocked_matches=%lu building_entry_natural_seen=%lu building_entry_recovery_attempts=%lu building_entry_recovery_fires=%lu ramp_installed=%d ramp_calls=%lu ramp_corrections=%lu ramp_unexpected=%lu trace_samples=%lu trace_dropped=%lu level=0x501 render_physics=60hz synth_sample_hold=20hz cadence_ticks=3 building_entry_policy=invoke_authored_node44_if_missed_no_noclip_no_teleport\\n",
 		gSpideyChaseSynthInstalled,
 		gSpideyChaseSynthCalls,
 		gSpideyChaseSynthActiveCalls,
@@ -5734,6 +5981,11 @@ static void SpideyLogChaseSynthStats()
 		gSpideyChaseHeadingSamples,
 		gSpideyChaseHeadingCorrections,
 		gSpideyChaseHeadingMaxPreCorrectionDrift,
+		gSpideyChaseBuildingEntryChecks,
+		gSpideyChaseBuildingEntryBlockedMatches,
+		gSpideyChaseBuildingEntryNaturalSeen,
+		gSpideyChaseBuildingEntryRecoveryAttempts,
+		gSpideyChaseBuildingEntryRecoveryFires,
 		gSpideyChaseRampInstalled,
 		gSpideyChaseRampCalls,
 		gSpideyChaseRampCorrections,
