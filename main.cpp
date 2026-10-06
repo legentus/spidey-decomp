@@ -5374,41 +5374,54 @@ static void SpideyLogChaseCameraAI20Stats()
 	fclose(f);
 }
 
-// Chase Venom world-actor cadence compatibility.
+// Chase Venom world-actor / script-controller cadence compatibility.
 //
-// Retail Logic updates BaddyList through:
-//   0x004554F5 -> Ob_AI(&BaddyList, 0)
-// and FindBaddyOfType proves BaddyList is the retail global at 0x0056E990.
-// CVenom also lives on that list.
+// Retail Logic updates the two coupled lists back-to-back:
+//   0x004554F5 -> Ob_AI(&BaddyList, 0)        [0x0056E990]
+//   0x00455501 -> Ob_AI(&ControlBaddyList, 0) [0x0056E994]
 //
-// Player and camera cadence experiments alone still failed because Venom and
-// other baddies continued to advance on every 60-Hz Logic pass. That lets a
-// baddy cross/activate later L5A1 trigger volumes (including camera-shot
-// transitions) before the scripted player reaches the matching authored leg.
+// Venom is on BaddyList.  L5A1 node 76, the CScriptOnlyBaddy that pulses the
+// node-74 fixed-camera transition, is constructed onto ControlBaddyList.
+// Therefore gating Venom alone cannot reproduce the authored 20-FPS phase:
+// the camera controller would still advance on all three 60-Hz Logic passes.
 //
-// During L5A1 synthesized player control only, hold two BaddyList dispatches
-// and call the untouched retail Ob_AI on the third canonical tick. Ob_AI then
-// runs each body's own EveryFrame(), which naturally observes ~3 elapsed
-// ticks. No baddy velocity/timer fields are manually scaled.
+// During synthesized Chase control, both lists must share one cadence gate.
+// They are allowed through on the same canonical tick every 3 ticks.  Because
+// Ob_AI then executes each body's EveryFrame(), elapsed field_80 naturally
+// becomes ~3 for both the actor and script-controller lists.
+//
+// The shared "due tick" is important: BaddyList executes first.  When it
+// establishes a due tick, ControlBaddyList immediately follows in the same
+// Logic pass and is also allowed through instead of being delayed another
+// three ticks.
 typedef void (__cdecl *SpideyRetailObAIFn)(
 	CBody**,
 	int);
 
-static long gSpideyChaseBaddyAI20LastTick = 0;
-static int gSpideyChaseBaddyAI20TickValid = 0;
+static long gSpideyChaseWorldAI20LastRetailTick = 0;
+static long gSpideyChaseWorldAI20DueTick = -1;
+static int gSpideyChaseWorldAI20TickValid = 0;
+static unsigned long gSpideyChaseWorldAI20GateEvents = 0;
+static unsigned long gSpideyChaseWorldAI20MaxElapsed = 0;
+
 static unsigned long gSpideyChaseBaddyAI20Calls = 0;
 static unsigned long gSpideyChaseBaddyAI20RetailCalls = 0;
 static unsigned long gSpideyChaseBaddyAI20HeldCalls = 0;
-static unsigned long gSpideyChaseBaddyAI20MaxElapsed = 0;
-static int gSpideyChaseBaddyAI20Installed = 0;
+static unsigned long gSpideyChaseControlAI20Calls = 0;
+static unsigned long gSpideyChaseControlAI20RetailCalls = 0;
+static unsigned long gSpideyChaseControlAI20HeldCalls = 0;
 
-static void SpideyResetChaseBaddyAI20State()
+static int gSpideyChaseBaddyAI20Installed = 0;
+static int gSpideyChaseControlAI20Installed = 0;
+
+static void SpideyResetChaseWorldAI20State()
 {
-	gSpideyChaseBaddyAI20LastTick = 0;
-	gSpideyChaseBaddyAI20TickValid = 0;
+	gSpideyChaseWorldAI20LastRetailTick = 0;
+	gSpideyChaseWorldAI20DueTick = -1;
+	gSpideyChaseWorldAI20TickValid = 0;
 }
 
-static void __cdecl SpideyChaseBaddyAI20Hz(
+static void __cdecl SpideyChaseWorldAI20Hz(
 		CBody** list,
 		int arg)
 {
@@ -5416,7 +5429,17 @@ static void __cdecl SpideyChaseBaddyAI20Hz(
 		(SpideyRetailObAIFn)
 		0x00460FC0;
 
-	++gSpideyChaseBaddyAI20Calls;
+	const unsigned long listAddress =
+		(unsigned long)list;
+	const int isBaddyList =
+		listAddress == 0x0056E990UL;
+	const int isControlBaddyList =
+		listAddress == 0x0056E994UL;
+
+	if (isBaddyList)
+		++gSpideyChaseBaddyAI20Calls;
+	else if (isControlBaddyList)
+		++gSpideyChaseControlAI20Calls;
 
 	CPlayer* player = 0;
 	__try
@@ -5436,9 +5459,9 @@ static void __cdecl SpideyChaseBaddyAI20Hz(
 
 	if (!chaseScripted)
 	{
-		if (gSpideyChaseBaddyAI20TickValid)
+		if (gSpideyChaseWorldAI20TickValid)
 		{
-			SpideyResetChaseBaddyAI20State();
+			SpideyResetChaseWorldAI20State();
 		}
 
 		retail(
@@ -5450,39 +5473,65 @@ static void __cdecl SpideyChaseBaddyAI20Hz(
 	const long currentTick =
 		*(volatile long*)0x006B4CA8;
 
-	if (!gSpideyChaseBaddyAI20TickValid)
+	int allowRetail = 0;
+
+	if (!gSpideyChaseWorldAI20TickValid)
 	{
-		gSpideyChaseBaddyAI20LastTick =
+		gSpideyChaseWorldAI20LastRetailTick =
 			currentTick;
-		gSpideyChaseBaddyAI20TickValid =
+		gSpideyChaseWorldAI20DueTick =
+			-1;
+		gSpideyChaseWorldAI20TickValid =
 			1;
-		++gSpideyChaseBaddyAI20HeldCalls;
-		return;
 	}
-
-	const long elapsed =
-		currentTick -
-		gSpideyChaseBaddyAI20LastTick;
-	if (elapsed < 3)
+	else if (gSpideyChaseWorldAI20DueTick ==
+			 currentTick)
 	{
-		++gSpideyChaseBaddyAI20HeldCalls;
-		return;
+		// The sibling list immediately following the first allowed list in
+		// this same Logic pass must share the exact same authored phase.
+		allowRetail = 1;
+	}
+	else
+	{
+		const long elapsed =
+			currentTick -
+			gSpideyChaseWorldAI20LastRetailTick;
+
+		if (elapsed >= 3)
+		{
+			gSpideyChaseWorldAI20LastRetailTick =
+				currentTick;
+			gSpideyChaseWorldAI20DueTick =
+				currentTick;
+			allowRetail = 1;
+			++gSpideyChaseWorldAI20GateEvents;
+
+			if ((unsigned long)elapsed >
+				gSpideyChaseWorldAI20MaxElapsed)
+			{
+				gSpideyChaseWorldAI20MaxElapsed =
+					(unsigned long)elapsed;
+			}
+		}
 	}
 
-	gSpideyChaseBaddyAI20LastTick =
-		currentTick;
+	if (!allowRetail)
+	{
+		if (isBaddyList)
+			++gSpideyChaseBaddyAI20HeldCalls;
+		else if (isControlBaddyList)
+			++gSpideyChaseControlAI20HeldCalls;
+		return;
+	}
 
 	retail(
 		list,
 		arg);
 
-	++gSpideyChaseBaddyAI20RetailCalls;
-	if ((unsigned long)elapsed >
-		gSpideyChaseBaddyAI20MaxElapsed)
-	{
-		gSpideyChaseBaddyAI20MaxElapsed =
-			(unsigned long)elapsed;
-	}
+	if (isBaddyList)
+		++gSpideyChaseBaddyAI20RetailCalls;
+	else if (isControlBaddyList)
+		++gSpideyChaseControlAI20RetailCalls;
 }
 
 static int SpideyInstallChaseBaddyAI20HzCompat()
@@ -5491,8 +5540,15 @@ static int SpideyInstallChaseBaddyAI20HzCompat()
 		SpideyPatchDirectCall(
 			0x004554F5,
 			0x00460FC0,
-			(void*)&SpideyChaseBaddyAI20Hz,
+			(void*)&SpideyChaseWorldAI20Hz,
 			"timing_chase_baddylist_20hz");
+
+	gSpideyChaseControlAI20Installed =
+		SpideyPatchDirectCall(
+			0x00455501,
+			0x00460FC0,
+			(void*)&SpideyChaseWorldAI20Hz,
+			"timing_chase_controlbaddylist_20hz");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -5501,13 +5557,16 @@ static int SpideyInstallChaseBaddyAI20HzCompat()
 	{
 		fprintf(
 			f,
-			"chase_baddy_ai_20hz_install installed=%d call_site=0x004554F5 list=0x0056E990 retail=0x00460FC0 wrapper=0x%08lX policy=baddylist_20hz_only_during_l5a1_synthesized_player_control\\n",
+			"chase_world_ai_20hz_install baddy_installed=%d baddy_call=0x004554F5 baddy_list=0x0056E990 control_installed=%d control_call=0x00455501 control_list=0x0056E994 retail=0x00460FC0 wrapper=0x%08lX policy=phase_locked_baddy_and_control_lists_20hz_during_l5a1_synthesized_control\\n",
 			gSpideyChaseBaddyAI20Installed,
-			(unsigned long)(void*)&SpideyChaseBaddyAI20Hz);
+			gSpideyChaseControlAI20Installed,
+			(unsigned long)(void*)&SpideyChaseWorldAI20Hz);
 		fclose(f);
 	}
 
-	return gSpideyChaseBaddyAI20Installed;
+	return
+		gSpideyChaseBaddyAI20Installed &&
+		gSpideyChaseControlAI20Installed;
 }
 
 static void SpideyLogChaseBaddyAI20Stats()
@@ -5520,12 +5579,17 @@ static void SpideyLogChaseBaddyAI20Stats()
 
 	fprintf(
 		f,
-		"chase_baddy_ai_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu level=0x501 list=0x0056E990 policy=venom_and_baddylist_authored_cadence\\n",
+		"chase_world_ai_20hz_stats baddy_installed=%d baddy_calls=%lu baddy_retail=%lu baddy_held=%lu control_installed=%d control_calls=%lu control_retail=%lu control_held=%lu gate_events=%lu max_elapsed=%lu level=0x501 policy=phase_locked_venom_and_scriptonly_camera_controller_lists\\n",
 		gSpideyChaseBaddyAI20Installed,
 		gSpideyChaseBaddyAI20Calls,
 		gSpideyChaseBaddyAI20RetailCalls,
 		gSpideyChaseBaddyAI20HeldCalls,
-		gSpideyChaseBaddyAI20MaxElapsed);
+		gSpideyChaseControlAI20Installed,
+		gSpideyChaseControlAI20Calls,
+		gSpideyChaseControlAI20RetailCalls,
+		gSpideyChaseControlAI20HeldCalls,
+		gSpideyChaseWorldAI20GateEvents,
+		gSpideyChaseWorldAI20MaxElapsed);
 	fclose(f);
 }
 

@@ -153,3 +153,46 @@ The WIP source restores global timer delivery back to native 60 Hz after the suc
 - Logs are intentionally ignored by Git but remain preserved locally.
 - Comparison scripts/results are now tracked under `tools/research`.
 - Any WIP commit created from this frontier must be labeled **untested** until an actual runtime Chase test is performed.
+
+## 2026-10-06 — Node 76 camera controller proven / phase-locked world-list candidate
+
+Deeper L5A1 + retail object-factory RE proves the separate camera transition around the final through-building worker:
+
+- node 73 links to camera target node 72 and executes camera opcode 186 (`CCamera::SetFixedPosAnglesMode`) with 32 frames;
+- node 76 is a type-1 object node at approximately fixed-point position `(69111808, 61440, 19329024)`;
+- node 76 links to node 74 and node 87;
+- node 74 links to camera target node 75 and executes opcode 186 with **128 frames**;
+- node 72 target is approximately `(74461184, 0, 24510464)`;
+- node 75 target is approximately `(66482176, 0, 20025344)`.
+
+Retail `Trig_CreateObject @ 0x004DEE70` maps node-76 object type **203 / 0xCB** to construction of `CScriptOnlyBaddy @ 0x004075B0`.
+
+The constructor installs vtable `0x0053B2E8`; virtual AI slot +8 resolves to `CScriptOnlyBaddy::AI @ 0x00407840`.
+
+Crucially, the constructor attaches this script-only controller to the list head at **0x0056E994**, while Venom is on **BaddyList @ 0x0056E990**. Retail Logic confirms:
+
+- `0x004554F5 -> Ob_AI(&BaddyList @ 0x0056E990, 0)`;
+- `0x00455501 -> Ob_AI(&ControlBaddyList @ 0x0056E994, 0)`;
+- pending trigger commands are consumed afterward at `0x0045551D`.
+
+Therefore the prior BaddyList-only cadence candidate could slow Venom while leaving the actual camera-controller object at 60 Hz.
+
+Node 76's apparent script tail decodes as `0x4280, 32, 0x4100`. Retail `CBaddy::ExecuteCommand` maps opcode `0x4280` to a handler that writes the parameter to `field_230`. `CScriptOnlyBaddy::AI` updates `field_230` using `field_80`, so this particular 32-tick delay is already elapsed-time correct. A separate `field_238` raw per-call decrement exists in the class, but it is **not currently proven to own node 76's camera transition** and is not being patched.
+
+New 60-Hz candidate:
+- global timer remains native 60 Hz;
+- scripted player/camera/synth compatibility remains;
+- Venom's BaddyList and node-76's ControlBaddyList now share **one phase gate**;
+- both retail `Ob_AI` list dispatches are held for two Logic passes and released on the exact same third canonical tick;
+- because BaddyList executes immediately before ControlBaddyList in retail Logic, a shared due-tick marker guarantees both lists advance in the same authored phase;
+- outside L5A1 synthesized player control, both lists run retail every Logic update.
+
+New telemetry:
+- separate BaddyList calls/retail/held counts;
+- separate ControlBaddyList calls/retail/held counts;
+- shared gate-event count and max elapsed;
+- existing camera mode/interpolation and node-74 pulse state trace remains active.
+
+Forced-clean VC6 matching build of this phase-locked two-list source: **PASS**.
+
+This candidate is implemented and built but **not yet runtime-tested**.

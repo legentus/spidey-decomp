@@ -13712,3 +13712,17 @@ Current `main.cpp` contains WIP/UNTESTED 60-Hz follow-up work:
 - extra camera mode/interpolation/node-74 pulse telemetry.
 
 Do not call this WIP runtime-tested until a new Chase run is performed.
+
+## 2026-10-06 — Chase node76 / ControlBaddyList phase candidate
+
+New retail proof supersedes the BaddyList-only hypothesis:
+
+- L5A1 node 76 is type 203 = `CScriptOnlyBaddy`;
+- it links directly to node 74, the 128-frame fixed-camera transition;
+- node76 is constructed onto `ControlBaddyList @ 0x0056E994`;
+- Venom remains on `BaddyList @ 0x0056E990`;
+- Logic updates BaddyList at `0x4554F5`, then ControlBaddyList at `0x455501`, then pending trigger commands at `0x45551D`.
+
+Current source phase-locks **both** list dispatches to the same 20-Hz-equivalent canonical tick during L5A1 synthesized control. Global engine/timer remains 60 Hz. Forced-clean VC6 build: PASS. Runtime test is still pending.
+
+Full RE: `docs/CHASE_VENOM_20VS60_REFERENCE_DIFF_2026-10-06.md`.

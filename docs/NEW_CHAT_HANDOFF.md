@@ -2766,3 +2766,11 @@ Tracked comparison tooling/results:
 `tools/research/compare_final_building_window.txt`
 
 Current source includes WIP/UNTESTED BaddyList 20-Hz cadence plus camera-shot telemetry and restores the global timer to 60 Hz. Next runtime should test that WIP before further changes.
+
+## 2026-10-06 — node76 camera-controller frontier
+
+The earlier BaddyList-only candidate was incomplete. Node 76 is now proven to be a type-203 `CScriptOnlyBaddy` on **ControlBaddyList @ 0x0056E994**, and it links to node 74's 128-frame fixed-camera transition. Venom is separately on BaddyList @ `0x0056E990`.
+
+Retail Logic updates the two lists back-to-back before pending trigger commands. Current source therefore cadence-gates both lists with a **single shared phase**, so Venom and the node-76 camera controller advance together every third canonical tick while the rest of the engine remains at native 60 Hz.
+
+Forced-clean matching build: PASS. Not runtime-tested yet.
