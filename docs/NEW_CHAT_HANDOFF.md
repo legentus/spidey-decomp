@@ -2,7 +2,7 @@
 
 > **Workflow update:** the authoritative working repository is now the local Git checkout at `F:\Spider-Man 2000 Recomp\project main`. Normal TEST/FAST BATs build that local checkout directly and do not refresh from GitHub. `origin` remains a fallback/backup remote. Read the top of `docs/CURRENT_STATUS.md` before changing this workflow.
 
-## LIVE FRONTIER — AUTHORED BUILDING-ENTRY COMMAND-POINT RECOVERY
+## LIVE FRONTIER — WAIT05→WAIT06 STAGE-AWARE BUILDING RECOVERY
 
 This section supersedes the older Chase frontier notes immediately below it.
 

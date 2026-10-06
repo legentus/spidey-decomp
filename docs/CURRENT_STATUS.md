@@ -325,6 +325,15 @@ Corrected behavior candidate:
 
 Forced-clean matching VC6 build: **PASS**.
 
+Installed untested corrected Wait05->Wait06 candidate:
+- behavior commit: `9905039dddaa58981bd225c1b8cfdeebb119ed20`;
+- proxy SHA-256: `532190CAEAEB3BA41EEFDFA1CAF7C7F96A7BE8D1C0CAB5105AE034D780F68D72`;
+- renderer11 SHA-256: `56EC90E75E65069372A8D3EC81F7CF530EA7049F3CB6754A6949F074A8A7DFDA`;
+- input11 SHA-256: `1460892CBD6E41783FB74D20F28123DB83C7CA2125FE1B421CBF9F9C62E06141`;
+- prepare/install pipeline: **PASS**;
+- modern-input 32-bit ABI preflight: **PASS**;
+- game intentionally not launched.
+
 Next runtime action:
 1. install the corrected Wait05->Wait06 candidate;
 2. run `TEST_LATEST_BUILD.bat` (not direct `SpideyPC.exe`) so the harness preserves the full runtime log;
