@@ -1,5 +1,23 @@
 # CURRENT STATUS
 
+## LOCAL-AUTHORITATIVE CHECKOUT WORKFLOW (2026-10-05)
+
+The active authoritative development copy is now the real Git checkout at:
+- `F:\Spider-Man 2000 Recomp\project main`
+- branch: `dev`
+- remote `origin` is retained for backup/fallback, but normal development does **not** refresh from GitHub before building.
+
+Workflow rules:
+- ChatGPT edits, documents, and checkpoints the local checkout directly.
+- `TEST_LATEST_BUILD.bat` derives `LOCAL_DEV_REVISION.txt` from the local Git `HEAD`, skips the GitHub updater, then runs the existing build/install/launch pipeline.
+- `FAST_UPDATE_AND_TEST_LATEST_BUILD.bat` is now a local-only convenience wrapper around the same test path.
+- `UPDATE_SPIDEY_PROJECT.bat` is intentionally disabled in local-authoritative mode so an archive mirror cannot overwrite unpushed local work.
+- The original `tools\UPDATE_SPIDEY_PROJECT.ps1` remains untouched for fallback/recovery.
+- The pre-conversion tested source/doc versions are preserved outside the repo at `F:\Spider-Man 2000 Recomp\project main pre-local-git-backup`.
+- Returning to the former GitHub-authoritative workflow is reversible from Git history plus the retained updater; do not discard local commits before switching modes.
+
+At conversion time, the real checkout was reconciled to `dev` HEAD `3686276c7c868685791fd48813732868b2b04082`, with latest tested runtime still `df0b1d62b8c1987c7a14dfa7e0f190ecbbb46306`. The Chase camera-relative/world-heading steering source remains implemented but runtime-untested.
+
 ## NEW-CHAT HANDOFF CHECKPOINT (2026-10-05)
 
 Dedicated recovery document:

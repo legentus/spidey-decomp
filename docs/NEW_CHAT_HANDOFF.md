@@ -1,5 +1,7 @@
 # CHASE VENOM CAMERA-RELATIVE STEERING FRONTIER (2026-10-05)
 
+> **Workflow update:** the authoritative working repository is now the local Git checkout at `F:\Spider-Man 2000 Recomp\project main`. Normal TEST/FAST BATs build that local checkout directly and do not refresh from GitHub. `origin` remains a fallback/backup remote. Read the top of `docs/CURRENT_STATUS.md` before changing this workflow.
+
 ## Start here
 
 Latest tested runtime:
