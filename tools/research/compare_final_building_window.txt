@@ -1,0 +1,193 @@
+
+=== fail60 FINAL WINDOW ===
+i=680 tick= 8207 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=681 tick= 8210 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=682 tick= 8213 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=683 tick= 8216 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=684 tick= 8219 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=685 tick= 8222 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=686 tick= 8225 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=687 tick= 8228 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=688 tick= 8231 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2086 cam=   0 world=   0 state=000001 coll=2
+i=689 tick= 8234 e=3 head=-1,0,  0 axes=   0, 127 pos=74469376,4411392,14344192 ang=2086 cam=2079 world=3103 state=000001 coll=2
+i=690 tick= 8237 e=3 head=3,9,150 axes=   0, 127 pos=74469376,4411392,14344192 ang=2389 cam=2082 world=3106 state=000001 coll=2
+i=691 tick= 8240 e=3 head=3,9,147 axes=   0, 127 pos=74469376,4411392,14344192 ang=2692 cam=2084 world=3108 state=000001 coll=2
+i=692 tick= 8243 e=3 head=3,9,144 axes=   0, 127 pos=74469376,4411392,14344192 ang=2995 cam=2086 world=3110 state=000001 coll=2
+i=693 tick= 8246 e=3 head=3,9,141 axes=   0, 127 pos=74560912,4411392,14354416 ang=3028 cam=2100 world=3124 state=000010 coll=2
+i=694 tick= 8249 e=3 head=3,9,138 axes=   0, 127 pos=74675872,4411392,14361424 ang=3055 cam=2122 world=3146 state=000010 coll=2
+i=695 tick= 8252 e=3 head=3,9,135 axes=   0, 127 pos=74798704,4411392,14361424 ang=3082 cam=2151 world=3175 state=000010 coll=2
+i=696 tick= 8255 e=3 head=3,9,132 axes=   0, 127 pos=74921488,4411392,14357584 ang=3112 cam=2184 world=3208 state=000010 coll=2
+i=697 tick= 8258 e=3 head=3,9,129 axes=   0, 127 pos=75044032,4411392,14349232 ang=3139 cam=2220 world=3244 state=000010 coll=2
+i=698 tick= 8261 e=3 head=3,9,126 axes=   0, 127 pos=75166144,4411392,14335792 ang=3169 cam=2257 world=3281 state=000010 coll=2
+i=699 tick= 8264 e=3 head=3,9,123 axes=   0, 127 pos=75287536,4411392,14316928 ang=3201 cam=2297 world=3321 state=000010 coll=2
+i=700 tick= 8267 e=3 head=3,9,120 axes=   0, 127 pos=75287544,4411392,14310688 ang=3237 cam=2337 world=3361 state=000010 coll=3
+i=701 tick= 8270 e=3 head=3,9,117 axes=   0, 127 pos=75287556,4411392,14302792 ang=3273 cam=2379 world=3403 state=000010 coll=3
+i=702 tick= 8273 e=3 head=3,9,114 axes=   0, 127 pos=75287568,4411392,14293264 ang=3312 cam=2421 world=3445 state=000010 coll=3
+i=703 tick= 8276 e=3 head=3,9,111 axes=   0, 127 pos=75287580,4411392,14282008 ang=3351 cam=2463 world=3487 state=000010 coll=3
+i=704 tick= 8279 e=3 head=3,9,108 axes=   0, 127 pos=75287592,4411392,14269060 ang=3390 cam=2505 world=3529 state=000010 coll=3
+i=705 tick= 8282 e=3 head=3,9,105 axes=   0, 127 pos=75287592,4411392,14254468 ang=3429 cam=2547 world=3571 state=000010 coll=3
+i=706 tick= 8285 e=3 head=3,9,102 axes=   0, 127 pos=75287604,4411392,14238328 ang=3470 cam=2589 world=3613 state=000010 coll=3
+i=707 tick= 8288 e=3 head=3,9, 99 axes=   0, 127 pos=75287612,4411392,14220532 ang=3512 cam=2631 world=3655 state=000010 coll=3
+i=708 tick= 8291 e=3 head=3,9, 96 axes=   0, 127 pos=75287620,4411392,14201152 ang=3554 cam=2672 world=3696 state=000010 coll=3
+i=709 tick= 8294 e=3 head=3,9, 93 axes=   0, 127 pos=75287620,4411392,14201152 ang=3596 cam=2714 world=3738 state=000010 coll=3
+i=710 tick= 8297 e=3 head=3,9, 90 axes=   0, 127 pos=75287620,4411392,14201152 ang=3638 cam=2756 world=3780 state=000010 coll=3
+i=711 tick= 8300 e=3 head=3,9, 87 axes=   0, 127 pos=75287620,4411392,14201152 ang=3680 cam=2798 world=3822 state=000010 coll=3
+i=712 tick= 8303 e=3 head=3,9, 84 axes=   0, 127 pos=75287620,4411392,14201152 ang=3722 cam=2840 world=3864 state=000010 coll=3
+i=713 tick= 8306 e=3 head=3,9, 81 axes=   0, 127 pos=75287620,4411392,14201152 ang=3763 cam=2882 world=3906 state=000010 coll=3
+i=714 tick= 8309 e=3 head=3,9, 78 axes=   0, 127 pos=75287620,4411392,14201152 ang=3805 cam=2924 world=3948 state=000010 coll=3
+i=715 tick= 8312 e=3 head=3,9, 75 axes=   0, 127 pos=75287620,4411392,14201152 ang=3847 cam=2966 world=3990 state=000010 coll=3
+i=716 tick= 8315 e=3 head=3,9, 72 axes=   0, 127 pos=75287620,4411392,14201152 ang=3889 cam=3007 world=4031 state=000010 coll=3
+i=717 tick= 8318 e=3 head=3,9, 69 axes=   0, 127 pos=75287620,4411392,14201152 ang=3931 cam=3050 world=4074 state=000010 coll=3
+i=718 tick= 8321 e=3 head=3,9, 66 axes=   0, 127 pos=75287620,4411392,14201152 ang=3973 cam=3090 world=  18 state=000010 coll=3
+i=719 tick= 8324 e=3 head=3,9, 63 axes=   0, 127 pos=75287620,4411392,14201152 ang=4015 cam=3132 world=  60 state=000010 coll=3
+i=720 tick= 8327 e=3 head=3,9, 60 axes=   0, 127 pos=75287620,4411392,14201152 ang=4057 cam=3174 world= 102 state=000010 coll=3
+i=721 tick= 8330 e=3 head=3,9, 57 axes=   0, 127 pos=75287620,4411392,14201152 ang=   3 cam=3217 world= 145 state=000010 coll=3
+i=722 tick= 8333 e=3 head=3,9, 54 axes=   0, 127 pos=75287620,4411392,14201152 ang=  39 cam=3259 world= 187 state=000010 coll=3
+i=723 tick= 8336 e=3 head=3,9, 51 axes=   0, 127 pos=75286060,4411392,14201156 ang=  78 cam=3300 world= 228 state=000010 coll=3
+i=724 tick= 8339 e=3 head=3,9, 48 axes=   0, 127 pos=75282388,4411392,14201164 ang= 123 cam=3342 world= 270 state=000010 coll=3
+i=725 tick= 8342 e=3 head=3,9, 45 axes=   0, 127 pos=75276616,4411392,14201176 ang= 165 cam=3384 world= 312 state=000010 coll=3
+i=726 tick= 8345 e=3 head=3,9, 42 axes=   0, 127 pos=75268912,4411392,14201188 ang= 207 cam=3426 world= 354 state=000010 coll=3
+i=727 tick= 8348 e=3 head=3,9, 39 axes=   0, 127 pos=75259348,4411392,14201192 ang= 248 cam=3469 world= 397 state=000010 coll=3
+i=728 tick= 8351 e=3 head=3,9, 36 axes=   0, 127 pos=75247924,4411392,14201196 ang= 290 cam=3511 world= 439 state=000010 coll=3
+i=729 tick= 8354 e=3 head=3,9, 33 axes=   0, 127 pos=75234688,4411392,14201204 ang= 332 cam=3553 world= 481 state=000010 coll=3
+i=730 tick= 8357 e=3 head=3,9, 30 axes=   0, 127 pos=75219688,4411392,14201212 ang= 374 cam=3595 world= 523 state=000010 coll=3
+i=731 tick= 8360 e=3 head=3,9, 27 axes=   0, 127 pos=75212188,4411392,14201212 ang= 416 cam=3628 world= 556 state=000040 coll=2
+i=732 tick= 8363 e=3 head=3,9, 24 axes=   0, 127 pos=75198412,4123392,14182684 ang= 500 cam=3652 world= 580 state=000002 coll=0
+i=733 tick= 8366 e=3 head=3,9, 21 axes=   0, 127 pos=75138382,3835392,14120494 ang= 548 cam=3670 world= 598 state=000002 coll=0
+i=734 tick= 8369 e=3 head=3,9, 18 axes=   0, 127 pos=75138382,3835392,14120494 ang= 578 cam=3684 world= 612 state=000002 coll=101
+i=735 tick= 8372 e=3 head=3,9, 15 axes=   0, 127 pos=75138382,3835392,14120494 ang= 596 cam=3695 world= 623 state=000002 coll=101
+i=736 tick= 8375 e=3 head=3,9, 12 axes=   0, 127 pos=75138382,3835392,14120494 ang= 611 cam=3703 world= 631 state=000002 coll=101
+i=737 tick= 8378 e=3 head=3,9,  9 axes=   0, 127 pos=75091919,3892992,14120499 ang= 623 cam=3708 world= 636 state=000004 coll=1
+i=738 tick= 8381 e=3 head=3,9,  6 axes=   0, 127 pos=75044826,4004592,14120511 ang= 629 cam=3713 world= 641 state=000004 coll=1
+i=739 tick= 8384 e=3 head=3,9,  3 axes=   0, 127 pos=74997441,4166772,14120525 ang= 635 cam=3716 world= 644 state=000004 coll=1
+i=740 tick= 8387 e=3 head=3,9,  0 axes=   0,   0 pos=74949808,4376382,14120531 ang= 640 cam=   0 world=   0 state=000004 coll=1
+i=741 tick= 8390 e=3 head=3,7, 51 axes=   0,   0 pos=74905153,4407296,14120531 ang= 640 cam=   0 world=   0 state=000004 coll=2
+i=742 tick= 8393 e=3 head=3,7, 48 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=743 tick= 8396 e=3 head=3,7, 45 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=744 tick= 8399 e=3 head=3,7, 42 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=745 tick= 8402 e=3 head=3,7, 39 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=746 tick= 8405 e=3 head=3,7, 36 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=747 tick= 8408 e=3 head=3,7, 33 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=748 tick= 8411 e=3 head=3,7, 30 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=749 tick= 8414 e=3 head=3,7, 27 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=750 tick= 8417 e=3 head=3,7, 24 axes=   0,   0 pos=74905153,4411392,14120531 ang= 640 cam=   0 world=   0 state=000008 coll=2
+i=751 tick= 8420 e=3 head=3,7, 21 axes=-127,   0 pos=74905153,4411392,14120531 ang= 640 cam=3725 world=3725 state=000008 coll=2
+i=752 tick= 8423 e=3 head=3,7, 18 axes=-127,   0 pos=74905153,4411392,14120531 ang= 487 cam=3725 world=3725 state=000008 coll=2
+i=753 tick= 8426 e=3 head=3,7, 15 axes=-127,   0 pos=74905153,4411392,14120531 ang= 335 cam=3725 world=3725 state=000001 coll=2
+i=754 tick= 8429 e=3 head=3,7, 12 axes=-127,   0 pos=74905153,4411392,14120531 ang= 182 cam=3725 world=3725 state=000001 coll=2
+i=755 tick= 8432 e=3 head=3,7,  9 axes=-127,   0 pos=74905153,4411392,14120531 ang=  29 cam=3725 world=3725 state=000001 coll=2
+i=756 tick= 8435 e=3 head=3,7,  6 axes=-127,   0 pos=74905153,4411392,14120531 ang=3972 cam=3725 world=3725 state=000001 coll=2
+i=757 tick= 8438 e=3 head=3,7,  3 axes=-127,   0 pos=74905153,4411392,14120531 ang=3824 cam=3725 world=3725 state=000001 coll=2
+i=758 tick= 8441 e=3 head=3,7,  0 axes=-127,   0 pos=74917369,4411392,14120535 ang=3797 cam=3725 world=3725 state=000010 coll=3
+i=759 tick= 8444 e=3 head=3,10, 39 axes=-127,   0 pos=74930737,4411392,14120539 ang=3776 cam=3725 world=3725 state=000010 coll=3
+i=760 tick= 8447 e=3 head=3,10, 36 axes=-127,   0 pos=74944957,4411392,14120543 ang=3762 cam=3725 world=3725 state=000010 coll=3
+i=761 tick= 8450 e=3 head=3,10, 33 axes=-127,   0 pos=74959837,4411392,14120555 ang=3752 cam=3725 world=3725 state=000010 coll=3
+i=762 tick= 8453 e=3 head=3,10, 30 axes=-127,   0 pos=74975089,4411392,14120563 ang=3746 cam=3725 world=3725 state=000010 coll=3
+i=763 tick= 8456 e=3 head=3,10, 27 axes=-127,   0 pos=74990581,4411392,14120571 ang=3740 cam=3725 world=3725 state=000010 coll=3
+i=764 tick= 8459 e=3 head=3,10, 24 axes=-127,   0 pos=75006313,4411392,14120579 ang=3737 cam=3725 world=3725 state=000010 coll=3
+i=765 tick= 8462 e=3 head=3,10, 21 axes=-127,   0 pos=75022129,4411392,14120587 ang=3735 cam=3725 world=3725 state=000010 coll=3
+i=766 tick= 8465 e=3 head=3,10, 18 axes=-127,   0 pos=75038065,4411392,14120587 ang=3732 cam=3725 world=3725 state=000010 coll=3
+i=767 tick= 8468 e=3 head=3,10, 15 axes=-127,   0 pos=75054121,4411392,14120595 ang=3732 cam=3725 world=3725 state=000010 coll=3
+i=768 tick= 8471 e=3 head=3,10, 12 axes=-127,   0 pos=75070177,4411392,14120603 ang=3732 cam=3725 world=3725 state=000010 coll=3
+i=769 tick= 8474 e=3 head=3,10,  9 axes=-127,   0 pos=75086233,4411392,14120611 ang=3732 cam=3725 world=3725 state=000010 coll=3
+i=770 tick= 8477 e=3 head=3,10,  6 axes=-127,   0 pos=75102289,4411392,14120619 ang=3732 cam=3725 world=3725 state=000010 coll=3
+i=771 tick= 8480 e=3 head=3,10,  3 axes=-127,   0 pos=75118345,4411392,14120627 ang=3732 cam=3725 world=3725 state=000010 coll=3
+i=772 tick= 8483 e=3 head=3,10,  0 axes=   0,   0 pos=75134401,4411392,14120635 ang=3732 cam=   0 world=   0 state=000010 coll=3
+
+=== good20 FINAL WINDOW ===
+i=680 tick=10449 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=681 tick=10452 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=682 tick=10455 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=683 tick=10458 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=684 tick=10461 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=685 tick=10464 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=686 tick=10467 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=687 tick=10470 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=688 tick=10473 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=689 tick=10476 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=690 tick=10479 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=691 tick=10482 e=3 head=-1,0,  0 axes=   0,   0 pos=74469376,4411392,14344192 ang=2091 cam=   0 world=   0 state=000001 coll=2
+i=692 tick=10485 e=3 head=-1,0,  0 axes=   0, 127 pos=74469376,4411392,14344192 ang=2091 cam=1029 world=2053 state=000001 coll=2
+i=693 tick=10488 e=3 head=3,9,150 axes=   0, 127 pos=74469376,4411392,14367136 ang=2082 cam=1029 world=2053 state=000010 coll=2
+i=694 tick=10491 e=3 head=3,9,147 axes=   0, 127 pos=74469376,4411392,14413120 ang=2074 cam=1029 world=2053 state=000010 coll=2
+i=695 tick=10494 e=3 head=3,9,144 axes=   0, 127 pos=74469376,4411392,14482144 ang=2068 cam=1029 world=2053 state=000010 coll=2
+i=696 tick=10497 e=3 head=3,9,141 axes=   0, 127 pos=74472592,4411392,14574208 ang=2065 cam=1029 world=2053 state=000010 coll=2
+i=697 tick=10500 e=3 head=3,9,138 axes=   0, 127 pos=74476048,4411392,14689312 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=698 tick=10503 e=3 head=3,9,135 axes=   0, 127 pos=74479168,4411392,14812096 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=699 tick=10506 e=3 head=3,9,132 axes=   0, 127 pos=74482288,4411392,14934880 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=700 tick=10509 e=3 head=3,9,129 axes=   0, 127 pos=74485408,4411392,15057664 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=701 tick=10512 e=3 head=3,9,126 axes=   0, 127 pos=74488528,4411392,15180448 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=702 tick=10515 e=3 head=3,9,123 axes=   0, 127 pos=74491648,4411392,15303232 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=703 tick=10518 e=3 head=3,9,120 axes=   0, 127 pos=74494768,4411392,15426016 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=704 tick=10521 e=3 head=3,9,117 axes=   0, 127 pos=74497888,4411392,15548800 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=705 tick=10524 e=3 head=3,9,114 axes=   0, 127 pos=74501008,4411392,15671584 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=706 tick=10527 e=3 head=3,9,111 axes=   0, 127 pos=74504128,4411392,15794368 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=707 tick=10530 e=3 head=3,9,108 axes=   0, 127 pos=74507248,4411392,15917152 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=708 tick=10533 e=3 head=3,9,105 axes=   0, 127 pos=74510368,4411392,16039936 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=709 tick=10536 e=3 head=3,9,102 axes=   0, 127 pos=74513488,4411392,16162720 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=710 tick=10539 e=3 head=3,9, 99 axes=   0, 127 pos=74516608,4411392,16285504 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=711 tick=10542 e=3 head=3,9, 96 axes=   0, 127 pos=74519728,4411392,16408288 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=712 tick=10545 e=3 head=3,9, 93 axes=   0, 127 pos=74522848,4411392,16531072 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=713 tick=10548 e=3 head=3,9, 90 axes=   0, 127 pos=74525968,4411392,16653856 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=714 tick=10551 e=3 head=3,9, 87 axes=   0, 127 pos=74529088,4411392,16776640 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=715 tick=10554 e=3 head=3,9, 84 axes=   0, 127 pos=74532208,4411392,16899424 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=716 tick=10557 e=3 head=3,9, 81 axes=   0, 127 pos=74535328,4411392,17022208 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=717 tick=10560 e=3 head=3,9, 78 axes=   0, 127 pos=74538448,4411392,17144992 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=718 tick=10563 e=3 head=3,9, 75 axes=   0, 127 pos=74541568,4411392,17267776 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=719 tick=10566 e=3 head=3,9, 72 axes=   0, 127 pos=74544688,4411392,17390560 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=720 tick=10569 e=3 head=3,9, 69 axes=   0, 127 pos=74547808,4411392,17513344 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=721 tick=10572 e=3 head=3,9, 66 axes=   0, 127 pos=74550928,4407296,17636128 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=722 tick=10575 e=3 head=3,9, 63 axes=   0, 127 pos=74554048,4407296,17758912 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=723 tick=10578 e=3 head=3,9, 60 axes=   0, 127 pos=74557168,4407296,17881696 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=724 tick=10581 e=3 head=3,9, 57 axes=   0, 127 pos=74560288,4407296,18004480 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=725 tick=10584 e=3 head=3,9, 54 axes=   0, 127 pos=74563408,4407296,18127264 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=726 tick=10587 e=3 head=3,9, 51 axes=   0, 127 pos=74566528,4403200,18250048 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=727 tick=10590 e=3 head=3,9, 48 axes=   0, 127 pos=74569648,4403200,18372832 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=728 tick=10593 e=3 head=3,9, 45 axes=   0, 127 pos=74572768,4403200,18495616 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=729 tick=10596 e=3 head=3,9, 42 axes=   0, 127 pos=74575888,4403200,18618400 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=730 tick=10599 e=3 head=3,9, 39 axes=   0, 127 pos=74579008,4403200,18741184 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=731 tick=10602 e=3 head=3,9, 36 axes=   0, 127 pos=74582128,4399104,18863968 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=732 tick=10605 e=3 head=3,9, 33 axes=   0, 127 pos=74585248,4399104,18986752 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=733 tick=10608 e=3 head=3,9, 30 axes=   0, 127 pos=74588368,4399104,19109536 ang=2062 cam=1029 world=2053 state=000010 coll=2
+i=734 tick=10611 e=3 head=3,9, 27 axes=   0, 127 pos=74588368,4399104,19170928 ang=2062 cam=1029 world=2053 state=000040 coll=2
+i=735 tick=10614 e=3 head=3,9, 24 axes=   0, 127 pos=74591488,4111104,19293712 ang=2059 cam=1029 world=2053 state=000002 coll=0
+i=736 tick=10617 e=3 head=3,9, 21 axes=   0, 127 pos=74596258,3823104,19524022 ang=2056 cam=1029 world=2053 state=000002 coll=0
+i=737 tick=10620 e=3 head=3,9, 18 axes=   0, 127 pos=74600038,3535104,19754332 ang=2056 cam=1029 world=2053 state=000002 coll=0
+i=738 tick=10623 e=3 head=3,9, 15 axes=   0, 127 pos=74603818,3247104,19984642 ang=2056 cam=1029 world=2053 state=000002 coll=0
+i=739 tick=10626 e=3 head=3,9, 12 axes=   0, 127 pos=74607598,2959104,20214952 ang=2056 cam=1029 world=2053 state=000002 coll=0
+i=740 tick=10629 e=3 head=3,9,  9 axes=   0, 127 pos=74611378,2746704,20445262 ang=2056 cam=1029 world=2053 state=000004 coll=0
+i=741 tick=10632 e=3 head=3,9,  6 axes=   0, 127 pos=74615158,2605134,20675572 ang=2056 cam=1029 world=2053 state=000200 coll=0
+i=742 tick=10635 e=3 head=3,9,  3 axes=   0, 127 pos=74615158,2529984,20798404 ang=2056 cam=1029 world=2053 state=000200 coll=0
+i=743 tick=10638 e=3 head=3,9,  0 axes=   0,   0 pos=74615158,2517114,20921236 ang=2056 cam=   0 world=   0 state=000200 coll=0
+i=744 tick=10641 e=3 head=3,7, 51 axes=   0,   0 pos=74615158,2562564,21044068 ang=2056 cam=   0 world=   0 state=000200 coll=0
+i=745 tick=10644 e=3 head=3,7, 48 axes=   0,   0 pos=74612415,2577420,21095876 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=746 tick=10647 e=3 head=3,7, 45 axes=   0,   0 pos=74614693,2636648,21241668 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=747 tick=10650 e=3 head=3,7, 42 axes=   0,   0 pos=74619249,2734602,21494526 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=748 tick=10653 e=3 head=3,7, 39 axes=   0,   0 pos=74623805,2850780,21833948 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=749 tick=10656 e=3 head=3,7, 36 axes=   0,   0 pos=74632917,2976070,22259934 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=750 tick=10659 e=3 head=3,7, 33 axes=   0,   0 pos=74639751,3096804,22761094 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=751 tick=10662 e=3 head=3,7, 30 axes=   0,   0 pos=74651141,3199314,23339706 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=752 tick=10665 e=3 head=3,7, 27 axes=   0,   0 pos=74660253,3267654,23952488 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=753 tick=10668 e=3 head=3,7, 24 axes=   0,   0 pos=74671643,3294990,24594884 ang=2056 cam=   0 world=   0 state=000400 coll=0
+i=754 tick=10671 e=3 head=3,7, 21 axes=-127,   0 pos=74683033,3276766,25255504 ang=2056 cam=1029 world=1029 state=000400 coll=0
+i=755 tick=10674 e=3 head=3,7, 18 axes=-127,   0 pos=74694423,3215260,25895622 ang=2056 cam=1029 world=1029 state=000400 coll=0
+i=756 tick=10677 e=3 head=3,7, 15 axes=-127,   0 pos=74705813,3117306,26503848 ang=2056 cam=1029 world=1029 state=000400 coll=0
+i=757 tick=10680 e=3 head=3,7, 12 axes=-127,   0 pos=74714925,2987460,27064236 ang=2056 cam=1029 world=1029 state=000400 coll=0
+i=758 tick=10683 e=3 head=3,7,  9 axes=-127,   0 pos=74724037,2841668,27558562 ang=2056 cam=1029 world=1029 state=000400 coll=0
+i=759 tick=10686 e=3 head=3,7,  6 axes=-127,   0 pos=74730871,2698154,27961768 ang=2056 cam=1029 world=1029 state=000400 coll=0
+i=760 tick=10689 e=3 head=3,7,  3 axes=-127,   0 pos=74545395,2449844,28586861 ang=2056 cam=1029 world=1029 state=000400 coll=1
+i=761 tick=10692 e=3 head=3,7,  0 axes=-127,   0 pos=74545395,2449844,28586861 ang=2395 cam=1029 world=   0 state=000001 coll=2
+i=762 tick=10695 e=3 head=3,10, 39 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=1297 world=   0 state=000001 coll=2
+i=763 tick=10698 e=3 head=3,10, 36 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=1506 world=   0 state=000001 coll=2
+i=764 tick=10701 e=3 head=3,10, 33 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=1668 world=   0 state=000001 coll=2
+i=765 tick=10704 e=3 head=3,10, 30 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=1795 world=   0 state=000001 coll=2
+i=766 tick=10707 e=3 head=3,10, 27 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=1896 world=   0 state=000001 coll=2
+i=767 tick=10710 e=3 head=3,10, 24 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=1974 world=   0 state=000001 coll=2
+i=768 tick=10713 e=3 head=3,10, 21 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=2038 world=   0 state=000001 coll=2
+i=769 tick=10716 e=3 head=3,10, 18 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=2090 world=   0 state=000001 coll=2
+i=770 tick=10719 e=3 head=3,10, 15 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=2132 world=   0 state=000001 coll=2
+i=771 tick=10722 e=3 head=3,10, 12 axes=-127,   0 pos=74545395,2449844,28586861 ang=   0 cam=2167 world=   0 state=000001 coll=2
+i=772 tick=10725 e=3 head=3,10,  9 axes=-127,   0 pos=74546970,2370000,28589535 ang=   0 cam=2196 world=   0 state=000010 coll=2
+i=773 tick=10728 e=3 head=3,10,  6 axes=-127,   0 pos=74548545,2290156,28592209 ang=   0 cam=2220 world=   0 state=000010 coll=2
+i=774 tick=10731 e=3 head=3,10,  3 axes=-127,   0 pos=74555271,2223405,28596683 ang=   0 cam=2241 world=   0 state=000010 coll=2
+i=775 tick=10734 e=3 head=3,10,  0 axes=   0,   0 pos=74560465,2143282,28605683 ang=   2 cam=   0 world=   0 state=000010 coll=2

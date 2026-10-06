@@ -13686,3 +13686,29 @@ PC workflow update:
 - use Local Commander as the primary local-machine interface from this point forward;
 - local checkout remains authoritative;
 - Desktop Commander is no longer the preferred path for this project.
+
+
+## 2026-10-06 02:34 — 20 FPS reference diff checkpoint / Local Commander migration
+
+Local Commander is now the preferred local-PC interface.
+
+A successful full-engine 20 FPS reference was captured at `logs/20261006-020549/spidey-decomp.log`. Spider-Man visibly follows Venom through the building correctly there.
+
+Direct diff against failing 60 Hz `logs/20261006-012109/spidey-decomp.log` found:
+- traces identical through sample 21;
+- first divergence at sample 22 is camera transform heading (60 Hz 183 vs working 20 FPS 168);
+- sample ~37 includes an anomalous 6-tick 60-Hz player update vs expected 3 ticks in the working reference;
+- decisive final code-9 worker uses the same `axes=0,127` in both runs;
+- working 20 FPS camera is locked around heading 1029, producing desired world heading ~2053 and a straight +Z traversal through the building;
+- failing 60 Hz camera begins around 2080 and rotates through ~2300→3000→3700, turning the same camera-relative input into the wall.
+
+The failure target is therefore the separate L5A1 camera-shot/state lifetime that should remain active during the final code-9 worker.
+
+Full details: `docs/CHASE_VENOM_20VS60_REFERENCE_DIFF_2026-10-06.md`.
+
+Current `main.cpp` contains WIP/UNTESTED 60-Hz follow-up work:
+- global timer restored from reference 20 FPS back to native 60 Hz;
+- BaddyList/Venom 20-Hz cadence experiment at Logic call site `0x004554F5`;
+- extra camera mode/interpolation/node-74 pulse telemetry.
+
+Do not call this WIP runtime-tested until a new Chase run is performed.

@@ -2736,3 +2736,33 @@ Key state:
 - current candidate restores global 60 Hz and cadence-gates BaddyList only during L5A1 synthesized player control;
 - forced-clean matching build passed before checkpoint;
 - use Local Commander for local PC/repo interaction going forward.
+
+
+## 2026-10-06 02:34 — WORKING 20 FPS REFERENCE DIFF FRONTIER
+
+Successful reference:
+- `logs/20261006-020549/spidey-decomp.log`
+- full-engine 20 FPS
+- user confirmed Spider-Man actually chases Venom through the building.
+
+Failing comparison:
+- `logs/20261006-012109/spidey-decomp.log`
+- targeted player+camera 20-Hz compatibility inside a 60-Hz world
+- still fails.
+
+Critical final-worker difference:
+- both execute type-3/code-9 with `axes=0,127`;
+- working camera heading stays ~1029;
+- failing 60-Hz camera starts ~2080 and rotates onward;
+- camera-relative forward therefore maps to the wrong world direction and Spider-Man hits `Inside01`.
+
+Durable RE document:
+`docs/CHASE_VENOM_20VS60_REFERENCE_DIFF_2026-10-06.md`
+
+Tracked comparison tooling/results:
+`tools/research/compare_good20_fail60.py`
+`tools/research/compare_good20_fail60.txt`
+`tools/research/compare_final_building_window.py`
+`tools/research/compare_final_building_window.txt`
+
+Current source includes WIP/UNTESTED BaddyList 20-Hz cadence plus camera-shot telemetry and restores the global timer to 60 Hz. Next runtime should test that WIP before further changes.
