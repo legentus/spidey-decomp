@@ -155,8 +155,21 @@ New generic ownership rule in the working candidate:
 
 Forced-clean VC6 build with this change: **PASS**.
 
+Installed untested scripted-camera-yield candidate:
+- behavior commit: `bbacc44edc799d896e6223832b5e9b5e0c56f500`;
+- proxy SHA-256: `145429C1340A604AD4DFB0EFAB6C9B6E111E7E6E9EB9AB9BDDF9B13B794BFF8B`;
+- renderer11 SHA-256: `3F674EEE169CEC7CEB3536C97CA12AAC133764EA0FF2A618FE0AABB7E1291C07`;
+- input11 SHA-256: `84419F651993C23ADC265E44C5E0C12769AA988CD5A480503F3B7DA6C3E5529D`;
+- modern-input preflight: **PASS**;
+- prepare/install pipeline: **PASS**;
+- game was intentionally not launched.
+
+Git note:
+- local commit is authoritative and safe;
+- the immediate `git push origin dev` attempt failed with remote access/authentication, so do **not** assume GitHub contains `bbacc44e...` yet.
+
 Next runtime action:
-1. build/install the new scripted-camera-yield candidate;
+1. run/test the installed scripted-camera-yield candidate;
 2. replay Chase Venom;
 3. verify whether Spider-Man now traverses the building and exits the correct far side;
 4. also note whether the first-load yellow-haze fall recurs;
