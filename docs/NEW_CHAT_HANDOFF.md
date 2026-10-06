@@ -1,79 +1,73 @@
-# CHASE VENOM CAMERA-RELATIVE STEERING FRONTIER (2026-10-05)
+# CHASE VENOM BUILDING-ENTRY TRIGGER FRONTIER (2026-10-05)
 
 > **Workflow update:** the authoritative working repository is now the local Git checkout at `F:\Spider-Man 2000 Recomp\project main`. Normal TEST/FAST BATs build that local checkout directly and do not refresh from GitHub. `origin` remains a fallback/backup remote. Read the top of `docs/CURRENT_STATUS.md` before changing this workflow.
 
-## LIVE FRONTIER — SCRIPTED CAMERA OWNERSHIP A/B CANDIDATE
+## LIVE FRONTIER — AUTHORED BUILDING-ENTRY COMMAND-POINT RECOVERY
 
 This section supersedes the older Chase frontier notes immediately below it.
 
 Latest proper instrumented test:
-- runtime revision: `b77c529723c070933c13d67b0d49c02d48b1c8cb`;
-- behavior under test: type-3 latch commit `ee6022150a0911d5503495a8f1d04ded55097bc7`;
-- preserved archive: `logs/20261005-225403/spidey-decomp.log`;
-- result: **STILL WRONG** — type-3 latch preservation changed the scripted path but Spider-Man still did not traverse the building correctly;
-- first level start also suffered a one-off yellow-haze fall; later restarts did not.
+- runtime revision: `b1a72d62b2ed2a2690e68478e9e441fff6318633`;
+- behavior under test: scripted-camera-yield commit `bbacc44edc799d896e6223832b5e9b5e0c56f500`;
+- preserved archive: `logs/20261005-230941/spidey-decomp.log`;
+- result: **STILL WRONG** — Spider-Man reaches the black wall in the building, receives real forward collision, and does not continue through the authored passage.
 
-Type-3 fix was active:
-- `type3_latch_calls=604`;
-- `type3_latch_writes=732`;
-- `type3_latch_dynamic=174`;
-- `type3_latch_directional=558`.
+New runtime proof:
+- `mCollision & 1` repeatedly sets during the long type-3 code-10 worker;
+- `mCollision=0x3` is common at the failure;
+- player enters retail `CheckRunIntoWall` state `0x80000` and later surface-transition states while the scripted worker remains active.
 
-The long code-10 path moved materially versus the prior run, proving the correction was real but insufficient.
+Deep L5A1 retail-data RE located the actual transition:
+- `L5A1_T.trg` is a 344-node trigger graph;
+- node **44** is a physical type-6 command point with no incoming links;
+- node 44 checksum: **`0x854B6E67`**;
+- node 44 links: `21,48,53,196,292,300,338,305`;
+- node 338 contains the `Inside` visibility-on command;
+- node 44 command list is `[134,1,3,FFFF]`, which initializes one pulse then pulses its linked building-state nodes.
 
-### Yellow-haze event
+PSX correlation:
+- `0x854B6E67` appears exactly once in `L5A1_G.psx`;
+- retail trigger checksum table starts at file offset `0x3D76C`;
+- **trigger table index 2 = node-44 checksum `0x854B6E67`**.
 
-The first bad attempt and first normal restart are identical through relative sample 16.
+Retail trigger path was reconstructed end-to-end:
+- `SpideyAI0` snapshots `mPos` to `field_E8`;
+- after movement it sweeps a trigger-only line from the previous position toward the current position with `RecordTriggerZoneHits=1`;
+- `M3dColij_LineToThisItem` records a trigger-face index;
+- retail resolves that index through the PSX checksum table;
+- retail calls `Trig_TriggerCommandPoint(checksum,true)`.
 
-First divergence:
-- camera heading still `168` in both;
-- axes and desired heading still identical;
-- same route worker;
-- player state changes from `0x400` to `0x4` only on the bad run.
+Therefore the intended building transition is:
+**trigger face index 2 -> 0x854B6E67 -> node 44 -> linked Inside/window/building state commands**.
 
-`CPlayer::CheckGroundGone()` is the source path that sets `field_E1C=4` when ground collision bit `mCollision & 2` disappears after the `field_EA4` grace period.
+Implemented candidate:
+- behavior commit: `335dd7e51eb1baba785a96da7d81782fac683c28`;
+- if node 44 already executed naturally, compatibility does nothing;
+- otherwise recovery requires level `0x501`, synthesized control, type-3 code 10, forward collision, the observed building-entry cluster, exact node/checksum identity, and two consecutive blocked samples;
+- it then calls the **authored** `Trig_TriggerCommandPoint(0x854B6E67,true)`;
+- no noclip, teleport, arbitrary collision removal, or direct visibility forcing is used.
 
-Conclusion:
-- the one-off yellow-haze fall is a **ground/collision loss**, not a camera-steering failure;
-- new trace fields `collision` and `ground_grace` are added for any recurrence.
-
-### Why the 3D camera can still explain the Chase route
-
-Camera telemetry proves modern mode-3 ownership was active during Chase due tiny mouse deltas.
-
-Retail type-3 codes 8..11 are literal **camera-relative** stick directions. In particular:
-- code 10: `E2D=-127` (hold left);
-- code 9: `E2E=+127`.
-
-Therefore the existing world-heading sample/hold can stabilize the wrong world direction if the fresh sample was produced while our free-look camera had already changed the authored camera transform.
-
-New generic behavior candidate:
-- while active player `field_1AC != 0` (synthesized/scripted control), `SpideyModernMode3Camera` releases modern ownership with reason `scripted_player_input`;
-- retail `CM_Normal @ 0x00418E00` owns the camera completely;
-- ordinary gameplay reacquires modern camera normally after scripted control ends;
-- no Chase-specific level check is used.
-
-Forced-clean VC6 build: **PASS**.
-
-Installed candidate:
-- behavior commit: `bbacc44edc799d896e6223832b5e9b5e0c56f500`;
-- proxy SHA-256: `145429C1340A604AD4DFB0EFAB6C9B6E111E7E6E9EB9AB9BDDF9B13B794BFF8B`;
-- renderer11 SHA-256: `3F674EEE169CEC7CEB3536C97CA12AAC133764EA0FF2A618FE0AABB7E1291C07`;
-- input11 SHA-256: `84419F651993C23ADC265E44C5E0C12769AA988CD5A480503F3B7DA6C3E5529D`;
-- full prepare/install + input preflight: **PASS**;
+Installed untested artifacts:
+- proxy SHA-256: `DF2FBDDD7DA53DEFA8CB114D3FB2E26298185479093BE9E930ACC06C73E63A28`;
+- renderer11 SHA-256: `4D78B3B931E9DD80142A4C342832008199EB127EDE9A33E9313E24353D69C057`;
+- input11 SHA-256: `3C4A9974B8D02B15A938528CFD22BC97EB245A37C3B2522A1AA7BB4E7601862F`;
+- forced-clean VC6 build: **PASS**;
+- prepare/install + modern-input preflight: **PASS**;
 - game intentionally not launched.
-- GitHub push failed at this checkpoint; local Git remains authoritative.
 
-New Chase trace telemetry:
-- `collision=0x...`;
-- `ground_grace=...`.
+New telemetry:
+- `building_entry_checks`;
+- `building_entry_blocked_matches`;
+- `building_entry_natural_seen`;
+- `building_entry_recovery_attempts`;
+- `building_entry_recovery_fires`;
+- one-time `chase_building_entry_recovery` event including the actual blocking model/region/flags/face flags.
 
 Next test:
-- install/run the scripted-camera-yield candidate through `TEST_LATEST_BUILD.bat`;
+- launch the installed local build;
 - Level Select -> Chase Venom;
-- verify whether Spider-Man finally enters/traverses the building and exits the correct far side;
-- note whether the first-load yellow-haze fall recurs;
-- exit normally and inspect `modern_camera event=release reason=scripted_player_input` plus collision/grace trace fields.
+- observe whether the black-wall transition now changes/opens and Spider-Man follows Venom through the building;
+- exit normally; ChatGPT can read the resulting consolidated log directly.
 
 ## Start here
 

@@ -284,8 +284,19 @@ New telemetry:
 
 Forced-clean VC6 matching build of this source: **PASS**.
 
+Installed untested node-44 recovery candidate:
+- behavior commit: `335dd7e51eb1baba785a96da7d81782fac683c28`;
+- proxy SHA-256: `DF2FBDDD7DA53DEFA8CB114D3FB2E26298185479093BE9E930ACC06C73E63A28`;
+- renderer11 SHA-256: `4D78B3B931E9DD80142A4C342832008199EB127EDE9A33E9313E24353D69C057`;
+- input11 SHA-256: `3C4A9974B8D02B15A938528CFD22BC97EB245A37C3B2522A1AA7BB4E7601862F`;
+- full forced-clean proxy build: **PASS**;
+- renderer11 rebuild: **PASS**;
+- input11 rebuild + 32-bit ABI preflight: **PASS**;
+- prepare/install into the real game folder: **PASS**;
+- game intentionally not launched.
+
 Next runtime action:
-1. install/test the node-44 authored-commandpoint recovery candidate;
+1. test the already-installed node-44 authored-commandpoint recovery candidate;
 2. replay Chase Venom;
 3. watch specifically whether the black-wall/building transition now opens/changes and Spider-Man continues through the building after Venom;
 4. exit normally so the new recovery counters and blocking-model telemetry can be inspected.
