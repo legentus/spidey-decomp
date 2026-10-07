@@ -14484,3 +14484,50 @@ After exit inspect the newest archived log for:
 - `quadbit_camera_anchor ... camera_view=0x0056F224`
 - `mysterio_laser_visual_follow`
 - `mysterio_laser_setpos_20hz_stats`
+
+
+### Runtime confirmation — camera-relative world FX anchoring fixed
+User confirmed on the successful `a567bb58` runtime:
+- Mysterio helmet/head-circle FX now remains correctly attached.
+- character/NPC blob shadows no longer slide around when the camera moves.
+- Mysterio chest lasers visually originate from the correct FireBoobies/chest emitter slots.
+- Mysterio health bar and holder are both visually correct.
+
+This is important evidence that restoring the retail-proven `SCamera::View @ 0x0056F224` for legacy effect projection fixed a **shared renderer compatibility bug**, not merely a Mysterio-specific attachment problem.
+
+The earlier behavior where camera motion visibly displaced blob shadows from their owners is now confirmed fixed.
+
+Next cross-check requested by user:
+- Venom Chase / Venom body FX and tentacle-style effects should be tested to see whether they now remain attached correctly under camera motion as well.
+- If confirmed, promote the View-matrix correction to the general legacy world-effect anchoring fix for QuadBit/ribbon-style compatibility paths.
+
+
+## 2026-10-06 — MAJOR CONFIRMATION: game-wide legacy world-effect anchoring bug fixed
+
+User confirmed the `a567bb58` View-matrix compatibility change fixed the previously recurring camera-relative FX displacement across multiple unrelated game systems.
+
+Confirmed fixed in runtime:
+- Mysterio helmet/head-circle FX stays attached to his helmet while the camera moves.
+- NPC/character blob shadows stay beneath their owners while the camera moves.
+- Mysterio laser visuals originate from the correct chest/FireBoobies emitter slots.
+- Venom Chase / Venom tentacle-body FX now remain attached to Venom while moving the camera.
+
+This proves the issue was not Mysterio-specific, shadow-specific, Venom-specific, or caused only by the custom camera.
+
+Root cause:
+- legacy world-space effect renderers expect retail camera `SCamera::View @ 0x0056F224` to be loaded into the GTE effect-projection path;
+- the earlier compatibility wrapper restored `SCamera::Transform @ 0x0056F1E4` instead;
+- this caused world-space FX to project in a different camera basis from their owning rendered models, making them visibly slide when the camera moved.
+
+Retail proof remains:
+- `CSimpleTexturedRibbon_Display @ 0x0040AA00`
+- `0x0040ABA0: push 0x0056F224`
+- `0x0040ABD2: call gte_SetRotMatrix @ 0x0046D7B0`
+- `0x0040ABD7: call zero-GTE-translation @ 0x0046E460`
+
+Production compatibility now restores the retail-proven View matrix before affected legacy effect rendering.
+
+Status:
+**RESOLVED — broad DX11 migration renderer bug.**
+
+Do not reintroduce per-effect screen-space compensation for these classes unless new evidence proves a separate issue. The general View-matrix correction is now validated across Mysterio, blob shadows, and Venom FX.

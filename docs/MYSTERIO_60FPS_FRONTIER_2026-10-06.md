@@ -291,3 +291,19 @@ After exit inspect the newest archived log for:
 - `quadbit_camera_anchor ... camera_view=0x0056F224`
 - `mysterio_laser_visual_follow`
 - `mysterio_laser_setpos_20hz_stats`
+
+
+### Runtime confirmation — camera-relative world FX anchoring fixed
+User confirmed on the successful `a567bb58` runtime:
+- Mysterio helmet/head-circle FX now remains correctly attached.
+- character/NPC blob shadows no longer slide around when the camera moves.
+- Mysterio chest lasers visually originate from the correct FireBoobies/chest emitter slots.
+- Mysterio health bar and holder are both visually correct.
+
+This is important evidence that restoring the retail-proven `SCamera::View @ 0x0056F224` for legacy effect projection fixed a **shared renderer compatibility bug**, not merely a Mysterio-specific attachment problem.
+
+The earlier behavior where camera motion visibly displaced blob shadows from their owners is now confirmed fixed.
+
+Next cross-check requested by user:
+- Venom Chase / Venom body FX and tentacle-style effects should be tested to see whether they now remain attached correctly under camera motion as well.
+- If confirmed, promote the View-matrix correction to the general legacy world-effect anchoring fix for QuadBit/ribbon-style compatibility paths.
