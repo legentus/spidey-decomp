@@ -544,10 +544,70 @@ void CPlayer::CheckWebShot(void)
     printf("CPlayer::CheckWebShot(void)");
 }
 
-// @SMALLTODO
-void CPlayer::CheckZipWebAvailability(SLineInfo *,i32)
+// @Ok
+// Original 0x004C30D0. Validate a zip-web collision candidate. Retail returns
+// its result in AL (so this is u8, not void as the old stub declared).
+u8 CPlayer::CheckZipWebAvailability(
+		SLineInfo* lineInfo,
+		i32 maxDistance)
 {
-    printf("CPlayer::CheckZipWebAvailability(SLineInfo *,i32)");
+	const i32 minDistance =
+		this->field_E1C == 4 ?
+			8 :
+			16;
+
+	if (lineInfo->Distance <=
+			minDistance ||
+		lineInfo->Distance >=
+			maxDistance ||
+		(lineInfo->pFace[3] &
+			0x40000) != 0)
+	{
+		return 0;
+	}
+
+	gte_ldsvrtrow0(
+		reinterpret_cast<const SVECTOR*>(
+			&this->field_A8));
+
+	SVECTOR relative;
+	const i32 pushOut =
+		this->field_EA8;
+
+	relative.vx =
+		(i16)((
+			this->field_C84.vx *
+				pushOut -
+			this->mPos.vx +
+			lineInfo->Position.vx) >>
+			12);
+	relative.vy =
+		(i16)((
+			this->field_C84.vy *
+				pushOut -
+			this->mPos.vy +
+			lineInfo->Position.vy) >>
+			12);
+	relative.vz =
+		(i16)((
+			this->field_C84.vz *
+				pushOut -
+			this->mPos.vz +
+			lineInfo->Position.vz) >>
+			12);
+
+	gte_ldv0(
+		&relative);
+	gte_rtv0();
+
+	i32 forwardDistance = 0;
+	gte_stlvnl0(
+		&forwardDistance);
+
+	if (this->field_E1C == 4)
+		return 1;
+
+	return forwardDistance > 0x40;
 }
 
 // @Ok

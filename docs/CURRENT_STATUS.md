@@ -14903,3 +14903,189 @@ High-value checks:
 3. Fight Scorpion until the previous termination point or until enough combat has occurred.
 
 After exit, pull the newest consolidated log directly. Do not ask for upload while Local Commander is available.
+
+
+## 2026-10-07 — Web-zip deep RE: manual zip vs scripted move-to-point, direct-authored velocity 60-Hz candidate
+
+### Triggering runtime
+Newest reproduction:
+`logs/20261007-001513/spidey-decomp.log`
+revision:
+`89c2952063fa953ae388a4608018785f525b9454`
+
+User loaded a level whose in-engine opening sequence starts with Spider-Man visually web-zipping from the ceiling toward the floor. Spider-Man remained suspended at the ceiling/start point.
+
+Log evidence:
+- camera is `CAMERAMODE_DEMO (3)`;
+- session exited normally (`exit_code=0`);
+- there are **zero** `web_zip_physics` records;
+- therefore this scripted sequence did not enter the ordinary manual zip travel state `field_E1C=0x40000`;
+- Spider-Man's world position is bit-for-bit identical at frames 1200, 1500 and 1800:
+  `-31195060,-3138734,-6942891`.
+This rules out a simple visible overshoot as the whole explanation for that reproduction: the scripted sequence is holding/snap-backing the player at one exact point.
+
+### Previously missing web-zip decomp
+The source still contained placeholder stubs for:
+- `CPlayer::CheckJumpingR1ZipWeb`
+- `CPlayer::CheckJumpingR2ZipWeb`
+- `CPlayer::CheckZipWebAvailability`
+
+Retail mapping:
+- first jumping zip handler: `0x004C0EE0`
+- second jumping zip handler: `0x004C1460`
+- `CPlayer::CheckZipWebAvailability @ 0x004C30D0`
+- `CPlayer::TidyUpZipWebLandingPosition @ 0x004C4A20`
+- `CPlayer::FireWeb @ 0x004C5DD0`
+
+The two large jumping handlers are still retail-live; no source patch replaces them.
+
+### CheckZipWebAvailability reconstructed
+The old source incorrectly declared this function `void`. Retail returns its boolean result in AL.
+
+Source/header now use:
+`u8 CPlayer::CheckZipWebAvailability(SLineInfo*, i32)`
+
+Recovered retail behavior:
+- minimum line distance:
+  - state 4 -> > 8
+  - other states -> > 16
+- must be less than caller max distance;
+- rejects `pFace[3] & 0x40000`;
+- loads player `field_A8` as GTE rotation row 0;
+- constructs a relative fixed-point vector from:
+  `lineInfo.Position + field_C84 * field_EA8 - mPos`;
+- transforms it and reads transformed X;
+- state 4 accepts immediately after distance/face checks;
+- other states require transformed X > `0x40`.
+
+The new C++ reconstruction uses the existing retail-compatible GTE helper functions and builds cleanly. This source function remains unpatched at runtime; the retail implementation is still authoritative.
+
+### Manual zip path recovered
+Both retail jump-zip handlers:
+- raycast a candidate surface;
+- call `CheckZipWebAvailability`;
+- store target at player `+0xDC0`;
+- store normal at `+0xDA0`;
+- fire the web;
+- start animation 270 / `0x10E`;
+- set `field_E1C=0x40000`.
+
+`SpideyAI0 @ 0x004B13F0` state `0x40000`:
+- handles prep anims and transition into 270/271;
+- clears crawl mode when zip travel takes over;
+- detects target crossing / landing;
+- sets a **fresh authored mVel every active AI update** using speed `0xF0`;
+- eventually plays landing anim 272 and calls TidyUpZipWebLandingPosition.
+
+### Retail DoPhysics proof
+Our entire replacement `CPlayer::DoPhysics` is live via:
+`PATCH_PUSH_RET(0x00466CE0, CPlayer::DoPhysics)`.
+
+Retail `DoPhysics @ 0x00466CE0`:
+- swing check;
+- crawl check;
+- retail velocity integration;
+- special zip no-collision movement when:
+  - state `0x40000`
+  - anim 270 frame >= 13, or anim 271;
+- retail then adds full `mVel` and returns.
+
+The crawl-before-zip ordering in our source exactly matches retail. Do not reorder these branches.
+
+### Scripted cutscene movement RE
+`CPlayer_SynthesizeAnalogueInput @ 0x004BC300` processes linked script command blocks at player `+0x1BC` while `field_1AC` is active.
+
+Dispatcher table `0x004BD44C` maps command types 2..15.
+
+Recovered **type 5** handler at `0x004BD0FD`:
+- block contains a 3D target and authored speed;
+- computes `Utils_Dist(target, playerPos)`;
+- completes/removes block once distance < `0x40`;
+- otherwise normalizes `target - playerPos`;
+- multiplies by authored speed;
+- writes that vector directly to `player->mVel`.
+
+This provides a second path which can visually represent scripted zip/travel without ever entering manual state `0x40000`.
+
+The caller `sub_4BD510` invokes `CPlayer_SynthesizeAnalogueInput` at `0x004BD572` when scripted control is active. Its subsequent analogue/ramp processing does not itself overwrite mVel, although later state-specific SpideyAI0 code can still touch velocity.
+
+### Native-60 direct-authored velocity mismatch
+Commit `6b56677c` converted player physics from retail cadence to native 60 Hz using a continuous half-step integrator plus half displacement when `field_80==1`.
+
+That is correct only if velocity persists between the two 60-Hz half-steps.
+
+Manual zip and script command type 5 violate that assumption because they author a fresh mVel every AI update.
+
+Retail friction setup in SpideyAI0 proves:
+- manual state `0x40000` uses friction `1,1,1`.
+
+For an authored velocity V with zero acceleration and friction 1:
+- one retail 30-Hz solve: post-friction velocity = 0.5V, displacement = 0.5V.
+- current native-60 continuous half-step: post-half damping ~=0.707V, displacement ~=0.354V each 60-Hz frame.
+- over the same 33.3 ms, two re-authored 60-Hz frames move ~=0.707V rather than retail 0.5V.
+
+This is a ~41% excess displacement because AI destroys the velocity persistence assumed by the square-root damping derivation.
+
+### Candidate implemented: direct-authored motion integration
+Added `SpideyPhysicsGetDirectAuthoredMotion`.
+
+It recognizes only:
+1. manual zip state `0x40000` while anim 270/271;
+2. an active scripted command chain containing type 5.
+
+When `field_80==1` and one of those modes is active:
+- use the **full retail acceleration+friction solve** for mVel;
+- retain the already-existing **half displacement** at 60 Hz.
+
+Therefore each 60-Hz frame consumes half of a retail-authored movement step without assuming velocity survives into the next frame.
+
+Applied in:
+- `CPlayer::DoPhysics`
+- `CPlayer::DoCrawlingPhysics`
+
+All other player movement keeps the prior continuous native-60 half-step.
+
+This also deliberately covers a script type-5 worker while crawl mode is still active; the next runtime trace will tell whether crawl physics itself is snapping the scripted movement back to the ceiling.
+
+### New generic DEMO script telemetry
+The existing wrapper around retail `CPlayer_SynthesizeAnalogueInput` now records capped DEMO-camera snapshots even outside L5A1.
+
+Marker:
+`[TIMING] script_motion ...`
+
+Captured:
+- pre/post retail synth phase;
+- worker type bitmask;
+- head command type/size/data;
+- player state;
+- crawl/wall/ceiling flags;
+- animation/frame/fraction/finished;
+- field_80;
+- position;
+- velocity;
+- acceleration;
+- collision bits.
+
+It logs on important state/command changes plus a low-rate periodic sample, capped at 256 records.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+- `Release/spider.dll`: 917,504 bytes
+- pre-commit SHA-256:
+  `c376cc0fc1c86b8bce30ac6eb8b1b09d47e32270ec076ac76ae23aaa051679ea`
+
+### Next test
+Run:
+`F:\Spider-Man 2000 Recomp\project main\TEST_LATEST_BUILD.bat`
+
+Highest-value reproduction:
+1. load the same level with the scripted ceiling -> floor zip/drop;
+2. observe whether Spider-Man now travels;
+3. if still stuck, exit normally if possible.
+
+Then inspect `script_motion` in the newest consolidated log:
+- if type 5 is active and crawl=1 while velocity changes but position does not, the remaining bug is the scripted surface-detach/crawl handoff;
+- if type 5 is active and crawl=0, compare pre/post mVel and successive positions to verify authored-motion integration;
+- if no type 5 appears, use the worker mask/head to identify and decompile the actual command type;
+- manual R1/R2 zip should also be retested afterward because its state-0x40000 authored velocity now uses the corrected integration class.

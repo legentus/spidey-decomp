@@ -162,6 +162,103 @@ static void SpideyPhysicsIntegrateVelocity60(
 	velocity->KillSmall();
 }
 
+enum SpideyDirectAuthoredMotionFlags
+{
+	SPIDEY_AUTHORED_MOTION_NONE = 0,
+	SPIDEY_AUTHORED_MOTION_ZIP = 1,
+	SPIDEY_AUTHORED_MOTION_SCRIPT_TYPE5 = 2
+};
+
+// The generic native-60 integrator assumes velocity persists between the two
+// half-steps that replace one retail 30-Hz step. Some player controllers do
+// not satisfy that assumption: they author a fresh mVel every AI update.
+//
+// Retail proof:
+// - SpideyAI0 state 0x40000 writes a fresh zip velocity while anim 270/271.
+// - scripted worker type 5 in 0x004BC300 writes a normalized move-to-point
+//   velocity directly to CPlayer::mVel on every worker update.
+//
+// For those modes, two sqrt-damped half integrations are NOT equivalent once
+// AI has overwritten the intermediate velocity. Instead, perform the retail
+// full friction/acceleration solve on each 60-Hz update and let the existing
+// half-displacement path consume half of that result.
+static int SpideyPhysicsGetDirectAuthoredMotion(
+		CPlayer* player)
+{
+	if (!player)
+		return SPIDEY_AUTHORED_MOTION_NONE;
+
+	int flags =
+		SPIDEY_AUTHORED_MOTION_NONE;
+
+	if (player->field_E1C == 0x40000 &&
+		(player->mAnim == 270 ||
+		 player->mAnim == 271))
+	{
+		flags |=
+			SPIDEY_AUTHORED_MOTION_ZIP;
+	}
+
+	if (player->field_1AC &&
+		player->field_1BC)
+	{
+#ifdef _WIN32
+		__try
+		{
+#endif
+			i32* block =
+				player->field_1BC;
+			for (i32 nodes = 0;
+				 block && nodes < 32;
+				 ++nodes)
+			{
+				const i32 type =
+					block[0];
+				const i32 size =
+					block[1];
+
+				if (type == 5)
+				{
+					flags |=
+						SPIDEY_AUTHORED_MOTION_SCRIPT_TYPE5;
+					break;
+				}
+
+				if (size < 2 ||
+					size > 32)
+				{
+					break;
+				}
+
+				i32* next =
+					reinterpret_cast<i32*>(
+						block[size - 1]);
+				if (next == block)
+					break;
+				block =
+					next;
+			}
+#ifdef _WIN32
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+#endif
+	}
+
+	return flags;
+}
+
+static void SpideyPhysicsIntegrateDirectAuthoredVelocity60(
+		CPlayer* player)
+{
+	player->mVel +=
+		player->mAcc;
+	player->mVel %=
+		player->mFric;
+	player->mVel.KillSmall();
+}
+
 // Retail DoPhysics and DoCrawlingPhysics both perform:
 //
 //     mVel += mAcc;
@@ -388,9 +485,25 @@ void CPlayer::DoCrawlingPhysics(void)
 	this->field_B09 = 0;
 	bStopped = 0;
 
+	const int directAuthoredMotion =
+		SpideyPhysicsGetDirectAuthoredMotion(
+			this);
+
 	if (this->field_80 == 1)
 	{
-		SpideyPhysicsIntegrateVelocity60(&this->mVel, &this->mAcc, &this->mFric);
+		if (directAuthoredMotion !=
+			SPIDEY_AUTHORED_MOTION_NONE)
+		{
+			SpideyPhysicsIntegrateDirectAuthoredVelocity60(
+				this);
+		}
+		else
+		{
+			SpideyPhysicsIntegrateVelocity60(
+				&this->mVel,
+				&this->mAcc,
+				&this->mFric);
+		}
 	}
 	else
 	{
@@ -1000,9 +1113,25 @@ void CPlayer::DoPhysics(void)
 	gSpideyZipPhysicsWasActive =
 		zipActive;
 
+	const int directAuthoredMotion =
+		SpideyPhysicsGetDirectAuthoredMotion(
+			this);
+
 	if (this->field_80 == 1)
 	{
-		SpideyPhysicsIntegrateVelocity60(&this->mVel, &this->mAcc, &this->mFric);
+		if (directAuthoredMotion !=
+			SPIDEY_AUTHORED_MOTION_NONE)
+		{
+			SpideyPhysicsIntegrateDirectAuthoredVelocity60(
+				this);
+		}
+		else
+		{
+			SpideyPhysicsIntegrateVelocity60(
+				&this->mVel,
+				&this->mAcc,
+				&this->mFric);
+		}
 	}
 	else
 	{

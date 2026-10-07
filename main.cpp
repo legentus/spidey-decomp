@@ -6965,6 +6965,143 @@ static void SpideyRecordChaseSynthTrace(
 	++gSpideyChaseSynthTraceCount;
 }
 
+static unsigned long gSpideyScriptMotionTraceSamples =
+	0;
+static unsigned long gSpideyScriptMotionTraceDropped =
+	0;
+static unsigned long gSpideyScriptMotionLastMask =
+	0xFFFFFFFFUL;
+static int gSpideyScriptMotionLastHead =
+	-999;
+static int gSpideyScriptMotionLastState =
+	-1;
+static int gSpideyScriptMotionLastAnim =
+	-1;
+static int gSpideyScriptMotionLastCrawl =
+	-1;
+
+static void SpideyLogScriptMotionSnapshot(
+		const char* phase,
+		CPlayer* player)
+{
+	if (!player ||
+		!player->field_1AC)
+	{
+		return;
+	}
+
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+	if (!camera ||
+		camera->mCameraMode !=
+			CAMERAMODE_DEMO)
+	{
+		return;
+	}
+
+	unsigned long workerMask =
+		SpideyChaseReadWorkerTypeMask(
+			player);
+	int headType = -1;
+	int headSize = 0;
+	int head2 = 0;
+	int head3 = 0;
+	SpideyChaseReadWorkerHead(
+		player,
+		&headType,
+		&headSize,
+		&head2,
+		&head3);
+
+	const int state =
+		(int)player->field_E1C;
+	const int anim =
+		(int)player->mAnim;
+	const int crawl =
+		(int)player->field_AD4;
+
+	const int changed =
+		workerMask !=
+			gSpideyScriptMotionLastMask ||
+		headType !=
+			gSpideyScriptMotionLastHead ||
+		state !=
+			gSpideyScriptMotionLastState ||
+		anim !=
+			gSpideyScriptMotionLastAnim ||
+		crawl !=
+			gSpideyScriptMotionLastCrawl;
+
+	const unsigned long tick =
+		(unsigned long)
+		*(volatile long*)0x006B4CA8;
+
+	if (!changed &&
+		(tick % 6UL) != 0)
+	{
+		return;
+	}
+
+	if (gSpideyScriptMotionTraceSamples >=
+		256)
+	{
+		++gSpideyScriptMotionTraceDropped;
+		return;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"script_motion phase=%s sample=%lu tick=%lu camera_mode=%d active=%d mask=0x%08lX head=%d,%d,%d,%d state=0x%08X crawl=%d wall=%d ceiling=%d anim=%d frame=%d frac=%d finished=%d field80=%d pos=%ld,%ld,%ld vel=%ld,%ld,%ld acc=%ld,%ld,%ld collision=0x%04X\n",
+			phase ? phase : "unknown",
+			gSpideyScriptMotionTraceSamples,
+			tick,
+			(int)camera->mCameraMode,
+			(int)player->field_1AC,
+			workerMask,
+			headType,
+			headSize,
+			head2,
+			head3,
+			(unsigned int)state,
+			crawl,
+			(int)player->field_8E8,
+			(int)player->field_8E9,
+			anim,
+			(int)player->mFrame,
+			(int)player->mFrameFrac,
+			(int)player->mAnimFinished,
+			(int)player->field_80,
+			(long)player->mPos.vx,
+			(long)player->mPos.vy,
+			(long)player->mPos.vz,
+			(long)player->mVel.vx,
+			(long)player->mVel.vy,
+			(long)player->mVel.vz,
+			(long)player->mAcc.vx,
+			(long)player->mAcc.vy,
+			(long)player->mAcc.vz,
+			(unsigned int)player->mCollision);
+		fclose(f);
+	}
+
+	++gSpideyScriptMotionTraceSamples;
+	gSpideyScriptMotionLastMask =
+		workerMask;
+	gSpideyScriptMotionLastHead =
+		headType;
+	gSpideyScriptMotionLastState =
+		state;
+	gSpideyScriptMotionLastAnim =
+		anim;
+	gSpideyScriptMotionLastCrawl =
+		crawl;
+}
+
 static void SpideyResetChaseSynthState(
 		CPlayer* player)
 {
@@ -7001,6 +7138,10 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 	gSpideyChaseSynthFreshThisCall =
 		0;
 
+	SpideyLogScriptMotionSnapshot(
+		"pre",
+		player);
+
 	if (!player ||
 		SpideyRetailGetLevelId() != 0x501 ||
 		!player->field_1AC)
@@ -7014,6 +7155,9 @@ static void __fastcall SpideyChaseVenomSynth20Hz(
 		retail(
 			player,
 			0);
+		SpideyLogScriptMotionSnapshot(
+			"post",
+			player);
 		return;
 	}
 
