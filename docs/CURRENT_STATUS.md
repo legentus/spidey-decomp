@@ -14428,27 +14428,12 @@ This is the strongest current root-cause candidate for:
 
 The prior stale-GTE-translation hypothesis was falsified by the latest run: all sampled `pre_trans` values were zero.
 
-### Gouraud ribbon camera protection
-Mysterio laser visuals are not QuadBits. `CMysterioLaser` owns two `CGouraudRibbon` objects at offsets:
-- `laser+0x3C`
-- `laser+0x40`
+### Rejected Gouraud ribbon vtable experiment
+Mysterio laser visuals are not QuadBits. `CMysterioLaser` owns two `CGouraudRibbon` objects at offsets `laser+0x3C` and `laser+0x40`. Retail identification remains useful: constructor `0x004F16C0`, vtable `0x0053C70C`, and `CGouraudRibbon::Display @ 0x004F1860`.
 
-Retail identification:
-- `CGouraudRibbon::CGouraudRibbon @ 0x004F16C0`
-- constructor writes vtable `0x0053C70C`
-- display function `CGouraudRibbon::Display @ 0x004F1860`
-- display vtable slot therefore `0x0053C714`
+Final static review disproved the attempted `vtable+8` Display hook. The recovered class does not declare `Display()` virtual, the special-display dispatcher invokes the second vtable entry (`vtable+4`), and the freshly built proxy vtable shows that entry is inherited `CBit::Move`. Therefore `0x0053C714` is not a valid `CGouraudRibbon::Display` slot. The experimental global hook was removed before the source checkpoint.
 
-New guarded vtable compatibility wrapper:
-- patch slot `0x0053C714` only if original value is exactly `0x004F1860`;
-- rebuild pristine DCX combined matrix;
-- restore `SCamera::View @ 0x0056F224`;
-- zero GTE translation;
-- call untouched retail `CGouraudRibbon::Display`.
-
-Telemetry:
-- `gouraud_ribbon_camera_install ...`
-- `gouraud_ribbon_camera_restore ...`
+Do **not** expect `gouraud_ribbon_camera_install` or `gouraud_ribbon_camera_restore` in the next correct build. If ribbon projection still needs a global fix after the emitter-follow test, trace its real indirect display registration rather than guessing another vtable slot.
 
 ### Mysterio laser emitter-follow correction
 The existing safe laser policy keeps:
@@ -14477,12 +14462,11 @@ Telemetry:
 - extended `mysterio_laser_setpos_20hz_stats ... visual_follow_calls=... visual_follow_points=... policy=20hz_sim_60hz_emitter_follow_fireboobies_ai_60hz`
 
 ### Validation
-- forced-clean matching VC6 build: PASS
-- full link of `Release/spider.dll`: PASS
-- `git diff --check`: PASS
-- candidate pre-commit DLL:
-  - size: 913,408 bytes
-  - SHA-256: `dc965754cbc6e6a05d2f395da17f789f18232b402c4b4115736c440a66c9902f`
+- `git diff --check`: PASS.
+- Fresh Win32 MSVC syntax/type build compiled `main.cpp` successfully with warnings only.
+- The project-wide modern build still fails on known legacy-source incompatibilities outside this candidate (for example `DXinit.cpp: DS_INCOMPLETE` and old member-function macro syntax).
+- An interrupted matching VC6 run produced a linked `Release/spider.dll`, but that binary was built **before** the invalid Gouraud `vtable+8` experiment was removed. It is superseded and must not be deployed as the final candidate.
+- The committed source is authoritative. Use `TEST_LATEST_BUILD.bat` so the normal matching VC6 harness rebuilds the exact checkpoint before runtime testing.
 
 ### Next runtime test
 Use `TEST_LATEST_BUILD.bat` only.
@@ -14498,7 +14482,5 @@ After exit inspect the newest archived log for:
 - `holder_texture_shared_top_right`
 - `holder_frame_shared_top_right`
 - `quadbit_camera_anchor ... camera_view=0x0056F224`
-- `gouraud_ribbon_camera_install`
-- `gouraud_ribbon_camera_restore`
 - `mysterio_laser_visual_follow`
 - `mysterio_laser_setpos_20hz_stats`
