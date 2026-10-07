@@ -17265,3 +17265,25 @@ Installer telemetry now includes:
 - forced-clean matching VC6 build: PASS
 
 No camera, combat-freeze, or drop-hang diagnostic behavior was changed.
+
+
+### Final revision-stamped bomb-timer fix artifact
+
+Behavior commit:
+
+`44382012` — **Fix bomb timer holder alignment**
+
+A forced-clean matching VC6 build was produced with that commit stamped into `RUNTIME_VERSION`.
+
+`Release/spider.dll` verification:
+
+- size: 942,080 bytes
+- SHA-256: `a38c65a8d62ebe711692c545930cdca2cd4078779beb815112ba9450e81dabf8`
+- behavior commit string present in DLL: PASS
+
+Use the normal `TEST_LATEST_BUILD.bat` workflow. In the bomb level, verify that the visible `00:00` countdown sits inside the timer holder. The live log should contain both:
+
+- `bomb_timer_alignment source=text ...`
+- `bomb_timer_alignment source=backing ...`
+
+and startup installer telemetry should report `bomb_timer=text:1,backing:1`.
