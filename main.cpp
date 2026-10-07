@@ -34,6 +34,7 @@
 #include "platform.h"
 #include "rhino.h"
 #include "scorpion.h"
+#include "screen.h"
 #include "simby.h"
 #include "spclone.h"
 #include "superock.h"
@@ -8656,6 +8657,10 @@ static void SpideyModernAimDropForZip(
 
 	player->field_8EA =
 		0;
+	player->field_DE4 =
+		0;
+	Screen_TargetOn(
+		false);
 	gSpideyModernAimZipReleaseLatchPlayer =
 		player;
 	gSpideyModernAimLastBodyPosValid =
@@ -15430,11 +15435,16 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 				camera);
 	}
 
-	// The original camera collision was authored for the game's narrow
-	// vertical orbit. At modern pitch angles, explicitly constrain the whole
-	// focus-to-camera arm against world geometry before retail computes the
-	// final orientation. This makes walls, floors and ceilings equivalent
-	// camera boundaries, including while Spider-Man is ceiling-crawling.
+	retail(
+		camera,
+		0);
+
+	// MoveToDesiredPos is the retail routine wrapped here. It can change
+	// camera->mPos after mode-3 has generated its desired orbit position.
+	// Clamp *after* that final move so the rendered camera itself cannot cross
+	// a wall/floor/ceiling. The caller immediately runs Utils_CalcAim with
+	// camera->mPos + field_144, so retail orientation is rebuilt from this
+	// clipped position before publish.
 	if (gSpideyModernCameraActive &&
 		camera->mCameraMode ==
 			CAMERAMODE_DEMO)
@@ -15443,10 +15453,6 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 			camera,
 			player);
 	}
-
-	retail(
-		camera,
-		0);
 
 	if (manualAim)
 	{
@@ -19830,7 +19836,16 @@ static u8 __fastcall SpideyTraceR1ZipCheck(
 	}
 
 	if (result)
+	{
 		++gSpideyZipR1Success;
+		// RenderLookaroundReticle is gated by field_DE4, not by the retail
+		// aim-state bit. Clear the target marker on every successful zip so a
+		// stale manual-aim reticle cannot be carried to the new zip target.
+		player->field_DE4 =
+			0;
+		Screen_TargetOn(
+			false);
+	}
 
 	SpideyLogZipCheck(
 		"r1",
@@ -19919,7 +19934,13 @@ static u8 __fastcall SpideyTraceR2ZipCheck(
 	}
 
 	if (result)
+	{
 		++gSpideyZipR2Success;
+		player->field_DE4 =
+			0;
+		Screen_TargetOn(
+			false);
+	}
 
 	SpideyLogZipCheck(
 		"r2",

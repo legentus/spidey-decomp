@@ -702,3 +702,86 @@ High-value checks:
 6. Aim into open space and press Zipline; no legacy fallback zip should occur.
 7. Release Aim and press Zipline; original quick/surface-normal retail zip should still work.
 8. Hostage Situation opening scripted zip should remain functional.
+
+
+## 2026-10-07 — Live-session camera clipping + stale Zipline reticle fixes
+
+### Live session access
+While the game is running, the harness session directory can remain empty because the consolidated log is archived only after process exit.
+
+For the active test started at `20261007-031631`, the live source is:
+`C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`
+
+Live runtime revision:
+`ceb17d4cdc5ef9c6758d907894ab634909ccf982`
+
+### Runtime observations
+Aimed Zipline works in the live session:
+- tick 3248: `web_zip_aimed ... result=1`
+- tick 3457: `web_zip_aimed ... result=1`
+
+The player-state trace shows aim state clears after zip:
+- `aim=0`
+- `field_8EA=0`
+
+Therefore the reticle persistence is not an aim-state failure.
+
+Camera collision is also firing:
+- 64 logged `modern_camera_collision` hits before the telemetry cap;
+- hits include ceiling-crawl state and world contacts.
+
+So the camera bug is not “collision ray never sees geometry.”
+
+### Reticle root cause
+`CPlayer::RenderLookaroundReticle` draws whenever `field_DE4 != 0`.
+
+Modern aim explicitly sets:
+- `field_DC0` = reticle world point;
+- `field_DE4 = 1`.
+
+Retail `ExitLookaroundMode` normally clears:
+- `field_8EA`;
+- `field_DE4`;
+- `Screen_TargetOn(false)`.
+
+Our aimed Zipline path intentionally bypasses normal retail lookaround exit semantics so it can enter state `0x40000` cleanly. It cleared `field_8EA`, but did not clear `field_DE4`.
+
+Retail R1/R2 themselves do not set `field_DE4`.
+
+Quick Zipline updates `field_DC0` to its new zip target. Therefore if `field_DE4` was stale from a prior aim session, even a non-aimed quick zip makes the stale reticle appear at the new zip destination. This exactly matches the reported “reticle/decal stays where I zipped to” behavior.
+
+### Reticle fix
+- `SpideyModernAimDropForZip` now also clears `field_DE4` and calls `Screen_TargetOn(false)`.
+- Every successful R1 and R2 Zipline wrapper now clears `field_DE4` and calls `Screen_TargetOn(false)`, regardless of aimed vs quick path.
+
+This makes successful Zipline a hard cleanup boundary for the lookaround target marker.
+
+### Camera clipping root cause
+The modern world-arm clamp was executed before calling:
+`CCamera_MoveToDesiredPos @ 0x00416B10`.
+
+The camera AI caller proves the order:
+- `0x00418458: call CCamera_MoveToDesiredPos`
+- `0x0041845D+`: immediately uses final `mPos` and `field_144`
+- `0x0041846C: call Utils_CalcAim @ 0x004E62D0`
+
+So our earlier sequence was:
+1. mode-3 chooses desired camera;
+2. custom collision clamp shortens `mPos`;
+3. retail `MoveToDesiredPos` moves `mPos` again;
+4. retail computes orientation from the moved position.
+
+This allowed the final rendered camera to cross geometry after our successful collision hit.
+
+### Camera fix
+`SpideyModernAimCameraPostprocess` now:
+1. applies framed focus for manual aim if needed;
+2. calls retail `CCamera_MoveToDesiredPos`;
+3. then runs `SpideyModernCameraClipToWorld` on the final `camera->mPos`;
+4. returns to retail caller, which immediately runs `Utils_CalcAim` from the clipped final position.
+
+Thus walls/floors/ceilings now constrain the final camera position rather than an intermediate one, and retail orientation/publish remains coherent.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
