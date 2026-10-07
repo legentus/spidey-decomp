@@ -17126,3 +17126,22 @@ Interpretation should be immediate:
 - all player/list events return but no `logic_return` -> later Logic subsystem after list dispatch.
 
 The validated first-person camera behavior is unchanged.
+
+
+### Final revision-stamped post-drop hang diagnostic artifact
+
+Behavior/diagnostic commit:
+
+`a6c361de` — **Instrument post-drop Logic hang path**
+
+A forced-clean matching VC6 build was produced with that commit stamped into `RUNTIME_VERSION`.
+
+`Release/spider.dll` verification:
+
+- size: 942,080 bytes
+- SHA-256: `4155940e680a9c4e41f406f407fa349f22c04ceffdab5a149501971c9a917c72`
+- behavior commit string present in DLL: PASS
+
+The currently frozen `a83e0578...` game process has yielded all available evidence through the present Local Commander interface and may be terminated.
+
+Use normal `TEST_LATEST_BUILD.bat` for the next run. If another ceiling-drop freeze occurs, leave the process open and inspect the final `drop_hang_trace` sequence first.
