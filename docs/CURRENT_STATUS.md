@@ -16751,3 +16751,31 @@ Primary test:
 4. the live `spidey-decomp.log` can then be pulled directly through Local Commander.
 
 No need to retest the wall/ceiling camera beyond a brief sanity check; that behavior is already user-validated.
+
+
+### Final revision-stamped diagnostic artifact
+
+Behavior commit:
+
+`3eb5747307cd296d14d2761afb67d07fba2d4d7b`
+
+After committing/pushing the source, a second forced-clean matching VC6 build was performed with:
+
+`RUNTIME_VERSION = 3eb5747307cd296d14d2761afb67d07fba2d4d7b`
+
+Verification of `Release/spider.dll`:
+
+- size: 937,984 bytes
+- SHA-256:
+  `69f30643e93ad6f77b23ee1d711b02656821efcc5e556c7c07987336657cc68c`
+- the full behavior commit string is present in the binary: PASS
+
+An attempt to use `TEST_LATEST_BUILD.ps1 -PrepareOnly` confirmed the correct revision but hit the normal Windows UAC boundary for writing into:
+
+`C:\Program Files (x86)\Activision\Spider-Man`
+
+No forced/unsupported install was attempted.
+
+The repository `Release/spider.dll` is therefore the exact revision-stamped diagnostic artifact. The user should use the normal `TEST_LATEST_BUILD.bat` workflow and accept its elevation prompt so the same source is rebuilt/installed through the supported path.
+
+The tracked `runtime_version.h` was restored to its repository-empty state after producing the stamped artifact.
