@@ -785,3 +785,62 @@ Thus walls/floors/ceilings now constrain the final camera position rather than a
 ### Validation
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-07 — Wall/ceiling manual-aim reticle framing
+
+### User-visible result before this candidate
+The previous camera/Zipline batch is nearly correct:
+- final-position camera collision is working much better;
+- aimed Zipline works;
+- quick Zipline works;
+- stale post-Zipline reticle cleanup is fixed;
+- floor manual aim behaves correctly.
+
+Remaining issue:
+- while ceiling-crawling, manual aim reticle stays visually centered on Spider-Man instead of giving a usable world target;
+- wall-crawl likely has the same class of issue.
+
+### Live-log proof
+Active manual-aim ceiling sample:
+- player body: `-6990084,-4009898,4049717`
+- camera: `-6990068,-4337594,4049717`
+- old framed focus: `-6990084,-4403114,4049717`
+- `wall=0 ceiling=1`.
+
+The old framing code always did:
+`focus = player->mPos + (0,-96*4096,0)`.
+
+In this ceiling case, camera->player is already almost exactly vertical, so the fixed world-Y framing vector is nearly collinear with the camera ray. The visible reticle therefore projects back across Spider-Man instead of separating from his body.
+
+### Fix
+Floor behavior is intentionally preserved exactly.
+
+For wall/ceiling states only (`field_8E8 || field_8E9`):
+1. compute the normalized camera->player view direction;
+2. project engine world-up `(0,-1,0)` into the camera image plane;
+3. normalize that projected vector to a 4096-scale screen-up axis;
+4. apply the existing 96-world-unit framing offset along that screen-up axis rather than fixed world -Y.
+
+At a mathematically vertical view, world-up projection is undefined. The modern orbit already retains a tiny horizontal arm at the ±90° pole, so the fallback uses that horizontal radial direction with the correct pole sign.
+
+This gives a framing offset that is always perpendicular to the view ray, preventing the reticle from collapsing onto Spider-Man on ceilings/walls.
+
+Unchanged:
+- ordinary floor manual aim retains exact `(0,-4096,0)` framing axis;
+- ±90° camera pitch;
+- final-position wall/floor/ceiling camera collision;
+- aimed and quick Zipline behavior;
+- native-60 Zipline displacement;
+- reticle cleanup on successful Zipline.
+
+### New telemetry
+Manual-aim framing records now include:
+- `framing_mode=0` => preserved floor/world-up path;
+- `framing_mode=1` => projected screen-up path;
+- `framing_mode=2` => exact vertical-pole radial fallback;
+- `framing_axis=x,y,z` => actual normalized 4096-scale framing direction.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS

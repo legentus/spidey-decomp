@@ -8931,14 +8931,38 @@ static int __fastcall SpideyModernAimCheckForwards(
 	return result;
 }
 
-// Manual aim TPS framing. World +Y points downward in this game, so a
-// negative Y offset places the camera/reticle focus above Spider-Man.
-// 96 world units is intentionally modest: enough to put the reticle over the
-// character instead of through his body without introducing a shoulder bias.
+// Manual aim TPS framing.
+//
+// On ordinary floor movement, preserve the already-validated retail-like
+// framing exactly: world +Y points downward, so -Y places the focus 96 units
+// above Spider-Man.
+//
+// Wall/ceiling crawl is different. A fixed world-Y offset can become nearly
+// collinear with the camera->player ray (most obviously when the camera looks
+// almost straight through Spider-Man on a ceiling). The projected reticle then
+// sits on Spider-Man instead of providing a usable point in the world.
+//
+// For wall/ceiling aim only, project world-up into the camera's image plane and
+// use that screen-up direction for the same 96-unit framing offset. This keeps
+// the reticle visually above/away from Spider-Man regardless of surface
+// orientation while leaving the successful floor behavior untouched.
 static const int kSpideyManualAimFocusHeightUnits = 96;
 static const int kSpideyManualAimFocusHeight =
 	kSpideyManualAimFocusHeightUnits *
 	4096;
+
+static int gSpideyManualAimFramingMode = 0;
+static int gSpideyManualAimFramingAxisX = 0;
+static int gSpideyManualAimFramingAxisY = -4096;
+static int gSpideyManualAimFramingAxisZ = 0;
+
+static int SpideyRoundAimFramingDouble(
+		double value)
+{
+	if (value >= 0.0)
+		return (int)(value + 0.5);
+	return (int)(value - 0.5);
+}
 
 static CVector SpideyModernAimFramedFocus(
 		CPlayer* player,
@@ -8946,12 +8970,155 @@ static CVector SpideyModernAimFramedFocus(
 {
 	CVector focus;
 
+	gSpideyManualAimFramingMode =
+		0;
+	gSpideyManualAimFramingAxisX =
+		0;
+	gSpideyManualAimFramingAxisY =
+		-4096;
+	gSpideyManualAimFramingAxisZ =
+		0;
+
 	if (player)
 	{
 		focus =
 			player->mPos;
-		focus.vy -=
-			kSpideyManualAimFocusHeight;
+
+		if ((player->field_8E8 ||
+			 player->field_8E9) &&
+			camera)
+		{
+			const double fxRaw =
+				(double)player->mPos.vx -
+				(double)camera->mPos.vx;
+			const double fyRaw =
+				(double)player->mPos.vy -
+				(double)camera->mPos.vy;
+			const double fzRaw =
+				(double)player->mPos.vz -
+				(double)camera->mPos.vz;
+			const double forwardLength =
+				sqrt(
+					fxRaw * fxRaw +
+					fyRaw * fyRaw +
+					fzRaw * fzRaw);
+
+			if (forwardLength > 1.0)
+			{
+				const double fx =
+					fxRaw /
+					forwardLength;
+				const double fy =
+					fyRaw /
+					forwardLength;
+				const double fz =
+					fzRaw /
+					forwardLength;
+
+				// World-up in this engine is (0,-1,0). Remove its component
+				// along the view direction; what remains is screen-up in
+				// world space.
+				const double upDotForward =
+					-fy;
+				double ux =
+					-fx *
+					upDotForward;
+				double uy =
+					-1.0 -
+					fy *
+					upDotForward;
+				double uz =
+					-fz *
+					upDotForward;
+
+				double upLength =
+					sqrt(
+						ux * ux +
+						uy * uy +
+						uz * uz);
+
+				if (upLength <= 0.00001)
+				{
+					// At a mathematically vertical view the image-plane
+					// projection is undefined. The modern orbit deliberately
+					// retains at least a one-unit horizontal arm, so use that
+					// radial direction as the continuous pole fallback.
+					double rx =
+						(double)camera->mPos.vx -
+						(double)player->mPos.vx;
+					double rz =
+						(double)camera->mPos.vz -
+						(double)player->mPos.vz;
+					const double radialLength =
+						sqrt(
+							rx * rx +
+							rz * rz);
+
+					if (radialLength > 0.00001)
+					{
+						rx /=
+							radialLength;
+						rz /=
+							radialLength;
+
+						const double poleSign =
+							fyRaw >= 0.0 ?
+								-1.0 :
+								1.0;
+						ux =
+							rx *
+							poleSign;
+						uy =
+							0.0;
+						uz =
+							rz *
+							poleSign;
+						upLength =
+							1.0;
+						gSpideyManualAimFramingMode =
+							2;
+					}
+				}
+				else
+				{
+					gSpideyManualAimFramingMode =
+						1;
+				}
+
+				if (upLength > 0.00001)
+				{
+					ux /=
+						upLength;
+					uy /=
+						upLength;
+					uz /=
+						upLength;
+
+					gSpideyManualAimFramingAxisX =
+						SpideyRoundAimFramingDouble(
+							ux *
+							4096.0);
+					gSpideyManualAimFramingAxisY =
+						SpideyRoundAimFramingDouble(
+							uy *
+							4096.0);
+					gSpideyManualAimFramingAxisZ =
+						SpideyRoundAimFramingDouble(
+							uz *
+							4096.0);
+				}
+			}
+		}
+
+		focus.vx +=
+			kSpideyManualAimFocusHeightUnits *
+			gSpideyManualAimFramingAxisX;
+		focus.vy +=
+			kSpideyManualAimFocusHeightUnits *
+			gSpideyManualAimFramingAxisY;
+		focus.vz +=
+			kSpideyManualAimFocusHeightUnits *
+			gSpideyManualAimFramingAxisZ;
 	}
 	else if (camera)
 	{
@@ -9124,7 +9291,7 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 		{
 			fprintf(
 				f,
-				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d framed_focus=%d,%d,%d framing_up_units=%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
+				"modern_manual_aim event=reticle call=%lu applied=%d retail_setup=0 camera=0x%08lX mode=%d axes=%d,%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d framed_focus=%d,%d,%d framing_up_units=%d framing_mode=%d framing_axis=%d,%d,%d body_pos=%d,%d,%d body_delta=%d,%d,%d body_vel=%d,%d,%d state=0x%08lX anim=%u collision=0x%08lX aim_state=%d actual_aim_state=%u locomotion_mask=%d wall=%u ceiling=%u ignore_input=%d ground_grace=%d\n",
 				gSpideyModernAimLookaroundCalls,
 				applied,
 				(unsigned long)camera,
@@ -9144,6 +9311,10 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 				framedFocus.vy,
 				framedFocus.vz,
 				kSpideyManualAimFocusHeightUnits,
+				gSpideyManualAimFramingMode,
+				gSpideyManualAimFramingAxisX,
+				gSpideyManualAimFramingAxisY,
+				gSpideyManualAimFramingAxisZ,
 				player->mPos.vx,
 				player->mPos.vy,
 				player->mPos.vz,
@@ -15478,7 +15649,7 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 			{
 				fprintf(
 					f,
-					"modern_manual_camera event=framing call=%lu camera=0x%08lX focus=%d,%d,%d body=%d,%d,%d framing_up_units=%d heading=%d transform_heading=%d post_camera_reticle=%d reticle_point=%d,%d,%d\n",
+					"modern_manual_camera event=framing call=%lu camera=0x%08lX focus=%d,%d,%d body=%d,%d,%d framing_up_units=%d framing_mode=%d framing_axis=%d,%d,%d heading=%d transform_heading=%d post_camera_reticle=%d reticle_point=%d,%d,%d\n",
 					gSpideyManualAimFramingCalls,
 					(unsigned long)camera,
 					camera->field_144.vx,
@@ -15488,6 +15659,10 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 					player->mPos.vy,
 					player->mPos.vz,
 					kSpideyManualAimFocusHeightUnits,
+					gSpideyManualAimFramingMode,
+					gSpideyManualAimFramingAxisX,
+					gSpideyManualAimFramingAxisY,
+					gSpideyManualAimFramingAxisZ,
 					(int)camera->field_236,
 					(int)camera->field_23A,
 					postCameraReticleApplied,
