@@ -4226,16 +4226,106 @@ static int SpideyPatchBytes(
 	return 1;
 }
 
+static unsigned long gSpideyZipSpecialMoveHalfSteps = 0;
+static unsigned long gSpideyZipSpecialMoveLogs = 0;
+
+static CVector* __fastcall SpideyZipSpecialMoveAdd60(
+		CVector* position,
+		void*,
+		const CVector& velocity)
+{
+	if (!position)
+		return position;
+
+	CPlayer* player =
+		reinterpret_cast<CPlayer*>(
+			reinterpret_cast<unsigned char*>(position) -
+			8);
+
+	if (player &&
+		player->field_E1C ==
+			0x40000 &&
+		player->field_80 ==
+			1 &&
+		(player->mAnim == 270 ||
+		 player->mAnim == 271))
+	{
+		const long beforeX =
+			position->vx;
+		const long beforeY =
+			position->vy;
+		const long beforeZ =
+			position->vz;
+
+		position->vx +=
+			velocity.vx >> 1;
+		position->vy +=
+			velocity.vy >> 1;
+		position->vz +=
+			velocity.vz >> 1;
+		++gSpideyZipSpecialMoveHalfSteps;
+
+		if (gSpideyZipSpecialMoveLogs < 64)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"web_zip_move_halfstep sample=%lu tick=%ld anim=%u frame=%d field80=%ld before=%ld,%ld,%ld velocity=%ld,%ld,%ld after=%ld,%ld,%ld\n",
+					gSpideyZipSpecialMoveHalfSteps,
+					(long)*(volatile long*)0x006B4CA8,
+					(unsigned int)player->mAnim,
+					(int)player->mFrame,
+					(long)player->field_80,
+					beforeX,
+					beforeY,
+					beforeZ,
+					(long)velocity.vx,
+					(long)velocity.vy,
+					(long)velocity.vz,
+					(long)position->vx,
+					(long)position->vy,
+					(long)position->vz);
+				fclose(f);
+			}
+			++gSpideyZipSpecialMoveLogs;
+		}
+
+		return position;
+	}
+
+	typedef CVector* (__fastcall *SpideyRetailVectorAddFn)(
+		CVector*,
+		void*,
+		const CVector&);
+	SpideyRetailVectorAddFn retail =
+		(SpideyRetailVectorAddFn)0x004E7590;
+
+	return retail(
+		position,
+		0,
+		velocity);
+}
+
 // Native-60 player compatibility without replacing retail player physics.
 //
 // Retail authored its movement quantum around the common field_80 == 2 case.
 // The master timer now dispatches one canonical update every 16/17 ms, so
 // field_80 == 1 must represent half of that old movement quantum. The force
-// hook below replaces only the two friction CALL sites. The five threshold
-// byte changes make the existing retail elapsed-vblank math handle a one-tick
-// update through its general path while leaving the zero-tick retail shortcut
-// intact. Collision, grounding, landing, platform and cutscene code remains
-// retail.
+// hook below replaces only the two friction CALL sites. Four threshold byte
+// changes make the generic retail elapsed-vblank math handle a one-tick update
+// through its general path while leaving the zero-tick retail shortcut intact.
+//
+// Web-zip's special no-collision branch is different: retail first adds the
+// whole velocity, then returns for field_80 <= 2. Sending field_80==1 through
+// its catch-up path cancels that displacement completely. A dedicated call
+// hook therefore halves only that initial zip vector add and leaves retail's
+// original comparison/return structure untouched.
+//
+// Collision, grounding, landing, platform and cutscene code remains retail.
 //
 // Each affected retail branch is:
 //
@@ -4274,15 +4364,22 @@ static void SpideyInstallPlayerPhysics60Compat()
 	const unsigned char twoTickThreshold[] = { 0x02 };
 	const unsigned char zeroTickThreshold[] = { 0x00 };
 
-	// Special no-collision animation displacement:
-	// cmp field_80,2 -> cmp field_80,0; existing JLE remains untouched.
+	// Special no-collision animation displacement used by web-zip.
+	// Retail first does mPos += mVel and then returns immediately when
+	// field_80 <= 2. The old 2->0 threshold patch was wrong: at field_80==1
+	// it fell through into the catch-up term with (field_80-2)==-1, which
+	// subtracted the same velocity and produced zero net movement.
+	//
+	// Keep retail's original cmp field_80,2 / JLE intact. Replace only the
+	// initial vector-add call so a native-60 one-tick update consumes half of
+	// the authored retail velocity; all other elapsed-tick values use the
+	// original operator+= unchanged.
 	const int specialMoveInstalled =
-		SpideyPatchBytes(
-			0x00466DC9,
-			twoTickThreshold,
-			zeroTickThreshold,
-			sizeof(twoTickThreshold),
-			"timing_player_special_move_halfstep");
+		SpideyPatchDirectCall(
+			0x00466DBC,
+			0x004E7590,
+			(void*)&SpideyZipSpecialMoveAdd60,
+			"timing_player_zip_special_move_halfstep");
 
 	// Main normal-physics displacement.
 	const int normalMoveInstalled =
@@ -4326,7 +4423,7 @@ static void SpideyInstallPlayerPhysics60Compat()
 	{
 		fprintf(
 			f,
-			"player_physics_60_install normal_friction=%d crawl_friction=%d special_move=%d normal_move=%d velocity_restore=%d fall=%d crawl_move=%d retail_friction=0x%08lX policy=retail_collision_halfstep_force_displacement threshold=2_to_0_preserve_zero rounding=general_retail_path_max_1_fixed_unit\n",
+			"player_physics_60_install normal_friction=%d crawl_friction=%d special_move=%d normal_move=%d velocity_restore=%d fall=%d crawl_move=%d retail_friction=0x%08lX policy=retail_collision_halfstep_force_displacement zip_special=call_0x00466DBC_half_velocity_when_field80_1 generic_thresholds=2_to_0 rounding=general_retail_path_max_1_fixed_unit\n",
 			normalFrictionInstalled,
 			crawlFrictionInstalled,
 			specialMoveInstalled,

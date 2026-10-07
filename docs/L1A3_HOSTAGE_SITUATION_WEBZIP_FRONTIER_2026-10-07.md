@@ -354,3 +354,119 @@ Interpretation:
 - if stale-aim compatibility never fires, inspect `web_zip_check` for which gate actually blocks;
 - if R1 reaches `web_zip_availability` but rejects, the problem is geometric/collision rather than camera ownership;
 - if availability succeeds and state becomes `0x40000` but travel still fails, continue in the already-instrumented zip animation/physics path.
+
+
+## 2026-10-07 — Web-zip root cause isolated: native-60 special-move threshold canceled displacement
+
+Latest tested runtime:
+- log: `logs/20261007-023252/spidey-decomp.log`
+- revision: `9be749173827aa546245d2f098e870fb010ea018`
+- process exit: 0
+
+### Runtime proof
+The stale-modern-aim compatibility candidate did not fire:
+- zero `web_zip_compat` records;
+- `aim_flag=0` at the successful zip starts.
+
+The input/gate/raycast path is working.
+
+Scripted Hostage Situation R1 zip:
+- tick 2428;
+- `input60 held=1 pressed=1`;
+- `CheckZipWebAvailability result=1 reason=accepted`;
+- distance 765, max 3072;
+- retail R1 returns 1;
+- player state changes `0x00000001 -> 0x00040000`;
+- animation becomes 260, then 270/271.
+
+Manual zip later in the same run:
+- R2 call 237 at tick 2822 returns 1;
+- availability accepted;
+- player state `0x00000002 -> 0x00040000`;
+- animation 270.
+
+Therefore both scripted and manual web-zip initiation are functional.
+
+During the scripted zip:
+- animation 270 reaches frame 13;
+- AI authors zip velocity approximately `4095,982800,-8`;
+- animation continues to 271 and finishes;
+- player position remains exactly `-31195060,-3138734,-6942891` across the whole active zip interval;
+- zero reconstructed `web_zip_physics` events appear because reconstructed `CPlayer::DoPhysics` is intentionally not installed globally.
+
+### Live physics ownership
+`game_patches()` intentionally does **not** call `patch_physics()`.
+Retail `DoPhysics @ 0x00466CE0` remains live, with only narrow native-60 compatibility hooks from `SpideyInstallPlayerPhysics60Compat()`.
+
+### Root cause
+Retail special zip displacement at `0x00466D90+`:
+
+```
+0x00466D90  cmp [player+E1C], 0x40000
+...
+0x00466DA3  cmp anim, 270
+0x00466DA9  cmp frame, 13
+...
+0x00466DB3  cmp anim, 271
+...
+0x00466DB9  push &mVel
+0x00466DBC  call CVector::operator+=     ; mPos += mVel
+0x00466DC1  mov esi,[player+80]          ; field_80
+0x00466DC7  cmp esi,2
+0x00466DCA  jle return
+...
+```
+
+The old native-60 compatibility changed the immediate at `0x00466DC9` from 2 to 0.
+
+For `field_80==1`, that was wrong:
+- retail first adds the full zip velocity;
+- patched comparison no longer returns;
+- the catch-up path receives `field_80-2 == -1`;
+- that path subtracts the same authored displacement;
+- net displacement becomes zero.
+
+This exactly matches the runtime: nonzero authored velocity + unchanged position.
+
+### Corrected candidate
+Removed the `0x00466DC9: 2 -> 0` special-move threshold patch.
+
+Added one narrow direct-call hook:
+- callsite: `0x00466DBC`
+- retail target: `CVector::operator+= @ 0x004E7590`
+- wrapper: `SpideyZipSpecialMoveAdd60`
+
+Behavior:
+- only for player state `0x40000`, animation 270/271, and `field_80==1`:
+  - add `mVel >> 1` to `mPos`;
+- all other elapsed-tick values call retail `operator+=` unchanged;
+- retail's original `cmp field_80,2 / jle` remains untouched.
+
+This preserves the authored 30-Hz displacement as two half-steps at native 60 Hz without entering the retail catch-up path with a negative count.
+
+Telemetry:
+- `web_zip_move_halfstep sample=... before=... velocity=... after=...`
+
+The four generic native-60 threshold rewrites for normal movement / velocity restoration / fall / crawling remain unchanged.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+- `Release/spider.dll`: 929,792 bytes
+- pre-commit SHA-256:
+  `5b0994759a80e649383d9e8a16bb1389c83abcecd57bb8c45127f3c4a4ced503`
+
+### Next test
+Run `TEST_LATEST_BUILD.bat`.
+
+Primary:
+1. Hostage Situation opening automatic ceiling zip.
+2. Confirm Spider-Man actually travels off the ceiling instead of remaining suspended.
+
+Secondary:
+3. Try several manual web-zips.
+
+Expected next log:
+- successful R1/R2 -> `0x40000`;
+- `web_zip_move_halfstep` records with changing before/after position;
+- no long interval where animation 270/271 advances while position stays constant.
