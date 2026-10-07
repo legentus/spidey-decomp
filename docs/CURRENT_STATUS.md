@@ -17287,3 +17287,123 @@ Use the normal `TEST_LATEST_BUILD.bat` workflow. In the bomb level, verify that 
 - `bomb_timer_alignment source=backing ...`
 
 and startup installer telemetry should report `bomb_timer=text:1,backing:1`.
+
+
+## 2026-10-07 — BaddyList freeze boundary nailed; cycle repair + per-baddy AI trace candidate
+
+### Live freeze boundary
+
+The post-drop trace from runtime `fa31e626...` narrowed the busy-spin to one exact unmatched call:
+
+`logic_pass=45 -> ob_ai_enter list=0x0056E990 list_head=0x16FAD4A0 -> no ob_ai_return`
+
+Everything before it returned normally:
+
+- player `Ob_AI`;
+- player `DoPhysics`;
+- `CheckWebShot`;
+- `CheckForwards`;
+- earlier Logic body lists.
+
+`0x0056E990` is confirmed retail **BaddyList**.
+
+Therefore the active freeze is inside:
+
+`Ob_AI(&BaddyList, 0) @ 0x00460FC0`.
+
+### Retail Ob_AI traversal facts
+
+Retail `Ob_AI`:
+
+- starts from `*list`;
+- saves each node's `mNextItem @ +0x20` before processing the node;
+- executes the node's virtual AI callback through vtable slot +8;
+- advances to the previously saved next pointer.
+
+This leaves two realistic one-core-spin mechanisms:
+
+1. BaddyList's `mNextItem` chain is cyclic/self-referential;
+2. one individual baddy virtual AI callback never returns.
+
+### New BaddyList validator / repair
+
+Added:
+
+`SpideyValidateAndRepairBaddyList`
+
+It runs only for list pointer:
+
+`0x0056E990`.
+
+Behavior:
+
+- walks up to 128 nodes;
+- records every visited pointer;
+- checks each node's:
+  - body pointer;
+  - vtable;
+  - type;
+  - item flags;
+  - CBody flags;
+  - next;
+  - previous;
+  - expected previous;
+- detects repeated-node/self-loop cycles;
+- if and only if an actual repeated pointer is proven, cuts the cycle at the predecessor by writing:
+  `previous->mNextItem = NULL`;
+- otherwise leaves the list unchanged.
+
+This is an actual defensive repair for a proven cyclic-list condition, not a generic list rewrite.
+
+New markers:
+
+`baddy_list_guard event=node ...`
+
+`baddy_list_guard event=cycle_detected ... action=cut_previous_next`
+
+`baddy_list_guard event=summary ... cycle=<0|1> repaired=<0|1> ...`
+
+A normal acyclic BaddyList is behaviorally untouched.
+
+### Per-baddy virtual AI tracing
+
+To avoid another broad diagnostic round when the list is acyclic, the same candidate dynamically wraps vtable AI slot +8 for each unique BaddyList vtable observed while the post-drop trace window is active.
+
+Each vtable record preserves the exact current AI function pointer before patching, including any existing compatibility target.
+
+Wrapper:
+
+`SpideyBaddyAITraceThunk`
+
+forwards to that preserved target unchanged.
+
+Markers:
+
+`baddy_ai_trace event=vtable_install ...`
+
+`baddy_ai_trace event=enter ... body=... vtable=... type=... original_ai=...`
+
+`baddy_ai_trace event=return ...`
+
+If the next freeze has an acyclic list, the final unmatched `baddy_ai_trace event=enter` identifies the exact baddy object/type/vtable/AI function that spins.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+### Next runtime interpretation
+
+If the game no longer freezes and the log contains:
+
+`baddy_list_guard event=cycle_detected ... repaired=1`
+
+then the root cause was a corrupted/cyclic BaddyList and the new guard prevented retail `Ob_AI` from spinning.
+
+If no cycle is reported and the game still freezes, inspect the final:
+
+`baddy_ai_trace event=enter`
+
+without a matching return. That gives the exact enemy AI callback for the next targeted repair.
+
+Bomb-timer alignment, first-person camera behavior, and the earlier repeated-smash recovery fix remain intact.

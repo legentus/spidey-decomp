@@ -6449,6 +6449,545 @@ static void SpideyDropHangTraceUpdateArmBeforeLogic()
 	}
 }
 
+static unsigned long gSpideyBaddyListValidationCalls = 0;
+static unsigned long gSpideyBaddyListCycleRepairs = 0;
+static unsigned long gSpideyBaddyListPreviousMismatches = 0;
+
+struct SpideyBaddyAITraceVtable
+{
+	unsigned long vtable;
+	unsigned long originalAI;
+};
+
+static SpideyBaddyAITraceVtable gSpideyBaddyAITraceVtables[64];
+static int gSpideyBaddyAITraceVtableCount = 0;
+static unsigned long gSpideyBaddyAITraceCalls = 0;
+static unsigned long gSpideyBaddyAITraceReturns = 0;
+
+static SpideyBaddyAITraceVtable* SpideyFindBaddyAITraceVtable(
+		unsigned long vtable)
+{
+	for (int i = 0;
+		i < gSpideyBaddyAITraceVtableCount;
+		++i)
+	{
+		if (gSpideyBaddyAITraceVtables[i].vtable ==
+			vtable)
+		{
+			return
+				&gSpideyBaddyAITraceVtables[i];
+		}
+	}
+
+	return 0;
+}
+
+static void __fastcall SpideyBaddyAITraceThunk(
+		CBody* body,
+		void*)
+{
+	unsigned long vtable =
+		0;
+	unsigned int type =
+		0;
+	unsigned int flags =
+		0;
+	unsigned int bodyFlags =
+		0;
+	CBody* next =
+		0;
+	CBody* previous =
+		0;
+	int readOk =
+		0;
+
+	__try
+	{
+		if (body)
+		{
+			vtable =
+				*(unsigned long*)body;
+			type =
+				(unsigned int)body->mType;
+			flags =
+				(unsigned int)body->mFlags;
+			bodyFlags =
+				(unsigned int)body->mCBodyFlags;
+			next =
+				(CBody*)body->mNextItem;
+			previous =
+				(CBody*)body->mPreviousItem;
+			readOk =
+				1;
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		readOk =
+			0;
+	}
+
+	SpideyBaddyAITraceVtable* entry =
+		SpideyFindBaddyAITraceVtable(
+			vtable);
+
+	const int trace =
+		SpideyDropHangTraceIsActive();
+
+	++gSpideyBaddyAITraceCalls;
+
+	if (trace)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_ai_trace event=enter call=%lu tick=%lu body=0x%08lX vtable=0x%08lX type=%u flags=0x%04X cbody_flags=0x%04X next=0x%08lX previous=0x%08lX original_ai=0x%08lX mapping_ok=%d read_ok=%d state=0x%08lX anim=%u\n",
+				gSpideyBaddyAITraceCalls,
+				SpideyDropHangTraceTick(),
+				(unsigned long)body,
+				vtable,
+				type,
+				flags,
+				bodyFlags,
+				(unsigned long)next,
+				(unsigned long)previous,
+				entry ?
+					entry->originalAI :
+					0UL,
+				entry != 0,
+				readOk,
+				(unsigned long)(
+					SpideyDropHangTracePlayer() ?
+					SpideyDropHangTracePlayer()->field_E1C :
+					0),
+				(unsigned int)(
+					SpideyDropHangTracePlayer() ?
+					SpideyDropHangTracePlayer()->mAnim :
+					0));
+			fclose(f);
+		}
+	}
+
+	if (!entry ||
+		!entry->originalAI ||
+		entry->originalAI ==
+			(unsigned long)(void*)&SpideyBaddyAITraceThunk)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_ai_trace event=missing_mapping tick=%lu body=0x%08lX vtable=0x%08lX action=skip_to_avoid_recursive_thunk\n",
+				SpideyDropHangTraceTick(),
+				(unsigned long)body,
+				vtable);
+			fclose(f);
+		}
+		return;
+	}
+
+	typedef void (__fastcall *SpideyBaddyAIFn)(
+		CBody*,
+		void*);
+
+	SpideyBaddyAIFn original =
+		(SpideyBaddyAIFn)
+		entry->originalAI;
+	original(
+		body,
+		0);
+
+	++gSpideyBaddyAITraceReturns;
+
+	if (trace)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_ai_trace event=return call=%lu returns=%lu tick=%lu body=0x%08lX vtable=0x%08lX type=%u original_ai=0x%08lX\n",
+				gSpideyBaddyAITraceCalls,
+				gSpideyBaddyAITraceReturns,
+				SpideyDropHangTraceTick(),
+				(unsigned long)body,
+				vtable,
+				type,
+				entry->originalAI);
+			fclose(f);
+		}
+	}
+}
+
+static int SpideyInstallBaddyAITraceVtable(
+		unsigned long vtable)
+{
+	if (!vtable)
+	{
+		return 0;
+	}
+
+	if (SpideyFindBaddyAITraceVtable(
+			vtable))
+	{
+		return 1;
+	}
+
+	if (gSpideyBaddyAITraceVtableCount >=
+		(int)(
+			sizeof(gSpideyBaddyAITraceVtables) /
+			sizeof(gSpideyBaddyAITraceVtables[0])))
+	{
+		return 0;
+	}
+
+	unsigned long* aiSlot =
+		((unsigned long*)vtable) +
+		2;
+	unsigned long originalAI =
+		0;
+
+	__try
+	{
+		originalAI =
+			*aiSlot;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		return 0;
+	}
+
+	if (!originalAI ||
+		originalAI ==
+			(unsigned long)(void*)&SpideyBaddyAITraceThunk)
+	{
+		return 0;
+	}
+
+	SpideyBaddyAITraceVtable* entry =
+		&gSpideyBaddyAITraceVtables[
+			gSpideyBaddyAITraceVtableCount];
+	entry->vtable =
+		vtable;
+	entry->originalAI =
+		originalAI;
+
+	DWORD oldProtect =
+		0;
+	if (!VirtualProtect(
+			aiSlot,
+			sizeof(*aiSlot),
+			PAGE_EXECUTE_READWRITE,
+			&oldProtect))
+	{
+		entry->vtable =
+			0;
+		entry->originalAI =
+			0;
+		return 0;
+	}
+
+	*aiSlot =
+		(unsigned long)(void*)
+		&SpideyBaddyAITraceThunk;
+
+	DWORD ignoredProtect =
+		0;
+	VirtualProtect(
+		aiSlot,
+		sizeof(*aiSlot),
+		oldProtect,
+		&ignoredProtect);
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		aiSlot,
+		sizeof(*aiSlot));
+
+	++gSpideyBaddyAITraceVtableCount;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"baddy_ai_trace event=vtable_install index=%d vtable=0x%08lX ai_slot=0x%08lX original_ai=0x%08lX wrapper=0x%08lX\n",
+			gSpideyBaddyAITraceVtableCount - 1,
+			vtable,
+			(unsigned long)aiSlot,
+			originalAI,
+			(unsigned long)(void*)
+				&SpideyBaddyAITraceThunk);
+		fclose(f);
+	}
+
+	return 1;
+}
+
+static int SpideyValidateAndRepairBaddyList(
+		CBody** list)
+{
+	if ((unsigned long)list !=
+		0x0056E990UL)
+	{
+		return 0;
+	}
+
+	++gSpideyBaddyListValidationCalls;
+
+	enum
+	{
+		kSpideyBaddyListMaxNodes = 128
+	};
+
+	CBody* seen[kSpideyBaddyListMaxNodes];
+	int seenCount =
+		0;
+	CBody* current =
+		0;
+	CBody* previous =
+		0;
+	int cycleFound =
+		0;
+	int previousMismatch =
+		0;
+	int readFault =
+		0;
+
+	__try
+	{
+		current =
+			*list;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		readFault =
+			1;
+		current =
+			0;
+	}
+
+	while (current &&
+		!readFault &&
+		seenCount <
+			kSpideyBaddyListMaxNodes)
+	{
+		int repeatedIndex =
+			-1;
+		for (int i = 0;
+			i < seenCount;
+			++i)
+		{
+			if (seen[i] ==
+				current)
+			{
+				repeatedIndex =
+					i;
+				break;
+			}
+		}
+
+		if (repeatedIndex >= 0)
+		{
+			cycleFound =
+				1;
+
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"baddy_list_guard event=cycle_detected validation=%lu tick=%lu repeated=0x%08lX repeated_index=%d previous=0x%08lX seen_count=%d action=cut_previous_next\n",
+					gSpideyBaddyListValidationCalls,
+					SpideyDropHangTraceTick(),
+					(unsigned long)current,
+					repeatedIndex,
+					(unsigned long)previous,
+					seenCount);
+				fclose(f);
+			}
+
+			if (previous)
+			{
+				__try
+				{
+					previous->mNextItem =
+						0;
+					++gSpideyBaddyListCycleRepairs;
+				}
+				__except(EXCEPTION_EXECUTE_HANDLER)
+				{
+					readFault =
+						1;
+				}
+			}
+			else
+			{
+				// A repeated head without a predecessor cannot occur on the
+				// first visit. Fail closed rather than rewriting the head.
+				readFault =
+					1;
+			}
+
+			break;
+		}
+
+		seen[seenCount++] =
+			current;
+
+		CBody* next =
+			0;
+		CItem* actualPrevious =
+			0;
+		unsigned long vtable =
+			0;
+		unsigned int type =
+			0;
+		unsigned int flags =
+			0;
+		unsigned int bodyFlags =
+			0;
+
+		__try
+		{
+			next =
+				(CBody*)current->mNextItem;
+			actualPrevious =
+				current->mPreviousItem;
+			vtable =
+				*(unsigned long*)current;
+			type =
+				(unsigned int)current->mType;
+			flags =
+				(unsigned int)current->mFlags;
+			bodyFlags =
+				(unsigned int)current->mCBodyFlags;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			readFault =
+				1;
+			break;
+		}
+
+		if (SpideyDropHangTraceIsActive())
+		{
+			SpideyInstallBaddyAITraceVtable(
+				vtable);
+		}
+
+		if ((CBody*)actualPrevious !=
+			previous)
+		{
+			++gSpideyBaddyListPreviousMismatches;
+			previousMismatch =
+				1;
+		}
+
+		if (SpideyDropHangTraceIsActive())
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"baddy_list_guard event=node validation=%lu tick=%lu index=%d body=0x%08lX vtable=0x%08lX type=%u flags=0x%04X cbody_flags=0x%04X next=0x%08lX previous=0x%08lX expected_previous=0x%08lX previous_ok=%d\n",
+					gSpideyBaddyListValidationCalls,
+					SpideyDropHangTraceTick(),
+					seenCount - 1,
+					(unsigned long)current,
+					vtable,
+					type,
+					flags,
+					bodyFlags,
+					(unsigned long)next,
+					(unsigned long)actualPrevious,
+					(unsigned long)previous,
+					(CBody*)actualPrevious ==
+						previous);
+				fclose(f);
+			}
+		}
+
+		previous =
+			current;
+		current =
+			next;
+	}
+
+	if (!readFault &&
+		current &&
+		seenCount >=
+			kSpideyBaddyListMaxNodes)
+	{
+		// A legitimate BaddyList should never approach this size. Do not
+		// silently let retail spin through an unbounded/corrupt chain.
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_list_guard event=node_cap validation=%lu tick=%lu seen_count=%d current=0x%08lX previous=0x%08lX action=none\n",
+				gSpideyBaddyListValidationCalls,
+				SpideyDropHangTraceTick(),
+				seenCount,
+				(unsigned long)current,
+				(unsigned long)previous);
+			fclose(f);
+		}
+	}
+
+	if (SpideyDropHangTraceIsActive() ||
+		cycleFound ||
+		previousMismatch ||
+		readFault)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_list_guard event=summary validation=%lu tick=%lu nodes=%d cycle=%d repaired=%d previous_mismatch=%d read_fault=%d total_repairs=%lu total_previous_mismatches=%lu head=0x%08lX\n",
+				gSpideyBaddyListValidationCalls,
+				SpideyDropHangTraceTick(),
+				seenCount,
+				cycleFound,
+				cycleFound &&
+					!readFault,
+				previousMismatch,
+				readFault,
+				gSpideyBaddyListCycleRepairs,
+				gSpideyBaddyListPreviousMismatches,
+				(unsigned long)(list ?
+					*list :
+					0));
+			fclose(f);
+		}
+	}
+
+	return
+		cycleFound &&
+		!readFault;
+}
+
 static void SpideyDropHangTraceRetailObAI(
 		CBody** list,
 		int arg)
@@ -6462,7 +7001,12 @@ static void SpideyDropHangTraceRetailObAI(
 	const int trace =
 		SpideyDropHangTraceIsActive();
 
-	if (trace)
+	const int repairedBaddyCycle =
+		SpideyValidateAndRepairBaddyList(
+			list);
+
+	if (trace ||
+		repairedBaddyCycle)
 	{
 		SpideyDropHangTraceLog(
 			"ob_ai_enter",
@@ -6478,7 +7022,8 @@ static void SpideyDropHangTraceRetailObAI(
 		list,
 		arg);
 
-	if (trace)
+	if (trace ||
+		repairedBaddyCycle)
 	{
 		SpideyDropHangTraceLog(
 			"ob_ai_return",
