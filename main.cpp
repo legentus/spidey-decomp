@@ -15902,23 +15902,56 @@ static void SpideyReleaseRendererExclusiveForCompatRebuild(
 		}
 	}
 
-	FILE* f = SpideyOpenConsolidatedLog(
-		"COMPAT");
-	if (f)
+	const int movieFrameReason =
+		reason &&
+		strcmp(
+			reason,
+			"movie_frame") ==
+			0;
+	static unsigned long movieFrameProbeCalls =
+		0;
+	int shouldLog =
+		1;
+
+	if (movieFrameReason)
 	{
-		fprintf(
-			f,
-			"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu had_exclusive=%d release_result=%d primary_lost=0x%08lX primary_restore=0x%08lX scene_lost=0x%08lX scene_restore=0x%08lX\n",
-			reason ? reason : "unknown",
-			gSpideySelectedOutputWidth,
-			gSpideySelectedOutputHeight,
-			hadExclusive,
-			releaseResult,
-			(unsigned long)primaryLost,
-			(unsigned long)primaryRestore,
-			(unsigned long)sceneLost,
-			(unsigned long)sceneRestore);
-		fclose(f);
+		++movieFrameProbeCalls;
+		shouldLog =
+			movieFrameProbeCalls <=
+				4 ||
+			(movieFrameProbeCalls %
+				3000) ==
+				0 ||
+			hadExclusive ||
+			primaryLost ==
+				DDERR_SURFACELOST ||
+			sceneLost ==
+				DDERR_SURFACELOST ||
+			FAILED(primaryRestore) ||
+			FAILED(sceneRestore);
+	}
+
+	if (shouldLog)
+	{
+		FILE* f = SpideyOpenConsolidatedLog(
+			"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"renderer11_release_exclusive_for_compat reason=%s selected=%lux%lu had_exclusive=%d release_result=%d primary_lost=0x%08lX primary_restore=0x%08lX scene_lost=0x%08lX scene_restore=0x%08lX movie_probe_calls=%lu\n",
+				reason ? reason : "unknown",
+				gSpideySelectedOutputWidth,
+				gSpideySelectedOutputHeight,
+				hadExclusive,
+				releaseResult,
+				(unsigned long)primaryLost,
+				(unsigned long)primaryRestore,
+				(unsigned long)sceneLost,
+				(unsigned long)sceneRestore,
+				movieFrameProbeCalls);
+			fclose(f);
+		}
 	}
 }
 
@@ -21807,15 +21840,20 @@ static void SpideyInstallPresentProbe()
 #ifdef _WIN32
 typedef void (__cdecl *SpideyRetailCleanup503AF0Fn)(void);
 
+static unsigned long gSpideyCleanup503AF0LostRecoveries =
+	0;
+static unsigned long gSpideyCleanup503AF0RestoreFailures =
+	0;
+
 static void __cdecl SpideyCompatCleanup503AF0()
 {
-	void* object =
-		*(void**)0x006BBF1C;
+	LPDIRECTSOUNDBUFFER primary =
+		*(LPDIRECTSOUNDBUFFER*)0x006BBF1C;
 
-	if (!object)
+	if (!primary)
 	{
 		FILE* f = SpideyOpenConsolidatedLog(
-		"COMPAT");
+			"COMPAT");
 		if (f)
 		{
 			fprintf(
@@ -21824,6 +21862,76 @@ static void __cdecl SpideyCompatCleanup503AF0()
 			fclose(f);
 		}
 		return;
+	}
+
+	DWORD status =
+		0;
+	HRESULT statusHr =
+		primary->GetStatus(
+			&status);
+	const int lost =
+		statusHr ==
+			DSERR_BUFFERLOST ||
+		(SUCCEEDED(statusHr) &&
+			(status &
+				DSBSTATUS_BUFFERLOST) !=
+			0);
+
+	HRESULT restoreHr =
+		S_OK;
+	unsigned long restoreAttempts =
+		0;
+
+	if (lost)
+	{
+		// Alt-tab can legitimately invalidate the primary DirectSound buffer.
+		// Retail DXSOUND_ShutDown calls Stop() and treats DSERR_BUFFERLOST as
+		// fatal, eventually reaching CRT _exit. Restore before entering retail
+		// so its unchanged Stop/Unload sequence can complete normally.
+		do
+		{
+			++restoreAttempts;
+			restoreHr =
+				primary->Restore();
+
+			if (restoreHr ==
+				DSERR_BUFFERLOST)
+			{
+				Sleep(10);
+			}
+		}
+		while (restoreHr ==
+				DSERR_BUFFERLOST &&
+			restoreAttempts <
+				8);
+
+		if (SUCCEEDED(restoreHr))
+			++gSpideyCleanup503AF0LostRecoveries;
+		else
+			++gSpideyCleanup503AF0RestoreFailures;
+
+		FILE* f = SpideyOpenConsolidatedLog(
+			"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"cleanup_503AF0 buffer_lost status_hr=0x%08lX status=0x%08lX restore_hr=0x%08lX attempts=%lu recoveries=%lu failures=%lu foreground=0x%08lX game_hwnd=0x%08lX\n",
+				(unsigned long)statusHr,
+				(unsigned long)status,
+				(unsigned long)restoreHr,
+				restoreAttempts,
+				gSpideyCleanup503AF0LostRecoveries,
+				gSpideyCleanup503AF0RestoreFailures,
+				(unsigned long)GetForegroundWindow(),
+				(unsigned long)*(HWND*)0x006B7A60);
+			fclose(f);
+		}
+
+		// If focus/priority has not returned yet, do not enter retail's fatal
+		// Stop()->_exit path. A later cleanup call can retry restoration.
+		if (FAILED(restoreHr))
+			return;
 	}
 
 	SpideyRetailCleanup503AF0Fn retail =

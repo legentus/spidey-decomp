@@ -14663,3 +14663,97 @@ Also confirm no regressions to:
 - corrected blob shadows;
 - corrected health bar/holder;
 - laser attack stability.
+
+
+## 2026-10-06 — Intro-movie alt-tab fatal exit: DirectSound lost-buffer recovery
+
+User reported a reproducible crash/termination when tabbing out while the startup/intro movies are playing.
+
+### Captured failing run
+Archive:
+\`logs/20261006-213539/spidey-decomp.log\`
+
+Runtime revision:
+\`61bdd58baf722a0e22c7902ffd13f80acb3b2ad8\`
+
+Session:
+- started 2026-10-06 21:35:39 -04:00;
+- abnormal process exit: \`-805306369 == 0xCFFFFFFF\`;
+- no normal proxy SEH/access-violation crash record was emitted.
+
+Focus evidence:
+- retail input bridge records foreground/input loss during movie playback;
+- later foreground reacquire is visible;
+- movie compatibility path continues running.
+
+Movie evidence:
+- the movie surface itself shuts down normally:
+  \`movie_surface_release reason=stop_call ... remaining_refs=0\`
+- immediately afterward the frontend/display rebuild begins.
+
+### Root cause
+After the focus transition, retail DirectSound primary buffer is lost.
+
+Retail \`DXSOUND_ShutDown @ 0x00503AF0\`:
+- reads primary sound buffer from \`0x006BBF1C\`;
+- calls virtual \`Stop()\`;
+- the failing run returns \`DSERR_BUFFERLOST == 0x88780096\`;
+- retail logs the DirectSound error;
+- because the HRESULT is negative, retail calls:
+  - \`DXINIT_ShutDown @ 0x005001B0\`;
+  - CRT \`_exit @ 0x0052A101\`.
+
+Therefore this was not a random crash. A normal focus-loss condition during Bink playback was being treated by the original 2000-era DirectSound shutdown code as fatal and deliberately terminating the process.
+
+The same run subsequently shows repeated \`DXSOUND_Load\` lost-buffer errors during frontend rebuild. The apparent D3D \`0x0000046C\` line at \`shutdownDirect3D7\` comes from old cleanup/refcount logging and is not the primary fatal cause.
+
+### Fix
+Existing compatibility hook:
+\`SpideyCompatCleanup503AF0\`
+already intercepts all retail calls to \`DXSOUND_ShutDown @ 0x00503AF0\`.
+
+It now:
+- treats global \`0x006BBF1C\` as the retail primary \`LPDIRECTSOUNDBUFFER\`;
+- checks \`GetStatus\`;
+- detects either:
+  - \`statusHr == DSERR_BUFFERLOST\`, or
+  - \`DSBSTATUS_BUFFERLOST\` in status;
+- calls \`Restore()\` before entering retail shutdown;
+- retries \`Restore()\` up to 8 times with 10 ms spacing while DirectSound still reports \`DSERR_BUFFERLOST\`;
+- on successful restore, calls untouched retail \`DXSOUND_ShutDown\`, whose original \`Stop/Unload\` flow can now complete normally;
+- if restore still fails because foreground/priority has not returned yet, it does **not** enter retail's known-fatal \`Stop()->_exit\` path; a later cleanup call may retry.
+
+New telemetry:
+\`cleanup_503AF0 buffer_lost status_hr=... status=... restore_hr=... attempts=... recoveries=... failures=... foreground=... game_hwnd=...\`
+
+### Movie compatibility log cleanup
+The failing 67-second run emitted approximately 74,000 identical:
+\`renderer11_release_exclusive_for_compat reason=movie_frame\`
+records because the Bink next-frame loop probes the compatibility path much more frequently than actual displayed movie frames.
+
+This logging is now throttled for \`reason=movie_frame\`:
+- first 4 probes;
+- every 3000th probe;
+- always if exclusive state changes, a DirectDraw surface is lost, or a restore fails.
+
+The compatibility checks themselves still run; only repetitive file I/O is reduced.
+
+### Validation
+- \`git diff --check\`: PASS
+- forced-clean matching VC6 build: PASS
+- full link: PASS
+- candidate pre-commit \`Release/spider.dll\`:
+  - size: 913,408 bytes
+  - SHA-256: \`6bb4aa3096ce1d6de3cbe498444b7813aec5f5d08b089b0d466349c25fcaa343\`
+
+### Next runtime
+Run \`TEST_LATEST_BUILD.bat\`.
+
+Test:
+1. allow an intro movie to begin;
+2. Alt-Tab away during playback;
+3. return to the game;
+4. let the movie finish/skip and verify frontend continues without process termination;
+5. then continue to Mysterio so the pending FireBoobies LookAt 20-Hz cadence candidate can also be evaluated.
+
+This fix is isolated from Mysterio timing, gameplay logic, and the validated game-wide View-matrix world-FX anchoring correction.
