@@ -16779,3 +16779,129 @@ No forced/unsupported install was attempted.
 The repository `Release/spider.dll` is therefore the exact revision-stamped diagnostic artifact. The user should use the normal `TEST_LATEST_BUILD.bat` workflow and accept its elevation prompt so the same source is rebuilt/installed through the supported path.
 
 The tracked `runtime_version.h` was restored to its repository-empty state after producing the stamped artifact.
+
+
+## 2026-10-07 — Repeated ceiling-smash combat-freeze root cause and fix candidate
+
+### Frozen runtime evidence
+
+Runtime revision: `a41372adca719085eeeb247333708ead915370ae`.
+
+The auto-aim cleanup diagnostic completed all eight cleanup stages repeatedly, including the final target-loss event immediately before the freeze. The target-helper detach/destructor/heap path is therefore ruled out.
+
+The decisive difference is the ceiling-smash landing state:
+
+- healthy 133 -> 134 landings: `state=0x00000001`;
+- frozen landing: `tick=2896 state=0x01000000 anim=134 collision=0x00000002`.
+
+So animation 134 is normal; the failure is that the special smash state does not return to stand mode.
+
+### Retail state and bad branch
+
+`0x01000000` is entered by `CPlayer::CheckCeilingJumpingSmashPunch @ 0x004C0B80`.
+
+It records:
+- `field_8C8 = previous field_8C4`;
+- `field_8C4 = gTimerRelated`;
+- `field_E1C = 0x01000000`;
+- animation 133 for the ceiling-smash variant.
+
+`SpideyAI0 @ 0x004B13F0` handles this state at `0x004B631E`.
+
+The landing recovery at `0x004B6570..` computes:
+
+`field_8C4 - field_8C8`
+
+and compares it with `0x78` (120 canonical timer ticks) at `0x004B657E`.
+
+Normal/fall-through recovery does:
+- `field_8DC = 0`;
+- `field_AE4 = 1`;
+- `field_AE5 = 0`;
+- `CPlayer::SwitchToStandMode @ 0x004BE4B0`.
+
+If interval <120, the `jl` at `0x004B6581` instead reaches `0x004B65A3`, which only writes:
+
+`field_8DC = 0x29A`
+
+and leaves `field_E1C = 0x01000000`.
+
+### Runtime proof the bad branch fired
+
+The frozen session has two smash entries:
+
+- tick 2786
+- tick 2885
+
+Difference: **99 ticks**.
+
+99 < 120, so the second landing necessarily takes the `field_8DC=0x29A` branch.
+
+The first smash lands at tick 2800 as:
+
+`state=0x00000001 anim=134`
+
+The second lands at tick 2896 as:
+
+`state=0x01000000 anim=134`
+
+and the process then enters the one-core busy hang before another Logic return.
+
+### Why field_8DC matters
+
+`CPlayer::Hit` is vtable slot 3:
+
+`0x0053C470 -> 0x004BD890`.
+
+Its state gate around `0x004BDB4C` explicitly tests `field_E1C & 0x01000000` and `field_8DC`. A nonzero `field_8DC` changes the combat-hit path while the player remains stranded in the special smash state.
+
+### Fix implemented
+
+The disproven auto-aim cleanup instrumentation was removed.
+
+Added:
+
+`SpideyFixRepeatedSmashRecoveryBeforeLogic()`
+
+It runs immediately before each retail `Logic @ 0x00455400` call and repairs only this exact proven tuple:
+
+- `field_E1C == 0x01000000`
+- `mAnim == 134`
+- grounded: `mCollision & 2`
+- `field_8DC == 0x29A`
+
+When matched it replays the healthy retail recovery exactly:
+
+1. `field_8DC = 0`
+2. `field_AE4 = 1`
+3. `field_AE5 = 0`
+4. call retail `CPlayer::SwitchToStandMode @ 0x004BE4B0`
+
+This is intentionally narrower than disabling the retail <120 branch globally.
+
+New markers:
+
+`repeated_smash_recovery event=repair_before_logic ...`
+
+`repeated_smash_recovery event=repair_return ...`
+
+The entry marker records current/previous smash timestamps and `smash_interval`; the reproduced case should be near 99.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+### Next runtime test
+
+Use `TEST_LATEST_BUILD.bat`.
+
+Highest-value reproduction:
+1. perform one ceiling smash/drop attack;
+2. perform a second within less than 120 canonical ticks (~2 seconds);
+3. land near enemies during combat;
+4. verify no freeze;
+5. confirm `repair_before_logic` followed by `repair_return`;
+6. continue fighting for several more target-loss/hit cycles.
+
+The validated wall/ceiling first-person camera remains unchanged.
