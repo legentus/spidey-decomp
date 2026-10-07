@@ -16245,3 +16245,41 @@ The projected-screen-up framing added in `1e839d2` remains in source but is no l
 ### Validation
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-07 — Robust new-chat handoff checkpoint: surface first-person aim frontier
+
+Dedicated recovery document:
+
+`docs/NEW_CHAT_HANDOFF_2026-10-07_SURFACE_FIRST_PERSON_AIM_FRONTIER.md`
+
+Authoritative **behavior/source** frontier before the docs-only handoff commit:
+
+`56b191cef67887fdd2562a5ac99f0aeb01247820`
+— `Use first person aim on walls and ceilings`
+
+Important distinction:
+- `1a82373aa03a81b779de5ca30168323c7c467081` is the user-confirmed “damn near perfect” camera/Zipline baseline;
+- `1e839d2ef3ccde2bcb6aa28c9bfbe08f0523062a` is the superseded projected-screen-up wall/ceiling framing experiment;
+- `56b191ce...` is the new surface-first-person wall/ceiling manual-aim candidate and is **pending runtime validation** at handoff time.
+
+The prior reported ceiling drop-attack “crash” on `1e839d2` is not proven as a code fault:
+- `logs/20261007-033631/spidey-decomp.log` exits `0xC000013A`, not access violation;
+- drop attack state/animations progress past the reported moment;
+- a later same-revision run `logs/20261007-034231/spidey-decomp.log` exits cleanly with code 0.
+
+Immediate next-chat action:
+1. pull newest runtime log directly;
+2. verify `[SESSION] revision=`;
+3. if it is `56b191...`, inspect `modern_manual_camera event=surface_first_person_angles`;
+4. combine with the user's visual verdict on wall/ceiling first-person aim and aimed Zipline;
+5. do not regress the user-confirmed floor camera/Zipline fixes from `1a82373...`.
+
+A maximum-context handoff ZIP is being created from this checkpoint with:
+- start-here recovery note;
+- current docs;
+- key source snapshot;
+- Git/commit/diff ledgers;
+- build/test scripts;
+- high-value camera/web-zip runtime logs;
+- SHA-256 manifest.
