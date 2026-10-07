@@ -17485,3 +17485,28 @@ New marker:
 - forced-clean matching VC6 build: PASS
 
 Existing camera, bomb-timer alignment, BaddyList validation, and diagnostic tracing remain intact.
+
+
+## 2026-10-07 — Bomb timer gray/striped backing artifact
+
+Live runtime `d1fdb316...` at 2560x1440 showed the countdown correctly aligned inside the timer holder, but the user reported a gray box that appeared in horizontal/scan-line-like strips.
+
+Live telemetry:
+- timer text: authored `234,68` -> compacted `246,41`;
+- legacy backing: authored `222,53,78,20` -> compacted `241,32,35,12`;
+- HUD density: `0.45 x 0.60`.
+
+Retail call at `0x0046239F` draws a solid black `78x20` flat-shaded quad at `z=0.5` immediately behind the countdown. After modern HUD compaction this becomes a tiny overlapping flat primitive under the textured timer frame.
+
+Fix:
+- `SpideyCompatBombTimerBacking` no longer forwards to `DCPanel_DrawFlatShadedPoly`;
+- only the legacy timer backing quad is suppressed;
+- textured timer holder remains;
+- countdown text remains at the validated aligned position;
+- new telemetry reports `source=backing action=suppressed`.
+
+Validation:
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+The post-drop type-304 thug AI freeze fix remains unchanged.

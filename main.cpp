@@ -13287,93 +13287,11 @@ static void __cdecl SpideyCompatBombTimerBacking(
 		i32 option9,
 		i32 option10)
 {
-	const int beforeX =
-		x;
-	const int beforeY =
-		y;
-	const int beforeWidth =
-		width;
-	const int beforeHeight =
-		height;
-
-	float densityX =
-		1.0f;
-	float densityY =
-		1.0f;
-	SpideyGetGameplayUiDensity(
-		&densityX,
-		&densityY);
-
-	float anchorX =
-		256.0f;
-	float anchorY =
-		0.0f;
-
-	if (!gSpideyFrontendUiActive &&
-		(densityX < 0.9995f ||
-		 densityX > 1.0005f ||
-		 densityY < 0.9995f ||
-		 densityY > 1.0005f))
-	{
-		const float right =
-			(float)x +
-			(float)width;
-		const float bottom =
-			(float)y +
-			(float)height;
-
-		anchorX =
-			SpideyChooseGameplayUiFloatAnchor(
-				(float)x,
-				right,
-				(float)x,
-				right,
-				512.0f);
-		anchorY =
-			SpideyChooseGameplayUiFloatAnchor(
-				(float)y,
-				(float)y,
-				bottom,
-				bottom,
-				240.0f);
-
-		const int scaledLeft =
-			SpideyRoundGameplayUiCoord(
-				SpideyScaleGameplayUiFloatCoord(
-					(float)x,
-					anchorX,
-					densityX));
-		const int scaledRight =
-			SpideyRoundGameplayUiCoord(
-				SpideyScaleGameplayUiFloatCoord(
-					right,
-					anchorX,
-					densityX));
-		const int scaledTop =
-			SpideyRoundGameplayUiCoord(
-				SpideyScaleGameplayUiFloatCoord(
-					(float)y,
-					anchorY,
-					densityY));
-		const int scaledBottom =
-			SpideyRoundGameplayUiCoord(
-				SpideyScaleGameplayUiFloatCoord(
-					bottom,
-					anchorY,
-					densityY));
-
-		x =
-			scaledLeft;
-		y =
-			scaledTop;
-		width =
-			scaledRight -
-			scaledLeft;
-		height =
-			scaledBottom -
-			scaledTop;
-	}
-
+	// Retail draws a solid black 78x20 quad at z=0.5 behind the bomb timer.
+	// Once the timer frame is compacted for the modern HUD, that legacy flat
+	// primitive becomes a tiny overlapping layer and visibly breaks up into
+	// gray/strip-like rows. The textured timer frame already supplies the
+	// visual container, so suppress only this obsolete backing draw.
 	if (gSpideyBombTimerAlignmentSamples < 48)
 	{
 		FILE* log =
@@ -13383,37 +13301,23 @@ static void __cdecl SpideyCompatBombTimerBacking(
 		{
 			fprintf(
 				log,
-				"bomb_timer_alignment source=backing before=%d,%d,%d,%d after=%d,%d,%d,%d anchor=%.1f,%.1f density=%.6f,%.6f\n",
-				beforeX,
-				beforeY,
-				beforeWidth,
-				beforeHeight,
+				"bomb_timer_alignment source=backing action=suppressed retail_rect=%d,%d,%d,%d z=%.3f rgb=%u,%u,%u options=%d,%d reason=legacy_flat_backing_conflicts_with_compacted_textured_holder\n",
 				x,
 				y,
 				width,
 				height,
-				(double)anchorX,
-				(double)anchorY,
-				(double)densityX,
-				(double)densityY);
+				(double)z,
+				(unsigned int)red,
+				(unsigned int)green,
+				(unsigned int)blue,
+				option9,
+				option10);
 			fclose(log);
 		}
 		++gSpideyBombTimerAlignmentSamples;
 	}
 
-	SpideyRetailFlatUiPolyFn retail =
-		(SpideyRetailFlatUiPolyFn)0x00462D60;
-	retail(
-		z,
-		x,
-		y,
-		width,
-		height,
-		red,
-		green,
-		blue,
-		option9,
-		option10);
+	// Intentionally do not call DCPanel_DrawFlatShadedPoly.
 }
 
 // @Ok
