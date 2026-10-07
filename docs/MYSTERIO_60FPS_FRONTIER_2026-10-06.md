@@ -179,3 +179,133 @@ Run only through `TEST_LATEST_BUILD.bat`. In the Mysterio fight verify:
 3. blob shadows remain under NPCs while rotating/moving the camera;
 4. if convenient, observe another QuadBit-derived effect such as Venom/Mysterio particles.
 After exit, inspect the newly archived consolidated log for `fill_qpoly_live_passthrough`, `gte_zero_trans=0x0046E460`, and `quadbit_gte_state`.
+
+
+## 2026-10-06 — Mysterio holder composite fix + retail View-matrix effect anchoring + 60-Hz laser emitter follow
+
+### User/runtime result consumed
+Latest user run: `logs/20261006-203245/spidey-decomp.log`.
+
+User visual result:
+- Mysterio health fill is now inside the holder correctly.
+- Holder itself is split: one/start piece appears near screen center while the rest is upper-right.
+- helmet/head-circle FX still moves outside Mysterio's helmet.
+- chest lasers do not remain attached to their shooter ports.
+
+### Holder split root cause
+Runtime `mysterio_health_alignment` telemetry shows adjacent holder pieces straddle the generic gameplay-HUD anchor thresholds:
+- first/start piece center is around authored X~292 and is classified center-anchored;
+- following holder piece center is around authored X~312 and is classified right-anchored.
+The generic per-poly 40/60 percent heuristic therefore tears one composite boss-bar holder into two coordinate systems.
+
+Fix now in `main.cpp`:
+- Mysterio holder texture/frame wrappers call retail coordinate setup directly;
+- every Mysterio holder piece then uses one shared top-right anchor:
+  - anchor X = 512
+  - anchor Y = 0
+- health-fill QPoly live-space passthrough remains intact.
+This mirrors the previously successful Venom composite-bar strategy: one composite HUD element must use one common anchor.
+
+New holder telemetry labels:
+- `holder_texture_shared_top_right`
+- `holder_frame_shared_top_right`
+
+### QuadBit camera-root-cause correction
+The previous QuadBit camera wrapper restored `SCamera::Transform @ 0x0056F1E4`.
+That was the wrong matrix for camera-relative effect projection.
+
+Retail proof:
+`CSimpleTexturedRibbon_Display @ 0x0040AA00` performs camera-relative world projection and at:
+- `0x0040ABA0`: pushes `0x0056F224`;
+- `0x0040ABD2`: calls `gte_SetRotMatrix @ 0x0046D7B0`;
+- `0x0040ABD7`: calls zero-GTE-translation helper `0x0046E460`;
+- then loads/projects the camera-relative point through GTE RTPS.
+
+Therefore the retail-proven effect projection matrix is `SCamera::View @ 0x0056F224`, not `Transform @ 0x0056F1E4`.
+
+QuadBit compatibility now restores:
+- `SCamera::View @ 0x0056F224`;
+- zero GTE translation;
+- rebuilt pristine DCX camera*projection matrix before retail QuadBit draw.
+
+This is the strongest current root-cause candidate for:
+- Mysterio helmet/head-circle drift;
+- blob-shadow drift;
+- Venom-style QuadBit FX drift.
+
+The prior stale-GTE-translation hypothesis was falsified by the latest run: all sampled `pre_trans` values were zero.
+
+### Gouraud ribbon camera protection
+Mysterio laser visuals are not QuadBits. `CMysterioLaser` owns two `CGouraudRibbon` objects at offsets:
+- `laser+0x3C`
+- `laser+0x40`
+
+Retail identification:
+- `CGouraudRibbon::CGouraudRibbon @ 0x004F16C0`
+- constructor writes vtable `0x0053C70C`
+- display function `CGouraudRibbon::Display @ 0x004F1860`
+- display vtable slot therefore `0x0053C714`
+
+New guarded vtable compatibility wrapper:
+- patch slot `0x0053C714` only if original value is exactly `0x004F1860`;
+- rebuild pristine DCX combined matrix;
+- restore `SCamera::View @ 0x0056F224`;
+- zero GTE translation;
+- call untouched retail `CGouraudRibbon::Display`.
+
+Telemetry:
+- `gouraud_ribbon_camera_install ...`
+- `gouraud_ribbon_camera_restore ...`
+
+### Mysterio laser emitter-follow correction
+The existing safe laser policy keeps:
+- global engine at 60 Hz;
+- Mysterio AI / FireBoobies at 60 Hz;
+- only the two `CMysterioLaser::SetPos @ 0x0045B5E0` calls sampled at authored 20-Hz cadence;
+- elapsed-time liveness compatibility active.
+
+User-visible problem with that policy:
+Mysterio's chest mesh animates every 60-Hz frame, while beam geometry previously remained frozen for the two held samples between retail SetPos updates. That can visibly pull beam origins away from the chest ports even if simulation timing is correct.
+
+New visual-only bridge:
+- each laser gate remembers the last chest-emitter world position;
+- on held 60-Hz SetPos samples, retail simulation/collision still does NOT advance;
+- the existing two `CGouraudRibbon` point arrays are translated by the emitter delta;
+- correction is tapered linearly:
+  - near/start point gets 100% emitter delta;
+  - intermediate points get proportionally less;
+  - far endpoint gets 0%;
+- next authored retail SetPos fully rebuilds beam geometry/collision normally.
+
+This preserves the authored 20-Hz beam simulation while keeping the visible origin attached to the 60-Hz animated chest.
+
+Telemetry:
+- `mysterio_laser_visual_follow ...`
+- extended `mysterio_laser_setpos_20hz_stats ... visual_follow_calls=... visual_follow_points=... policy=20hz_sim_60hz_emitter_follow_fireboobies_ai_60hz`
+
+### Validation
+- forced-clean matching VC6 build: PASS
+- full link of `Release/spider.dll`: PASS
+- `git diff --check`: PASS
+- candidate pre-commit DLL:
+  - size: 913,408 bytes
+  - SHA-256: `dc965754cbc6e6a05d2f395da17f789f18232b402c4b4115736c440a66c9902f`
+
+### Next runtime test
+Use `TEST_LATEST_BUILD.bat` only.
+
+High-value visual checks:
+1. Mysterio holder should remain one intact top-right composite; fill should stay inside it.
+2. Mysterio helmet/head-circle FX should remain attached while moving/rotating the camera.
+3. NPC/body blob shadows should remain under their owners while moving/rotating the camera.
+4. Mysterio chest lasers should visibly originate from the shooter ports throughout animation, not lag behind between authored SetPos samples.
+5. Confirm no laser-attack crash/regression.
+
+After exit inspect the newest archived log for:
+- `holder_texture_shared_top_right`
+- `holder_frame_shared_top_right`
+- `quadbit_camera_anchor ... camera_view=0x0056F224`
+- `gouraud_ribbon_camera_install`
+- `gouraud_ribbon_camera_restore`
+- `mysterio_laser_visual_follow`
+- `mysterio_laser_setpos_20hz_stats`

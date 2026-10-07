@@ -4552,12 +4552,16 @@ struct SpideyMysterioLaserSetPosGate
 	CMysterioLaser* laser;
 	long lastTick;
 	int valid;
+	long visualX;
+	long visualY;
+	long visualZ;
+	int visualValid;
 };
 
 static SpideyMysterioLaserSetPosGate gSpideyMysterioLaserSetPosGate[2] =
 {
-	{ 0, 0, 0 },
-	{ 0, 0, 0 }
+	{ 0, 0, 0, 0, 0, 0, 0 },
+	{ 0, 0, 0, 0, 0, 0, 0 }
 };
 
 static unsigned long gSpideyMysterioLaserSetPosCalls =
@@ -4567,6 +4571,10 @@ static unsigned long gSpideyMysterioLaserSetPosRetailCalls =
 static unsigned long gSpideyMysterioLaserSetPosHeldCalls =
 	0;
 static unsigned long gSpideyMysterioLaserSetPosMaxElapsed =
+	0;
+static unsigned long gSpideyMysterioLaserVisualFollowCalls =
+	0;
+static unsigned long gSpideyMysterioLaserVisualFollowPoints =
 	0;
 static int gSpideyMysterioLaserSetPosInstalled =
 	0;
@@ -4594,6 +4602,8 @@ SpideyGetMysterioLaserSetPosGate(
 				0;
 			gSpideyMysterioLaserSetPosGate[freeIndex].valid =
 				0;
+			gSpideyMysterioLaserSetPosGate[freeIndex].visualValid =
+				0;
 			return &gSpideyMysterioLaserSetPosGate[freeIndex];
 		}
 	}
@@ -4611,7 +4621,125 @@ SpideyGetMysterioLaserSetPosGate(
 		0;
 	gSpideyMysterioLaserSetPosGate[slot].valid =
 		0;
+	gSpideyMysterioLaserSetPosGate[slot].visualValid =
+		0;
 	return &gSpideyMysterioLaserSetPosGate[slot];
+}
+
+
+static void SpideyRememberMysterioLaserVisualPosition(
+		SpideyMysterioLaserSetPosGate* gate,
+		const CVector* position)
+{
+	if (!gate || !position)
+		return;
+
+	gate->visualX = position->vx;
+	gate->visualY = position->vy;
+	gate->visualZ = position->vz;
+	gate->visualValid = 1;
+}
+
+static void SpideyFollowMysterioLaserEmitter60Hz(
+		CMysterioLaser* laser,
+		SpideyMysterioLaserSetPosGate* gate,
+		const CVector* position)
+{
+	if (!laser ||
+		!gate ||
+		!position ||
+		!gate->visualValid)
+	{
+		SpideyRememberMysterioLaserVisualPosition(
+			gate,
+			position);
+		return;
+	}
+
+	const long deltaX =
+		position->vx - gate->visualX;
+	const long deltaY =
+		position->vy - gate->visualY;
+	const long deltaZ =
+		position->vz - gate->visualZ;
+
+	if (!deltaX &&
+		!deltaY &&
+		!deltaZ)
+	{
+		SpideyRememberMysterioLaserVisualPosition(
+			gate,
+			position);
+		return;
+	}
+
+	CGouraudRibbon** ribbons =
+		(CGouraudRibbon**)((unsigned char*)laser + 0x3C);
+	unsigned long translatedPoints = 0;
+
+	for (int ribbonIndex = 0;
+		ribbonIndex < 2;
+		++ribbonIndex)
+	{
+		CGouraudRibbon* ribbon =
+			ribbons[ribbonIndex];
+		if (!ribbon ||
+			ribbon->mNumPoints < 2 ||
+			ribbon->mNumPoints > 32 ||
+			!ribbon->mpPoints)
+		{
+			continue;
+		}
+
+		const int denominator =
+			ribbon->mNumPoints - 1;
+
+		for (int pointIndex = 0;
+			pointIndex < ribbon->mNumPoints;
+			++pointIndex)
+		{
+			const int weight =
+				denominator - pointIndex;
+
+			ribbon->mpPoints[pointIndex].Pos.vx +=
+				(deltaX * weight) / denominator;
+			ribbon->mpPoints[pointIndex].Pos.vy +=
+				(deltaY * weight) / denominator;
+			ribbon->mpPoints[pointIndex].Pos.vz +=
+				(deltaZ * weight) / denominator;
+			++translatedPoints;
+		}
+	}
+
+	if (translatedPoints)
+	{
+		++gSpideyMysterioLaserVisualFollowCalls;
+		gSpideyMysterioLaserVisualFollowPoints +=
+			translatedPoints;
+
+		if (gSpideyMysterioLaserVisualFollowCalls <= 32)
+		{
+			FILE* log =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (log)
+			{
+				fprintf(
+					log,
+					"mysterio_laser_visual_follow call=%lu delta=%ld,%ld,%ld points=%lu policy=20hz_sim_60hz_emitter_follow\n",
+					gSpideyMysterioLaserVisualFollowCalls,
+					deltaX,
+					deltaY,
+					deltaZ,
+					translatedPoints);
+				fclose(log);
+			}
+		}
+	}
+
+	SpideyRememberMysterioLaserVisualPosition(
+		gate,
+		position);
 }
 
 static int __fastcall SpideyMysterioLaserSetPos20Hz(
@@ -4649,11 +4777,15 @@ static int __fastcall SpideyMysterioLaserSetPos20Hz(
 			1;
 
 		++gSpideyMysterioLaserSetPosRetailCalls;
-		return retail(
+		const int result = retail(
 			laser,
 			0,
 			position,
 			rotation);
+		SpideyRememberMysterioLaserVisualPosition(
+			gate,
+			position);
+		return result;
 	}
 
 	int elapsed =
@@ -4672,8 +4804,12 @@ static int __fastcall SpideyMysterioLaserSetPos20Hz(
 		3)
 	{
 		++gSpideyMysterioLaserSetPosHeldCalls;
-		// Retail FireBoobies treats zero as "beam still active"; do not
-		// advance beam geometry/collision on this 60-Hz-only sample.
+		// Keep authored 20-Hz beam simulation/collision, but move the already
+		// built ribbon geometry with the animated chest emitter every 60-Hz frame.
+		SpideyFollowMysterioLaserEmitter60Hz(
+			laser,
+			gate,
+			position);
 		return 0;
 	}
 
@@ -4688,11 +4824,15 @@ static int __fastcall SpideyMysterioLaserSetPos20Hz(
 			(unsigned long)elapsed;
 	}
 
-	return retail(
+	const int result = retail(
 		laser,
 		0,
 		position,
 		rotation);
+	SpideyRememberMysterioLaserVisualPosition(
+		gate,
+		position);
+	return result;
 }
 
 static void SpideyLogMysterioLaserSetPosStats()
@@ -4705,12 +4845,14 @@ static void SpideyLogMysterioLaserSetPosStats()
 
 	fprintf(
 		f,
-		"mysterio_laser_setpos_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu callsites=0x0045D3AB,0x0045D44E retail=0x0045B5E0 policy=setpos_only_20hz_fireboobies_ai_60hz\\n",
+		"mysterio_laser_setpos_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu max_elapsed=%lu visual_follow_calls=%lu visual_follow_points=%lu callsites=0x0045D3AB,0x0045D44E retail=0x0045B5E0 policy=20hz_sim_60hz_emitter_follow_fireboobies_ai_60hz\\n",
 		gSpideyMysterioLaserSetPosInstalled,
 		gSpideyMysterioLaserSetPosCalls,
 		gSpideyMysterioLaserSetPosRetailCalls,
 		gSpideyMysterioLaserSetPosHeldCalls,
-		gSpideyMysterioLaserSetPosMaxElapsed);
+		gSpideyMysterioLaserSetPosMaxElapsed,
+		gSpideyMysterioLaserVisualFollowCalls,
+		gSpideyMysterioLaserVisualFollowPoints);
 	fclose(f);
 }
 
@@ -11515,6 +11657,42 @@ static void SpideyLogMysterioHealthRect(
 
 
 // @Ok
+static void SpideyCompactMysterioBossHolderPoly(
+		POLY_FT4* poly)
+{
+	if (!poly ||
+		gSpideyFrontendUiActive ||
+		!gSpideyShadowPreviewEnabled ||
+		gSpideyModernLogicalWidth <= 640 ||
+		gSpideyModernLogicalHeight <= 480)
+	{
+		return;
+	}
+
+	float densityX = 1.0f;
+	float densityY = 1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	if (densityX >= 1.0f &&
+		densityY >= 1.0f)
+	{
+		return;
+	}
+
+	const float anchorX = 512.0f;
+	const float anchorY = 0.0f;
+	poly->x0 = SpideyScaleGameplayUiCoord(poly->x0, anchorX, densityX);
+	poly->x1 = SpideyScaleGameplayUiCoord(poly->x1, anchorX, densityX);
+	poly->x2 = SpideyScaleGameplayUiCoord(poly->x2, anchorX, densityX);
+	poly->x3 = SpideyScaleGameplayUiCoord(poly->x3, anchorX, densityX);
+	poly->y0 = SpideyScaleGameplayUiCoord(poly->y0, anchorY, densityY);
+	poly->y1 = SpideyScaleGameplayUiCoord(poly->y1, anchorY, densityY);
+	poly->y2 = SpideyScaleGameplayUiCoord(poly->y2, anchorY, densityY);
+	poly->y3 = SpideyScaleGameplayUiCoord(poly->y3, anchorY, densityY);
+}
+
 static void __cdecl SpideyCompatMysterioBossHolderTexture(
 		i32 x,
 		i32 y,
@@ -11523,19 +11701,23 @@ static void __cdecl SpideyCompatMysterioBossHolderTexture(
 		i32 width,
 		i32 height)
 {
-	SpideyCompatPanelSetCoordsTexture(
+	SpideyRetailPanelSetCoordsFn retail =
+		(SpideyRetailPanelSetCoordsFn)0x00462CD0;
+	retail(
 		x,
 		y,
 		poly,
 		texture,
 		width,
 		height);
+	SpideyCompactMysterioBossHolderPoly(
+		poly);
 
 	if (SpideyIsMysterioBossActive() &&
 		poly)
 	{
 		SpideyLogMysterioHealthRect(
-			"holder_texture_authored_after_compact",
+			"holder_texture_shared_top_right",
 			(float)poly->x0,
 			(float)poly->y0,
 			(float)poly->x3,
@@ -11552,19 +11734,23 @@ static void __cdecl SpideyCompatMysterioBossHolderFrame(
 		i32 width,
 		i32 height)
 {
-	SpideyCompatPanelSetCoordsFrame(
+	SpideyRetailPanelSetCoordsFn retail =
+		(SpideyRetailPanelSetCoordsFn)0x00462C30;
+	retail(
 		x,
 		y,
 		poly,
 		frame,
 		width,
 		height);
+	SpideyCompactMysterioBossHolderPoly(
+		poly);
 
 	if (SpideyIsMysterioBossActive() &&
 		poly)
 	{
 		SpideyLogMysterioHealthRect(
-			"holder_frame_authored_after_compact",
+			"holder_frame_shared_top_right",
 			(float)poly->x0,
 			(float)poly->y0,
 			(float)poly->x3,
@@ -13973,8 +14159,8 @@ static void __cdecl SpideyDisplayQuadBitListCameraAnchored(
 	SpideyRetailDisplayQuadBitListFn retail =
 		(SpideyRetailDisplayQuadBitListFn)0x004097E0;
 
-	MATRIX* activeCameraTransform =
-		(MATRIX*)0x0056F1E4;
+	MATRIX* activeCameraView =
+		(MATRIX*)0x0056F224;
 	float* dcxCamera =
 		(float*)0x0056E778;
 	float* dcxProjection =
@@ -14035,11 +14221,12 @@ static void __cdecl SpideyDisplayQuadBitListCameraAnchored(
 	}
 
 	setRotMatrix(
-		activeCameraTransform);
+		activeCameraView);
 	zeroGteTranslation();
 	retail(
 		list);
 }
+
 
 static void SpideyInstallQuadBitCameraAnchorCompat()
 {
@@ -14097,7 +14284,7 @@ static void SpideyInstallQuadBitCameraAnchorCompat()
 	{
 		fprintf(
 			f,
-			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_transform=0x0056F1E4 gte_set_rot=0x0046D7B0 gte_zero_trans=0x0046E460 horplus_calls=%d,%d horplus_qpoly_wrapper=0x%08lX reason=%s\n",
+			"quadbit_camera_anchor installed=%d registration_push=0x004081D4 retail_display=0x004097E0 wrapper=0x%08lX camera_view=0x0056F224 gte_set_rot=0x0046D7B0 gte_zero_trans=0x0046E460 horplus_calls=%d,%d horplus_qpoly_wrapper=0x%08lX reason=%s\n",
 			installed,
 			(unsigned long)&SpideyDisplayQuadBitListCameraAnchored,
 			horPlusCallOne,
