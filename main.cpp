@@ -18353,6 +18353,633 @@ static void SpideyLogTimingWindow(
 	fclose(f);
 }
 
+struct SpideyZipButtonRecordSnapshot
+{
+	unsigned int held;
+	unsigned int pressed;
+	unsigned int rapidPress;
+	long heldTicks;
+	long releasedTicks;
+	long transitionTicks;
+};
+
+static void SpideyReadZipButtonRecord(
+		unsigned char* input,
+		unsigned long offset,
+		SpideyZipButtonRecordSnapshot* out)
+{
+	if (!out)
+		return;
+
+	memset(
+		out,
+		0,
+		sizeof(*out));
+
+	if (!input)
+		return;
+
+	__try
+	{
+		unsigned char* record =
+			input +
+			offset;
+		out->held =
+			(unsigned int)record[0];
+		out->pressed =
+			(unsigned int)record[1];
+		out->rapidPress =
+			(unsigned int)record[2];
+		out->heldTicks =
+			*(long*)(record + 4);
+		out->releasedTicks =
+			*(long*)(record + 8);
+		out->transitionTicks =
+			*(long*)(record + 0x0C);
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		memset(
+			out,
+			0,
+			sizeof(*out));
+	}
+}
+
+typedef u8 (FASTCALL *SpideyRetailZipCheckFn)(
+		CPlayer*,
+		void*);
+typedef u8 (FASTCALL *SpideyRetailZipAvailabilityFn)(
+		CPlayer*,
+		void*,
+		SLineInfo*,
+		i32);
+
+static unsigned long gSpideyZipR1Calls = 0;
+static unsigned long gSpideyZipR2Calls = 0;
+static unsigned long gSpideyZipR1Success = 0;
+static unsigned long gSpideyZipR2Success = 0;
+static unsigned long gSpideyZipTraceStored = 0;
+static unsigned long gSpideyZipTraceDropped = 0;
+static unsigned long gSpideyZipR1LastSignature = 0xFFFFFFFFUL;
+static unsigned long gSpideyZipR2LastSignature = 0xFFFFFFFFUL;
+static unsigned long gSpideyZipAvailabilityCalls = 0;
+static unsigned long gSpideyZipAvailabilityStored = 0;
+
+static unsigned long SpideyBuildZipGateSignature(
+		CPlayer* player,
+		int r2,
+		const SpideyZipButtonRecordSnapshot& zipButton,
+		const SpideyZipButtonRecordSnapshot& r2Button)
+{
+	if (!player)
+		return 0;
+
+	unsigned long signature =
+		(unsigned long)player->field_8EA |
+		((player->mHeldObject ? 1UL : 0UL) << 1) |
+		((unsigned long)(*((unsigned char*)player + 0x550) != 0) << 2) |
+		((unsigned long)(zipButton.held != 0) << 3) |
+		((unsigned long)(zipButton.pressed != 0) << 4) |
+		((unsigned long)(player->field_AD4 != 0) << 5) |
+		((unsigned long)(player->field_8E8 != 0) << 6) |
+		((unsigned long)(player->field_8E9 != 0) << 7);
+
+	if (r2)
+	{
+		signature |=
+			((unsigned long)(r2Button.held != 0) << 8) |
+			((unsigned long)(*(volatile unsigned char*)0x0060CFC7 != 0) << 9) |
+			((unsigned long)(player->field_1AC != 0) << 10) |
+			((unsigned long)(*((unsigned char*)player + 0xE8D) != 0) << 11);
+	}
+
+	signature ^=
+		((unsigned long)player->field_E1C << 12);
+
+	return signature;
+}
+
+static void SpideyLogZipCheck(
+		const char* kind,
+		CPlayer* player,
+		unsigned long callNumber,
+		u8 result,
+		unsigned long stateBefore,
+		const SpideyZipButtonRecordSnapshot& aimButton,
+		const SpideyZipButtonRecordSnapshot& zipButton,
+		const SpideyZipButtonRecordSnapshot& r2Button,
+		const SpideyZipButtonRecordSnapshot& extraButton,
+		unsigned long signature,
+		unsigned long* lastSignature)
+{
+	if (!player ||
+		!lastSignature)
+	{
+		return;
+	}
+
+	const unsigned long tick =
+		(unsigned long)
+		*(volatile long*)0x006B4CA8;
+
+	const int changed =
+		signature !=
+			*lastSignature;
+
+	const int inputInteresting =
+		zipButton.held ||
+		zipButton.pressed ||
+		zipButton.rapidPress ||
+		r2Button.held ||
+		r2Button.pressed ||
+		extraButton.held ||
+		extraButton.pressed;
+
+	if (callNumber > 12 &&
+		!changed &&
+		!inputInteresting &&
+		!result &&
+		(tick % 60UL) != 0)
+	{
+		return;
+	}
+
+	*lastSignature =
+		signature;
+
+	if (gSpideyZipTraceStored >=
+		2048)
+	{
+		++gSpideyZipTraceDropped;
+		return;
+	}
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	unsigned char raw550 = 0;
+	unsigned char rawE8D = 0;
+	__try
+	{
+		raw550 =
+			*((unsigned char*)player + 0x550);
+		rawE8D =
+			*((unsigned char*)player + 0xE8D);
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		raw550 = 0;
+		rawE8D = 0;
+	}
+
+	fprintf(
+		f,
+		"web_zip_check kind=%s call=%lu tick=%lu result=%u state_before=0x%08lX state_after=0x%08lX anim=%u frame=%d finished=%u aim_flag=%u held_object=%d gate_550=%u ignore_input=%ld crawl=%u wall=%u ceiling=%u e8d=%u script=%u global_cfc7=%u input40=%u,%u,%u,%ld,%ld,%ld input60=%u,%u,%u,%ld,%ld,%ld input70=%u,%u,%u,%ld,%ld,%ld input100=%u,%u,%u,%ld,%ld,%ld axes=%d,%d pos=%ld,%ld,%ld vel=%ld,%ld,%ld\n",
+		kind ? kind : "unknown",
+		callNumber,
+		tick,
+		(unsigned int)result,
+		stateBefore,
+		(unsigned long)player->field_E1C,
+		(unsigned int)player->mAnim,
+		(int)player->mFrame,
+		(unsigned int)player->mAnimFinished,
+		(unsigned int)player->field_8EA,
+		player->mHeldObject ? 1 : 0,
+		(unsigned int)raw550,
+		(long)player->field_E18,
+		(unsigned int)player->field_AD4,
+		(unsigned int)player->field_8E8,
+		(unsigned int)player->field_8E9,
+		(unsigned int)rawE8D,
+		(unsigned int)player->field_1AC,
+		(unsigned int)*(volatile unsigned char*)0x0060CFC7,
+		aimButton.held,
+		aimButton.pressed,
+		aimButton.rapidPress,
+		aimButton.heldTicks,
+		aimButton.releasedTicks,
+		aimButton.transitionTicks,
+		zipButton.held,
+		zipButton.pressed,
+		zipButton.rapidPress,
+		zipButton.heldTicks,
+		zipButton.releasedTicks,
+		zipButton.transitionTicks,
+		r2Button.held,
+		r2Button.pressed,
+		r2Button.rapidPress,
+		r2Button.heldTicks,
+		r2Button.releasedTicks,
+		r2Button.transitionTicks,
+		extraButton.held,
+		extraButton.pressed,
+		extraButton.rapidPress,
+		extraButton.heldTicks,
+		extraButton.releasedTicks,
+		extraButton.transitionTicks,
+		(int)player->field_E2D,
+		(int)player->field_E2E,
+		(long)player->mPos.vx,
+		(long)player->mPos.vy,
+		(long)player->mPos.vz,
+		(long)player->mVel.vx,
+		(long)player->mVel.vy,
+		(long)player->mVel.vz);
+	fclose(f);
+
+	++gSpideyZipTraceStored;
+}
+
+static u8 __fastcall SpideyTraceR1ZipCheck(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailZipCheckFn retail =
+		(SpideyRetailZipCheckFn)0x004C0EE0;
+	++gSpideyZipR1Calls;
+
+	if (!player)
+		return retail(
+			player,
+			0);
+
+	unsigned char* input =
+		(unsigned char*)player->field_E0C;
+	SpideyZipButtonRecordSnapshot aimButton;
+	SpideyZipButtonRecordSnapshot zipButton;
+	SpideyZipButtonRecordSnapshot r2Button;
+	SpideyZipButtonRecordSnapshot extraButton;
+	SpideyReadZipButtonRecord(
+		input,
+		0x40,
+		&aimButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x60,
+		&zipButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x70,
+		&r2Button);
+	SpideyReadZipButtonRecord(
+		input,
+		0x100,
+		&extraButton);
+
+	const unsigned long stateBefore =
+		(unsigned long)player->field_E1C;
+	const unsigned long signature =
+		SpideyBuildZipGateSignature(
+			player,
+			0,
+			zipButton,
+			r2Button);
+
+	const u8 result =
+		retail(
+			player,
+			0);
+	if (result)
+		++gSpideyZipR1Success;
+
+	SpideyLogZipCheck(
+		"r1",
+		player,
+		gSpideyZipR1Calls,
+		result,
+		stateBefore,
+		aimButton,
+		zipButton,
+		r2Button,
+		extraButton,
+		signature,
+		&gSpideyZipR1LastSignature);
+
+	return result;
+}
+
+static u8 __fastcall SpideyTraceR2ZipCheck(
+		CPlayer* player,
+		void*)
+{
+	SpideyRetailZipCheckFn retail =
+		(SpideyRetailZipCheckFn)0x004C1460;
+	++gSpideyZipR2Calls;
+
+	if (!player)
+		return retail(
+			player,
+			0);
+
+	unsigned char* input =
+		(unsigned char*)player->field_E0C;
+	SpideyZipButtonRecordSnapshot aimButton;
+	SpideyZipButtonRecordSnapshot zipButton;
+	SpideyZipButtonRecordSnapshot r2Button;
+	SpideyZipButtonRecordSnapshot extraButton;
+	SpideyReadZipButtonRecord(
+		input,
+		0x40,
+		&aimButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x60,
+		&zipButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x70,
+		&r2Button);
+	SpideyReadZipButtonRecord(
+		input,
+		0x100,
+		&extraButton);
+
+	const unsigned long stateBefore =
+		(unsigned long)player->field_E1C;
+	const unsigned long signature =
+		SpideyBuildZipGateSignature(
+			player,
+			1,
+			zipButton,
+			r2Button);
+
+	const u8 result =
+		retail(
+			player,
+			0);
+	if (result)
+		++gSpideyZipR2Success;
+
+	SpideyLogZipCheck(
+		"r2",
+		player,
+		gSpideyZipR2Calls,
+		result,
+		stateBefore,
+		aimButton,
+		zipButton,
+		r2Button,
+		extraButton,
+		signature,
+		&gSpideyZipR2LastSignature);
+
+	return result;
+}
+
+static u8 __fastcall SpideyTraceZipAvailability(
+		CPlayer* player,
+		void*,
+		SLineInfo* lineInfo,
+		i32 maxDistance)
+{
+	SpideyRetailZipAvailabilityFn retail =
+		(SpideyRetailZipAvailabilityFn)0x004C30D0;
+	++gSpideyZipAvailabilityCalls;
+
+	const u8 result =
+		retail(
+			player,
+			0,
+			lineInfo,
+			maxDistance);
+
+	if (!player ||
+		!lineInfo ||
+		gSpideyZipAvailabilityStored >=
+			512)
+	{
+		return result;
+	}
+
+	long faceFlags = 0;
+	__try
+	{
+		if (lineInfo->pFace)
+		{
+			faceFlags =
+				(long)lineInfo->pFace[3];
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		faceFlags = 0;
+	}
+
+	const long minDistance =
+		player->field_E1C == 4 ?
+			8 :
+			16;
+	const char* reason =
+		result ?
+			"accepted" :
+		lineInfo->Distance <= minDistance ?
+			"distance_low" :
+		lineInfo->Distance >= maxDistance ?
+			"distance_high" :
+		(faceFlags & 0x40000) ?
+			"face_no_zip" :
+			"orientation_or_other";
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"web_zip_availability call=%lu tick=%ld result=%u reason=%s state=0x%08lX distance=%ld min=%ld max=%ld face_flags=0x%08lX hit_item=%d position=%ld,%ld,%ld normal=%d,%d,%d player_pos=%ld,%ld,%ld\n",
+			gSpideyZipAvailabilityCalls,
+			(long)*(volatile long*)0x006B4CA8,
+			(unsigned int)result,
+			reason,
+			(unsigned long)player->field_E1C,
+			(long)lineInfo->Distance,
+			minDistance,
+			(long)maxDistance,
+			(unsigned long)faceFlags,
+			lineInfo->pItem ? 1 : 0,
+			(long)lineInfo->Position.vx,
+			(long)lineInfo->Position.vy,
+			(long)lineInfo->Position.vz,
+			(int)lineInfo->Normal.vx,
+			(int)lineInfo->Normal.vy,
+			(int)lineInfo->Normal.vz,
+			(long)player->mPos.vx,
+			(long)player->mPos.vy,
+			(long)player->mPos.vz);
+		fclose(f);
+		++gSpideyZipAvailabilityStored;
+	}
+
+	return result;
+}
+
+static unsigned long gSpideyPlayerStateTraceStored = 0;
+static unsigned long gSpideyPlayerStateTraceDropped = 0;
+static unsigned long gSpideyPlayerStateTraceLastState = 0xFFFFFFFFUL;
+static int gSpideyPlayerStateTraceLastAnim = -1;
+static int gSpideyPlayerStateTraceLastCrawl = -1;
+static int gSpideyPlayerStateTraceLastAim = -1;
+static CPlayer* gSpideyPlayerStateTraceLastPlayer = 0;
+
+static void SpideyTracePlayerStateAfterLogic()
+{
+	CPlayer* player =
+		*(CPlayer**)0x006A9038;
+	if (!player)
+	{
+		gSpideyPlayerStateTraceLastPlayer =
+			0;
+		return;
+	}
+
+	if (gSpideyPlayerStateTraceLastPlayer !=
+		player)
+	{
+		gSpideyPlayerStateTraceLastPlayer =
+			player;
+		gSpideyPlayerStateTraceLastState =
+			0xFFFFFFFFUL;
+		gSpideyPlayerStateTraceLastAnim =
+			-1;
+		gSpideyPlayerStateTraceLastCrawl =
+			-1;
+		gSpideyPlayerStateTraceLastAim =
+			-1;
+	}
+
+	const unsigned long tick =
+		(unsigned long)
+		*(volatile long*)0x006B4CA8;
+	const unsigned long state =
+		(unsigned long)player->field_E1C;
+	const int anim =
+		(int)player->mAnim;
+	const int crawl =
+		(int)player->field_AD4;
+	const int aim =
+		(int)player->field_8EA;
+
+	const int changed =
+		state !=
+			gSpideyPlayerStateTraceLastState ||
+		anim !=
+			gSpideyPlayerStateTraceLastAnim ||
+		crawl !=
+			gSpideyPlayerStateTraceLastCrawl ||
+		aim !=
+			gSpideyPlayerStateTraceLastAim;
+
+	if (!changed &&
+		(tick % 30UL) != 0)
+	{
+		return;
+	}
+
+	gSpideyPlayerStateTraceLastState =
+		state;
+	gSpideyPlayerStateTraceLastAnim =
+		anim;
+	gSpideyPlayerStateTraceLastCrawl =
+		crawl;
+	gSpideyPlayerStateTraceLastAim =
+		aim;
+
+	if (gSpideyPlayerStateTraceStored >=
+		1024)
+	{
+		++gSpideyPlayerStateTraceDropped;
+		return;
+	}
+
+	unsigned char* input =
+		(unsigned char*)player->field_E0C;
+	SpideyZipButtonRecordSnapshot jumpButton;
+	SpideyZipButtonRecordSnapshot aimButton;
+	SpideyZipButtonRecordSnapshot zipButton;
+	SpideyZipButtonRecordSnapshot webButton;
+	SpideyZipButtonRecordSnapshot extraButton;
+	SpideyReadZipButtonRecord(
+		input,
+		0x30,
+		&jumpButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x40,
+		&aimButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x60,
+		&zipButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x70,
+		&webButton);
+	SpideyReadZipButtonRecord(
+		input,
+		0x100,
+		&extraButton);
+
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"player_state_trace sample=%lu tick=%lu camera_mode=%d state=0x%08lX anim=%u frame=%d frac=%d finished=%u crawl=%u aim=%u wall=%u ceiling=%u ignore_input=%ld script=%u held_object=%d input30=%u,%u input40=%u,%u input60=%u,%u input70=%u,%u input100=%u,%u axes=%d,%d collision=0x%08lX pos=%ld,%ld,%ld vel=%ld,%ld,%ld acc=%ld,%ld,%ld\n",
+			gSpideyPlayerStateTraceStored,
+			tick,
+			camera ?
+				(int)camera->mCameraMode :
+				-1,
+			state,
+			(unsigned int)player->mAnim,
+			(int)player->mFrame,
+			(int)player->mFrameFrac,
+			(unsigned int)player->mAnimFinished,
+			(unsigned int)player->field_AD4,
+			(unsigned int)player->field_8EA,
+			(unsigned int)player->field_8E8,
+			(unsigned int)player->field_8E9,
+			(long)player->field_E18,
+			(unsigned int)player->field_1AC,
+			player->mHeldObject ? 1 : 0,
+			jumpButton.held,
+			jumpButton.pressed,
+			aimButton.held,
+			aimButton.pressed,
+			zipButton.held,
+			zipButton.pressed,
+			webButton.held,
+			webButton.pressed,
+			extraButton.held,
+			extraButton.pressed,
+			(int)player->field_E2D,
+			(int)player->field_E2E,
+			(unsigned long)player->mCollision,
+			(long)player->mPos.vx,
+			(long)player->mPos.vy,
+			(long)player->mPos.vz,
+			(long)player->mVel.vx,
+			(long)player->mVel.vy,
+			(long)player->mVel.vz,
+			(long)player->mAcc.vx,
+			(long)player->mAcc.vy,
+			(long)player->mAcc.vz);
+		fclose(f);
+		++gSpideyPlayerStateTraceStored;
+	}
+}
+
 static void __cdecl SpideyCompatLogicTiming()
 {
 	SpideyRetailLogicFn retail =
@@ -18367,6 +18994,8 @@ static void __cdecl SpideyCompatLogicTiming()
 	retail();
 	QueryPerformanceCounter(
 		&retailEnd);
+
+	SpideyTracePlayerStateAfterLogic();
 
 	gSpideyTimingOutsideLogicRetailUs +=
 		SpideyTimingElapsedUs(
@@ -18669,6 +19298,33 @@ static void SpideyInstallTimingTelemetry()
 			(void*)&SpideyTimingFireWeb,
 			"timing_fire_web");
 
+	const int zipR1Hooks =
+		SpideyPatchDirectCallsToTargetInRange(
+			0x004B13F0,
+			0x004B8790,
+			0x004C0EE0,
+			(void*)&SpideyTraceR1ZipCheck,
+			"timing_web_zip_r1_trace");
+	const int zipR2Hooks =
+		SpideyPatchDirectCallsToTargetInRange(
+			0x004B13F0,
+			0x004B8790,
+			0x004C1460,
+			(void*)&SpideyTraceR2ZipCheck,
+			"timing_web_zip_r2_trace");
+	const int zipAvailabilityR1 =
+		SpideyPatchDirectCall(
+			0x004C104F,
+			0x004C30D0,
+			(void*)&SpideyTraceZipAvailability,
+			"timing_web_zip_availability_r1");
+	const int zipAvailabilityR2 =
+		SpideyPatchDirectCall(
+			0x004C165C,
+			0x004C30D0,
+			(void*)&SpideyTraceZipAvailability,
+			"timing_web_zip_availability_r2");
+
 	FILE* f = SpideyOpenConsolidatedLog(
 		"TIMING");
 	if (f)
@@ -18681,6 +19337,13 @@ static void SpideyInstallTimingTelemetry()
 			fireWebHooks,
 			SPIDEY_TIMING_SLOW_EVENT_THRESHOLD_US,
 			gSpideyTimingFileTelemetryEnabled);
+		fprintf(
+			f,
+			"web_zip_trace_install r1_hooks=%d r1_target=0x004C0EE0 r2_hooks=%d r2_target=0x004C1460 availability_r1=%d availability_r2=%d availability_target=0x004C30D0 player_state_trace=post_logic input_base=0x00661100 zip_held=0x00661160 aim_held=0x00661140 r2_held=0x00661170 extra_held=0x00661200\n",
+			zipR1Hooks,
+			zipR2Hooks,
+			zipAvailabilityR1,
+			zipAvailabilityR2);
 		fclose(f);
 	}
 }

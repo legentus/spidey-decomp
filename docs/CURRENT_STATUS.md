@@ -15089,3 +15089,195 @@ Then inspect `script_motion` in the newest consolidated log:
 - if type 5 is active and crawl=0, compare pre/post mVel and successive positions to verify authored-motion integration;
 - if no type 5 appears, use the worker mask/head to identify and decompile the actual command type;
 - manual R1/R2 zip should also be retested afterward because its state-0x40000 authored velocity now uses the corrected integration class.
+
+
+## 2026-10-07 01:26 run — zip never enters retail travel state; direct R1/R2 gate tracing added
+
+### Runtime pulled
+The test harness created `logs/20261007-012633` but had not archived the log, so the authoritative live consolidated log was pulled from:
+`C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`
+
+The completed 191,243-byte log was copied into:
+`logs/20261007-012633/spidey-decomp.log`
+
+Runtime revision:
+`ad37f39a0ef96663c449121674f75e7c4bb02242`
+
+### User-visible result
+- Spider-Man still became stuck during the ceiling/web-zip-looking sequence.
+- Pressing Space/jump broke him loose and allowed him to fall to the ground.
+- Ordinary web-zip still cannot be initiated.
+
+### Runtime proof from this run
+There are **zero**:
+- `web_zip_physics` records;
+- `script_motion` records.
+
+Therefore the visible stuck sequence never reached:
+- manual zip travel state `field_E1C=0x40000`; or
+- the previously instrumented scripted type-5 move-to-point path.
+
+World position while stuck is exact and stationary:
+- frame 1981 / camera focus: `-31195060,-3138734,-6942891`
+- frame 2100 / body: `-31195060,-3138734,-6942891`
+
+After the user presses Space:
+- by frame 2257 Y has changed to approximately `-397312`;
+- by frame 2400 Spider-Man is grounded at `-30998474,-393216,-6950740`.
+
+This makes the surface/crawl/jump handoff significant for the intro symptom, but it does **not** explain why ordinary manual zip never starts.
+
+### Manual zip caller coverage
+Full retail `SpideyAI0 @ 0x004B13F0` disassembly shows six R1 and five R2 zip callsites:
+
+R1 `0x004C0EE0`:
+- `0x004B22BE`
+- `0x004B2785`
+- `0x004B2954`
+- `0x004B2C5E`
+- `0x004B2E00`
+- `0x004B32B4`
+
+R2 `0x004C1460`:
+- `0x004B22FA`
+- `0x004B2794`
+- `0x004B2963`
+- `0x004B2C6D`
+- `0x004B2E0F`
+
+### R1 retail rejection gates recovered
+`CPlayer::CheckJumpingR1ZipWeb @ 0x004C0EE0` returns false before raycast if any of these are true:
+1. `field_8EA != 0` (retail manual-aim/lookaround state);
+2. `mHeldObject @ +0xE48 != 0`;
+3. byte `player+0x550 != 0`;
+4. processed input held byte `player->field_E0C + 0x60 == 0`.
+
+If these pass, retail:
+- raycasts approximately `field_C84 * 0xC00` from the player;
+- validates hit/face;
+- calls `CheckZipWebAvailability(..., 0xC00)`;
+- then sets target/normal, creates/fires web, runs animation 270, and sets `field_E1C=0x40000`.
+
+### R2 retail rejection gates recovered
+`CPlayer::CheckJumpingR2ZipWeb @ 0x004C1460` shares the first three gates, then uses processed input/state at:
+- input `+0x70`;
+- global `0x0060CFC7`;
+- script-active `field_1AC`;
+- state bits `field_E1C & 6`;
+- raw player byte `+0xE8D`;
+- input `+0x100`.
+
+On success it performs its own raycast, calls `CheckZipWebAvailability(..., 0x800)`, then enters the same animation/state-0x40000 zip path.
+
+### Processed input model recovered
+Retail player constructor `0x004B9EB0` hard-wires:
+`player->field_E0C = 0x00661100`.
+
+`Pad_Update @ 0x00505720` uses 0x10-byte button-state records.
+
+Relevant raw action -> processed-record mapping:
+- raw `0x100` -> `0x00661140`;
+- raw `0x200` -> `0x00661160`;
+- raw `0x400` -> `0x00661170`;
+- additional raw `0x10` -> `0x00661200`.
+
+Retail action map identifies:
+- `0x0100` = aim;
+- `0x0200` = zipline;
+- `0x0400` = swing.
+
+Therefore **R1's +0x60 gate is exactly the processed held state for the retail zipline action**.
+
+`Pad_Update` helper `0x00479540` record layout:
+- +0 = currently held;
+- +1 = newly pressed transition/latch;
+- +2 = rapid re-press flag;
+- +4 = held duration;
+- +8 = released duration;
+- +0xC = transition timer.
+
+### player+0x550
+Static xrefs show this is a player-local latch which is repeatedly set by `SpideyAI0` and automatically cleared when processed `input+0x70` (raw `0x400`, retail swing action) is no longer held. It is therefore closely associated with swing/surface transition suppression and is an explicit zip blocker. Keep it in the next trace rather than guessing its final semantic name yet.
+
+### Decomp signature corrections
+The old source declared both:
+- `CheckJumpingR1ZipWeb`
+- `CheckJumpingR2ZipWeb`
+
+as `void`.
+
+Retail returns success/failure in AL and every SpideyAI0 callsite tests that result. Their source/header signatures are now corrected to `u8`. The source bodies remain TODO stubs and are not runtime-patched as implementations; runtime still calls retail through diagnostic wrappers.
+
+### New direct zip telemetry candidate
+All 11 direct SpideyAI0 calls are patched to wrappers which call the real retail functions unchanged.
+
+Markers:
+- `web_zip_check kind=r1 ...`
+- `web_zip_check kind=r2 ...`
+
+Each record captures:
+- retail result;
+- state before/after;
+- animation/frame/finished;
+- `field_8EA`;
+- held-object state;
+- byte +0x550;
+- input-ignore timer;
+- crawl/wall/ceiling flags;
+- byte +0xE8D;
+- script-active flag;
+- global `0x0060CFC7`;
+- full processed records at +0x40, +0x60, +0x70 and +0x100;
+- axes;
+- position and velocity.
+
+Both retail availability callsites are also wrapped:
+- R1 callsite `0x004C104F`;
+- R2 callsite `0x004C165C`.
+
+Marker:
+`web_zip_availability ...`
+
+It classifies rejection as:
+- distance_low;
+- distance_high;
+- face_no_zip;
+- orientation_or_other;
+- accepted.
+
+### New generic player-state trace
+After each retail Logic pass, a low-rate/change-driven `player_state_trace` captures player state independently of `field_1AC`.
+
+This is specifically intended to explain the ceiling-stuck-until-Space path:
+- state;
+- animation/frame/finished;
+- crawl/aim/wall/ceiling;
+- input-ignore;
+- script state;
+- held object;
+- processed jump/aim/zip/swing/extra button records;
+- position/velocity/acceleration.
+
+### Validation
+- forced-clean matching VC6 build: PASS
+- `git diff --check`: PASS after whitespace cleanup
+- built `Release/spider.dll`: 925,696 bytes
+- SHA-256: `888d57755bf9df7e9b60e405d8fb296601a46d87106f3b2d4988dc2ace237562`
+
+### Next runtime test
+Use only:
+`F:\Spider-Man 2000 Recomp\project main\TEST_LATEST_BUILD.bat`
+
+Highest-value sequence:
+1. reproduce the opening ceiling-stuck sequence once; if needed press Space as before;
+2. after gaining control, deliberately attempt ordinary web-zip several times while standing/jumping in a known valid area;
+3. exit normally.
+
+Interpretation:
+- `input60 held=0` during attempted zip => input/action translation failure upstream;
+- `input60 held=1` + `aim_flag=1` => stale/manual-aim compatibility state blocks retail zip;
+- `input60 held=1` + `gate_550=1` => stale swing-related latch blocks zip;
+- early gates clear but no `web_zip_availability` => raycast found no candidate;
+- availability logs reject => exact geometric reason now visible;
+- availability accepted but retail result false => investigate later web allocation/animation state;
+- retail result=1 and state becomes 0x40000 but movement still fails => return to authored-velocity/physics path with now-confirmed entry.

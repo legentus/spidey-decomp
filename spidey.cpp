@@ -401,15 +401,21 @@ void CPlayer::CheckJump(void)
 }
 
 // @MEDIUMTODO
-void CPlayer::CheckJumpingR1ZipWeb(void)
+// Retail 0x004C0EE0 returns success/failure in AL. The old decomp stub
+// incorrectly declared this routine void even though SpideyAI0 branches on
+// the return value at every callsite.
+u8 CPlayer::CheckJumpingR1ZipWeb(void)
 {
     printf("CPlayer::CheckJumpingR1ZipWeb(void)");
+    return 0;
 }
 
 // @MEDIUMTODO
-void CPlayer::CheckJumpingR2ZipWeb(void)
+// Retail 0x004C1460 likewise returns its success/failure result in AL.
+u8 CPlayer::CheckJumpingR2ZipWeb(void)
 {
     printf("CPlayer::CheckJumpingR2ZipWeb(void)");
+    return 0;
 }
 
 // @MEDIUMTODO
