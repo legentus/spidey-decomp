@@ -16575,3 +16575,179 @@ Add behavior-neutral breadcrumbs around the two auto-aim helper cleanup sites in
 - capture helper pointer, vtable, next/previous list links, `mCBodyFlags`, `mpShadow`, list head, and target pointer.
 
 The next reproduction should identify the exact spinning cleanup stage without changing combat behavior.
+
+
+## 2026-10-07 — Auto-aim target-helper cleanup hang diagnostic candidate
+
+Built from validated surface-first-person baseline:
+
+`91d5e3d8468234ea8a053c09a224041378a6781d`
+
+with docs checkpoint:
+
+`8c16191e5dc9e22a8b3cb0b76ffb0bc729948a90`
+
+### Purpose
+
+The previous live freeze was narrowed to:
+
+`SelectTargetBaddy returns NULL -> helper at player+0x878 is detached/destroyed -> CPU spin before next gameplay heartbeat`
+
+This candidate adds **behavior-neutral telemetry only** around every cleanup boundary needed to determine exactly which call does not return.
+
+No target scoring, combat logic, camera behavior, shadow behavior, object deletion behavior, or heap behavior is intentionally changed.
+
+### Confirmed retail cleanup chain
+
+Retail `sub_4C5AA0`:
+
+- replacement-old-target cleanup:
+  - direct `CBody::DeleteFrom` call at `0x004C5AF9 -> 0x00460280`;
+- lost-target cleanup:
+  - direct `CBody::DeleteFrom` call at `0x004C5C2F -> 0x00460280`;
+- helper virtual deleting destructor through base `CBody` vtable slot 0.
+
+Confirmed base `CBody` vtable:
+
+`0x0053BBD4`
+
+slot 0:
+
+`0x004601E0` — scalar deleting destructor.
+
+Confirmed scalar deleting destructor chain:
+
+- `0x004601E0` scalar deleting destructor;
+- direct base destructor call at `0x004601E3 -> CBody::~CBody @ 0x00460200`;
+- if delete flag is set, direct heap delete call at `0x004601F0 -> 0x00458210`.
+
+Confirmed `CBody::~CBody @ 0x00460200`:
+
+- reads `body+0xCC == mpShadow`;
+- if non-null, invokes the shadow object's virtual deleting destructor;
+- then returns.
+
+This makes `body_destructor_enter` without `body_destructor_return` a high-signal indicator that the spin is inside the marker's shadow deletion path.
+
+### Added diagnostic hooks
+
+New installer:
+
+`SpideyInstallAutoAimCleanupDiagnostics()`
+
+It installs:
+
+1. `0x004C5AF9` -> `SpideyAutoAimCleanupDeleteFromReplace`
+2. `0x004C5C2F` -> `SpideyAutoAimCleanupDeleteFromLost`
+3. `0x004601E3` -> `SpideyAutoAimCleanupBodyDestructor`
+4. `0x004601F0` -> `SpideyAutoAimCleanupMemDelete`
+5. `CBody` vtable slot `0x0053BBD4` -> `SpideyAutoAimCleanupScalarDeletingDestructor`
+
+The vtable patch validates the expected retail slot value `0x004601E0` and fails closed on mismatch.
+
+The two direct `DeleteFrom` call hooks use exact direct-call target validation and fail closed on mismatch.
+
+### Candidate tracking / noise control
+
+The direct `DeleteFrom` wrapper records the helper being cleaned as:
+
+`gSpideyAutoAimCleanupCandidate`
+
+and records whether the operation is:
+
+- `replace_old_target`
+- `lost_target`
+
+Destructor/base-destructor/heap-delete wrappers only emit detailed telemetry when the object equals that candidate.
+
+All wrappers forward to the original retail/currently-patched target and return its result unchanged.
+
+### New log marker
+
+Each boundary writes:
+
+`[TIMING] autoaim_cleanup ...`
+
+Important fields:
+
+- `seq`
+- `event`
+- `stage`
+- `body`
+- `list`
+- `list_head`
+- `vtable`
+- `next`
+- `previous`
+- `cbody_flags`
+- `shadow`
+- `destructor_flags`
+- guarded read-success flags
+
+Possible event progression for a normal cleanup:
+
+1. `deletefrom_enter`
+2. `deletefrom_return`
+3. `scalar_destructor_enter`
+4. `body_destructor_enter`
+5. `body_destructor_return`
+6. `operator_delete_enter`
+7. `operator_delete_return`
+8. `scalar_destructor_return`
+
+### How to interpret the next freeze
+
+Last marker is:
+
+- `deletefrom_enter`
+  - spin is inside `CBody::DeleteFrom` / unsuspend-list manipulation;
+- `deletefrom_return`
+  - spin occurs between detach and virtual destructor dispatch;
+- `scalar_destructor_enter`
+  - scalar deleting destructor entered but has not reached base destructor;
+- `body_destructor_enter`
+  - spin is inside `CBody::~CBody`, whose only meaningful owned-object cleanup is `delete mpShadow`; this strongly points at target-marker shadow destruction;
+- `body_destructor_return`
+  - base destructor completed; next suspect is the scalar destructor's delete branch;
+- `operator_delete_enter`
+  - spin is inside `Mem_Delete / heap deletion`;
+- `operator_delete_return` but no `scalar_destructor_return`
+  - heap delete returned; scalar destructor epilogue/return is implicated;
+- complete eight-event sequence
+  - this helper cleanup returned successfully and the hang lies later.
+
+### Toolchain correction
+
+Initial implementation used `__thiscall` function-pointer typedefs. The matching VC6 compiler rejects that form with C4234.
+
+They were converted to the repository's already-proven x86 pattern:
+
+- wrapper/function pointer uses `__fastcall`;
+- ECX carries `this`;
+- dummy EDX argument occupies the fastcall second register;
+- original explicit arguments remain on the stack.
+
+No ABI behavior change is intended.
+
+### Validation
+
+- `git diff --check`: PASS before build
+- forced-clean matching VC6 build: PASS
+- output:
+  - `Release/spider.dll`
+  - size: 937,984 bytes
+  - SHA-256:
+    `0bdbbb06034ddefdf5e8cdbf5f6e23cc2e147b6a5b407ea937d48ea1593281f1`
+
+### Next runtime test
+
+Use normal `TEST_LATEST_BUILD.bat` workflow.
+
+Primary test:
+
+1. enter a normal thug/henchman fight;
+2. fight normally until target acquisition/loss happens repeatedly;
+3. if the game freezes, leave it frozen long enough for the last breadcrumb to flush;
+4. the live `spidey-decomp.log` can then be pulled directly through Local Commander.
+
+No need to retest the wall/ceiling camera beyond a brief sanity check; that behavior is already user-validated.

@@ -16788,6 +16788,386 @@ static CBody* __fastcall SpideyCameraSelectTargetBaddyCheckWebShot(
 		"check_web_shot");
 }
 
+static CBody* gSpideyAutoAimCleanupCandidate = 0;
+static const char* gSpideyAutoAimCleanupStage = "none";
+static unsigned long gSpideyAutoAimCleanupEventSequence = 0;
+
+static void SpideyAutoAimCleanupLog(
+		const char* eventName,
+		CBody* body,
+		CBody** list,
+		unsigned int destructorFlags,
+		int readObject)
+{
+	unsigned long vtable = 0;
+	unsigned long nextItem = 0;
+	unsigned long previousItem = 0;
+	unsigned long shadow = 0;
+	unsigned long bodyFlags = 0;
+	unsigned long listHead = 0;
+	int objectReadOk = 0;
+	int listReadOk = 0;
+
+	if (readObject &&
+		body)
+	{
+		__try
+		{
+			vtable =
+				*(unsigned long*)body;
+			nextItem =
+				(unsigned long)body->mNextItem;
+			previousItem =
+				(unsigned long)body->mPreviousItem;
+			shadow =
+				(unsigned long)body->mpShadow;
+			bodyFlags =
+				(unsigned long)body->mCBodyFlags;
+			objectReadOk =
+				1;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			objectReadOk =
+				0;
+		}
+	}
+
+	if (list)
+	{
+		__try
+		{
+			listHead =
+				(unsigned long)(*list);
+			listReadOk =
+				1;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			listReadOk =
+				0;
+		}
+	}
+
+	++gSpideyAutoAimCleanupEventSequence;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"autoaim_cleanup seq=%lu event=%s stage=%s body=0x%08lX list=0x%08lX list_head=0x%08lX vtable=0x%08lX next=0x%08lX previous=0x%08lX cbody_flags=0x%08lX shadow=0x%08lX destructor_flags=0x%08X read_object=%d read_list=%d\n",
+			gSpideyAutoAimCleanupEventSequence,
+			eventName ?
+				eventName :
+				"unknown",
+			gSpideyAutoAimCleanupStage ?
+				gSpideyAutoAimCleanupStage :
+				"none",
+			(unsigned long)body,
+			(unsigned long)list,
+			listHead,
+			vtable,
+			nextItem,
+			previousItem,
+			bodyFlags,
+			shadow,
+			destructorFlags,
+			objectReadOk,
+			listReadOk);
+		fclose(f);
+	}
+}
+
+static void SpideyAutoAimCleanupDeleteFromCommon(
+		CBody* body,
+		CBody** list,
+		const char* stageName)
+{
+	typedef void (__fastcall *SpideyRetailCBodyDeleteFromFn)(
+		CBody*,
+		void*,
+		CBody**);
+
+	gSpideyAutoAimCleanupCandidate =
+		body;
+	gSpideyAutoAimCleanupStage =
+		stageName;
+
+	SpideyAutoAimCleanupLog(
+		"deletefrom_enter",
+		body,
+		list,
+		0,
+		1);
+
+	SpideyRetailCBodyDeleteFromFn retail =
+		(SpideyRetailCBodyDeleteFromFn)0x00460280;
+	retail(
+		body,
+		0,
+		list);
+
+	SpideyAutoAimCleanupLog(
+		"deletefrom_return",
+		body,
+		list,
+		0,
+		1);
+}
+
+static void __fastcall SpideyAutoAimCleanupDeleteFromReplace(
+		CBody* body,
+		void*,
+		CBody** list)
+{
+	SpideyAutoAimCleanupDeleteFromCommon(
+		body,
+		list,
+		"replace_old_target");
+}
+
+static void __fastcall SpideyAutoAimCleanupDeleteFromLost(
+		CBody* body,
+		void*,
+		CBody** list)
+{
+	SpideyAutoAimCleanupDeleteFromCommon(
+		body,
+		list,
+		"lost_target");
+}
+
+static void __fastcall SpideyAutoAimCleanupBodyDestructor(
+		CBody* body,
+		void*)
+{
+	typedef void (__fastcall *SpideyRetailCBodyDestructorFn)(
+		CBody*,
+		void*);
+
+	const int isCandidate =
+		body ==
+			gSpideyAutoAimCleanupCandidate;
+
+	if (isCandidate)
+	{
+		SpideyAutoAimCleanupLog(
+			"body_destructor_enter",
+			body,
+			0,
+			0,
+			1);
+	}
+
+	SpideyRetailCBodyDestructorFn retail =
+		(SpideyRetailCBodyDestructorFn)0x00460200;
+	retail(
+		body,
+		0);
+
+	if (isCandidate)
+	{
+		SpideyAutoAimCleanupLog(
+			"body_destructor_return",
+			body,
+			0,
+			0,
+			1);
+	}
+}
+
+static void __cdecl SpideyAutoAimCleanupMemDelete(
+		void* memory)
+{
+	typedef void (__cdecl *SpideyRetailMemDeleteFn)(
+		void*);
+
+	const int isCandidate =
+		memory ==
+			(void*)gSpideyAutoAimCleanupCandidate;
+
+	if (isCandidate)
+	{
+		SpideyAutoAimCleanupLog(
+			"operator_delete_enter",
+			(CBody*)memory,
+			0,
+			0,
+			0);
+	}
+
+	SpideyRetailMemDeleteFn retail =
+		(SpideyRetailMemDeleteFn)0x00458210;
+	retail(
+		memory);
+
+	if (isCandidate)
+	{
+		SpideyAutoAimCleanupLog(
+			"operator_delete_return",
+			(CBody*)memory,
+			0,
+			0,
+			0);
+	}
+}
+
+static CBody* __fastcall SpideyAutoAimCleanupScalarDeletingDestructor(
+		CBody* body,
+		void*,
+		unsigned int flags)
+{
+	typedef CBody* (__fastcall *SpideyRetailCBodyScalarDeletingDestructorFn)(
+		CBody*,
+		void*,
+		unsigned int);
+
+	const int isCandidate =
+		body ==
+			gSpideyAutoAimCleanupCandidate;
+
+	if (isCandidate)
+	{
+		SpideyAutoAimCleanupLog(
+			"scalar_destructor_enter",
+			body,
+			0,
+			flags,
+			1);
+	}
+
+	SpideyRetailCBodyScalarDeletingDestructorFn retail =
+		(SpideyRetailCBodyScalarDeletingDestructorFn)0x004601E0;
+	CBody* result =
+		retail(
+			body,
+			0,
+			flags);
+
+	if (isCandidate)
+	{
+		// The scalar deleting destructor may already have freed body.
+		SpideyAutoAimCleanupLog(
+			"scalar_destructor_return",
+			body,
+			0,
+			flags,
+			0);
+
+		gSpideyAutoAimCleanupCandidate =
+			0;
+		gSpideyAutoAimCleanupStage =
+			"none";
+	}
+
+	return result;
+}
+
+static int SpideyPatchAutoAimCleanupDestructorVtable()
+{
+	unsigned long* slot =
+		(unsigned long*)0x0053BBD4;
+	const unsigned long expected =
+		0x004601E0;
+	const unsigned long actual =
+		*slot;
+
+	if (actual !=
+		expected)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (f)
+		{
+			fprintf(
+				f,
+				"autoaim_cleanup_patch name=cbody_scalar_destructor installed=0 reason=target slot=0x0053BBD4 expected=0x%08lX actual=0x%08lX\n",
+				expected,
+				actual);
+			fclose(f);
+		}
+		return 0;
+	}
+
+	DWORD oldProtect =
+		0;
+	if (!VirtualProtect(
+			slot,
+			sizeof(*slot),
+			PAGE_EXECUTE_READWRITE,
+			&oldProtect))
+	{
+		return 0;
+	}
+
+	*slot =
+		(unsigned long)&SpideyAutoAimCleanupScalarDeletingDestructor;
+
+	DWORD ignoredProtect =
+		0;
+	VirtualProtect(
+		slot,
+		sizeof(*slot),
+		oldProtect,
+		&ignoredProtect);
+	FlushInstructionCache(
+		GetCurrentProcess(),
+		slot,
+		sizeof(*slot));
+
+	return 1;
+}
+
+static void SpideyInstallAutoAimCleanupDiagnostics()
+{
+	const int replaceDeleteFromInstalled =
+		SpideyPatchDirectCall(
+			0x004C5AF9,
+			0x00460280,
+			(void*)&SpideyAutoAimCleanupDeleteFromReplace,
+			"autoaim_cleanup_replace_deletefrom");
+	const int lostDeleteFromInstalled =
+		SpideyPatchDirectCall(
+			0x004C5C2F,
+			0x00460280,
+			(void*)&SpideyAutoAimCleanupDeleteFromLost,
+			"autoaim_cleanup_lost_deletefrom");
+	const int bodyDestructorInstalled =
+		SpideyPatchDirectCall(
+			0x004601E3,
+			0x00460200,
+			(void*)&SpideyAutoAimCleanupBodyDestructor,
+			"autoaim_cleanup_body_destructor");
+	const int memDeleteInstalled =
+		SpideyPatchDirectCall(
+			0x004601F0,
+			0x00458210,
+			(void*)&SpideyAutoAimCleanupMemDelete,
+			"autoaim_cleanup_mem_delete");
+	const int scalarDestructorInstalled =
+		SpideyPatchAutoAimCleanupDestructorVtable();
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"autoaim_cleanup_install replace_deletefrom=%d replace_call=0x004C5AF9 lost_deletefrom=%d lost_call=0x004C5C2F body_destructor=%d body_call=0x004601E3 mem_delete=%d mem_call=0x004601F0 scalar_destructor=%d vtable_slot=0x0053BBD4 retail_scalar=0x004601E0 policy=telemetry_only_no_behavior_change\n",
+			replaceDeleteFromInstalled,
+			lostDeleteFromInstalled,
+			bodyDestructorInstalled,
+			memDeleteInstalled,
+			scalarDestructorInstalled);
+		fclose(f);
+	}
+}
+
 static void SpideyInstallCameraWebTargetingCompat()
 {
 	const int autoAimInstalled =
@@ -25372,6 +25752,7 @@ void game_patches(void)
 	SpideyInstallModernCameraCompat();
 	SpideyInstallModernManualAimCompat();
 	SpideyInstallCameraWebTargetingCompat();
+	SpideyInstallAutoAimCleanupDiagnostics();
 	SpideyInstallQuadBitCameraAnchorCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();
