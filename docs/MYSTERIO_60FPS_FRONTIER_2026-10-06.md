@@ -307,3 +307,135 @@ The earlier behavior where camera motion visibly displaced blob shadows from the
 Next cross-check requested by user:
 - Venom Chase / Venom body FX and tentacle-style effects should be tested to see whether they now remain attached correctly under camera motion as well.
 - If confirmed, promote the View-matrix correction to the general legacy world-effect anchoring fix for QuadBit/ribbon-style compatibility paths.
+
+
+## 2026-10-06 — Mysterio FireBoobies firing-rate comparison and scoped LookAt cadence candidate
+
+### User observation
+After the successful `a567bb58` renderer/attachment build:
+- Mysterio health bar/holder: correct.
+- helmet FX: correct.
+- chest laser emitter attachment: correct.
+- blob shadows: correct.
+- Venom tentacle/body FX: correct.
+- user reported the **rate at which Mysterio fires the lasers still feels somewhat too fast**.
+
+### Direct 60-FPS vs true 20-FPS comparison
+Successful 60-FPS run:
+`logs/20261006-211658/spidey-decomp.log`
+
+True full-engine 20-FPS Mysterio reference:
+`logs/20261006-040238/spidey-decomp.log`
+
+The current FireBoobies wrapper runs at native 60 Hz with `field_80=1`.
+The true 20-FPS reference enters FireBoobies with `field_80=3`.
+
+Measured attack phase timing:
+
+Current 60-FPS complete attacks:
+- attack 1: total 35 canonical ticks = ~583.3 ms
+  - setup -> active beam: 7 ticks = ~116.7 ms
+  - active beam stage: 28 ticks = ~466.7 ms
+- attack 2: total ~283.3 ms
+- attack 3: total ~1383.3 ms
+- attack 4: total ~433.3 ms
+- attack 5: total ~2766.7 ms
+- every observed setup -> active transition: 7 ticks = ~116.7 ms.
+
+True 20-FPS reference:
+- attack 1: total 105 canonical-tick equivalent = ~1750 ms
+  - setup -> active beam: 15 ticks equivalent = ~250 ms
+  - active beam stage: 90 ticks equivalent = ~1500 ms
+- attack 2: setup ~300 ms
+- attack 3: setup ~300 ms
+- attack 4: setup ~250 ms.
+
+This confirms the user's speed impression is real:
+**FireBoobies reaches active firing in ~117 ms at 60 FPS versus ~250–300 ms in the true 20-FPS reference.**
+
+A particularly important comparison:
+- first attack uses 36 FireBoobies calls in the 60-FPS run;
+- first attack also uses 36 FireBoobies calls in the 20-FPS reference;
+- those same 36 state-machine calls consume ~0.58 s at 60 Hz versus ~1.75 s at 20 Hz.
+Therefore at least part of the attack behavior is call-rate dependent rather than purely elapsed-time dependent.
+
+### SetPos and laser Move investigation
+`CMysterioLaser::Move` is NOT the remaining attack-speed source.
+The compatibility replacement now only implements the retail SetPos/Move liveness handshake with elapsed-time grace and does not advance attack geometry.
+
+`CMysterioLaser::SetPos @ 0x0045B5E0` returns a collision/hit result; it does not contain a hidden beam-lifetime counter.
+The existing 20-Hz SetPos sampling therefore remains valid and should not be removed.
+
+### FireBoobies setup transition root cause
+Detailed FireBoobies RE:
+- substate 0 starts attack setup and creates a turn/look controller through helper `0x0045CF10`;
+- substate 1 waits for `field_288 & 1`;
+- that bit is the completion signal from the AI look/turn controller;
+- once received, FireBoobies transitions to substate 2 and begins active laser work.
+
+The global `CSuper` animation advance is already elapsed-time correct:
+- frame advance uses `field_80 * mAnimSpeed / 2`;
+- therefore animation itself is not the ~3x speed source.
+
+Helper `0x0045CF10` creates:
+`CAIProc_LookAt`
+
+Retail LookAt execution:
+`CAIProc_LookAt::Execute @ 0x004013D0`
+
+Its turn step calls:
+`0x00401528 -> CBaddy::YawTowards @ 0x004030C0`
+
+Critical finding:
+`CBaddy::YawTowards` applies:
+`step = yaw_error * turn_factor / 256`
+**once per call**, with no `field_80` scaling.
+
+Thus:
+- true 20-FPS reference: LookAt/YawTowards advances once per ~50 ms;
+- native 60 FPS: it advances once per ~16.7 ms;
+- Mysterio therefore converges toward the firing heading much faster and raises the completion flag earlier.
+
+The exact 20-FPS reference revision `47cd318d` uses the same current `CAIProc_RotY` half-step code, so this discrepancy is NOT source drift and is specifically in the retail LookAt/YawTowards path.
+
+### New narrowly scoped candidate
+Do NOT globally alter YawTowards yet.
+
+Patch only the retail LookAt callsite:
+`0x00401528 -> CBaddy::YawTowards @ 0x004030C0`
+
+Wrapper behavior:
+- every non-Mysterio baddy: untouched retail pass-through;
+- Mysterio outside FireBoobies state 6: untouched retail pass-through;
+- active Mysterio in state 6:
+  - LookAt itself still executes every 60-Hz AI update;
+  - first YawTowards call of a new attack establishes a canonical 3-tick phase and runs immediately;
+  - all state-6 LookAt YawTowards calls on the sampled phase execute retail;
+  - calls on the other two canonical ticks return the current normalized angular error without modifying yaw;
+  - a long gap/new attack resets the phase.
+
+This preserves 60-Hz AI/state upkeep while making the actual proportional turn step advance on the same 20-Hz cadence as the known-good reference.
+
+New stats:
+`mysterio_yawtowards_20hz_stats installed=... calls=... retail_calls=... held_calls=... phase_resets=... callsite=0x00401528 retail=0x004030C0 policy=lookat_alive_60hz_yaw_step_20hz_fireboobies_state6`
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+- full link: PASS
+- candidate pre-commit `Release/spider.dll`:
+  - size: 913,408 bytes
+  - SHA-256: `3d86988a3e64103aa02cb02e3900797a6619a7c1c201afe1bcd135afdf4391d9`
+
+### Next runtime check
+Use `TEST_LATEST_BUILD.bat`.
+
+Primary question:
+- does Mysterio's FireBoobies wind-up / firing rhythm now feel like the true 20-FPS reference rather than the too-fast ~117-ms setup?
+
+Also confirm no regressions to:
+- correct chest-emitter attachment;
+- correct helmet FX;
+- corrected blob shadows;
+- corrected health bar/holder;
+- laser attack stability.

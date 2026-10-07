@@ -4547,6 +4547,217 @@ typedef int (__fastcall *SpideyRetailMysterioLaserSetPosFn)(
 		const CVector*,
 		const CSVector*);
 
+typedef int (__fastcall *SpideyRetailYawTowardsFn)(
+		CBaddy*,
+		void*,
+		int,
+		int);
+
+static unsigned long gSpideyMysterioYawTowardsCalls =
+	0;
+static unsigned long gSpideyMysterioYawTowardsRetailCalls =
+	0;
+static unsigned long gSpideyMysterioYawTowardsHeldCalls =
+	0;
+static unsigned long gSpideyMysterioYawTowardsPhaseResets =
+	0;
+static unsigned long gSpideyMysterioYawTowardsPhase =
+	0;
+static unsigned long gSpideyMysterioYawTowardsLastTick =
+	0;
+static CBaddy* gSpideyMysterioYawTowardsBoss =
+	0;
+static int gSpideyMysterioYawTowardsPhaseValid =
+	0;
+static int gSpideyMysterioYawTowardsInstalled =
+	0;
+
+static int SpideyGetWrappedYawError(
+		CBaddy* baddy,
+		int targetYaw)
+{
+	if (!baddy)
+		return 0;
+
+	const int currentYaw =
+		(int)*(volatile short*)(
+			(unsigned char*)baddy +
+			0x16);
+	int error =
+		targetYaw -
+		currentYaw;
+
+	if (error <
+		-0x800)
+	{
+		error +=
+			0x1000;
+	}
+	else if (error >
+		0x800)
+	{
+		error -=
+			0x1000;
+	}
+
+	return error;
+}
+
+// FireBoobies creates a CAIProc_LookAt whose retail Execute calls
+// CBaddy::YawTowards once per AI update. YawTowards applies its full
+// proportional turn step per call and does not scale that step by field_80.
+// The true 20-FPS Mysterio reference therefore advances this controller once
+// per 50 ms, while native 60 Hz otherwise converges about three times as
+// often. Keep LookAt itself alive at 60 Hz, but sample only its Mysterio
+// state-6 turn step on one canonical phase out of three.
+static int __fastcall SpideyMysterioYawTowards20Hz(
+		CBaddy* baddy,
+		void*,
+		int targetYaw,
+		int turnFactor)
+{
+	SpideyRetailYawTowardsFn retail =
+		(SpideyRetailYawTowardsFn)0x004030C0;
+
+	++gSpideyMysterioYawTowardsCalls;
+
+	if (!baddy)
+	{
+		++gSpideyMysterioYawTowardsRetailCalls;
+		return retail(
+			baddy,
+			0,
+			targetYaw,
+			turnFactor);
+	}
+
+	int itemType =
+		0;
+	CBaddy* boss =
+		0;
+	int state =
+		-1;
+
+	__try
+	{
+		itemType =
+			*(volatile int*)0x0060F654;
+		boss =
+			*(CBaddy* volatile*)0x0060F788;
+		state =
+			*(volatile int*)(
+				(unsigned char*)baddy +
+				0x31C);
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		itemType =
+			0;
+		boss =
+			0;
+		state =
+			-1;
+	}
+
+	if (itemType !=
+			311 ||
+		boss !=
+			baddy ||
+		state !=
+			6)
+	{
+		if (gSpideyMysterioYawTowardsBoss ==
+			baddy)
+		{
+			gSpideyMysterioYawTowardsPhaseValid =
+				0;
+			gSpideyMysterioYawTowardsBoss =
+				0;
+		}
+
+		++gSpideyMysterioYawTowardsRetailCalls;
+		return retail(
+			baddy,
+			0,
+			targetYaw,
+			turnFactor);
+	}
+
+	const unsigned long now =
+		(unsigned long)*(volatile long*)0x006B4CA8;
+	int resetPhase =
+		!gSpideyMysterioYawTowardsPhaseValid ||
+		gSpideyMysterioYawTowardsBoss !=
+			baddy;
+
+	if (!resetPhase)
+	{
+		const unsigned long elapsed =
+			now -
+			gSpideyMysterioYawTowardsLastTick;
+
+		if (now <
+				gSpideyMysterioYawTowardsLastTick ||
+			elapsed >
+				3)
+		{
+			resetPhase =
+				1;
+		}
+	}
+
+	if (resetPhase)
+	{
+		gSpideyMysterioYawTowardsPhase =
+			now %
+			3;
+		gSpideyMysterioYawTowardsBoss =
+			baddy;
+		gSpideyMysterioYawTowardsPhaseValid =
+			1;
+		++gSpideyMysterioYawTowardsPhaseResets;
+	}
+
+	gSpideyMysterioYawTowardsLastTick =
+		now;
+
+	if ((now %
+			3) ==
+		gSpideyMysterioYawTowardsPhase)
+	{
+		++gSpideyMysterioYawTowardsRetailCalls;
+		return retail(
+			baddy,
+			0,
+			targetYaw,
+			turnFactor);
+	}
+
+	++gSpideyMysterioYawTowardsHeldCalls;
+	return SpideyGetWrappedYawError(
+		baddy,
+		targetYaw);
+}
+
+static void SpideyLogMysterioYawTowardsStats()
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"mysterio_yawtowards_20hz_stats installed=%d calls=%lu retail_calls=%lu held_calls=%lu phase_resets=%lu callsite=0x00401528 retail=0x004030C0 policy=lookat_alive_60hz_yaw_step_20hz_fireboobies_state6\n",
+		gSpideyMysterioYawTowardsInstalled,
+		gSpideyMysterioYawTowardsCalls,
+		gSpideyMysterioYawTowardsRetailCalls,
+		gSpideyMysterioYawTowardsHeldCalls,
+		gSpideyMysterioYawTowardsPhaseResets);
+	fclose(f);
+}
+
 struct SpideyMysterioLaserSetPosGate
 {
 	CMysterioLaser* laser;
@@ -7338,6 +7549,14 @@ static void SpideyInstallHighFpsTimingCompat()
 		0;
 	const int mysterioSoftSpotHitTelemetryInstalled =
 		SpideyInstallMysterioSoftSpotHitTelemetry();
+	const int mysterioYawTowardsInstalled =
+		SpideyPatchDirectCall(
+			0x00401528,
+			0x004030C0,
+			(void*)&SpideyMysterioYawTowards20Hz,
+			"mysterio_fireboobies_lookat_yaw_20hz");
+	gSpideyMysterioYawTowardsInstalled =
+		mysterioYawTowardsInstalled;
 	const int mysterioLaserAttackTelemetryInstalled =
 		SpideyPatchDirectCall(
 			0x0045F489,
@@ -17225,6 +17444,7 @@ static UINT WINAPI SpideyCompatTimeKillEvent(
 		}
 
 		SpideyLogMysterioLaserSetPosStats();
+		SpideyLogMysterioYawTowardsStats();
 		SpideyLogChasePlayerAI20Stats();
 		SpideyLogChaseCameraAI20Stats();
 		SpideyLogChaseBaddyAI20Stats();
