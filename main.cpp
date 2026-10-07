@@ -26304,6 +26304,7 @@ static void SpideyInstallCleanup503AF0Compat()
 
 typedef i32 (__cdecl *SpideyRetailPollKeyboardFn)(void);
 typedef i32 (__cdecl *SpideyRetailPollMouseFn)(i32*, i32*);
+typedef i32 (__cdecl *SpideyRetailSetupControllerFn)(void);
 
 static i32 gSpideyRetailInputForeground = -1;
 static unsigned long gSpideyRetailInputSyncCount = 0;
@@ -26479,6 +26480,361 @@ static i32 SpideySyncRetailInputForeground(void)
 	return foreground;
 }
 
+static unsigned long gSpideyRetailControllerPollCalls = 0;
+static unsigned long gSpideyRetailControllerDisconnects = 0;
+static unsigned long gSpideyRetailControllerReconnects = 0;
+static unsigned long gSpideyRetailControllerLastRebuildPoll = 0;
+static int gSpideyRetailControllerDisconnected = 0;
+
+static void SpideyClearRetailControllerFrame(
+		i32* pX,
+		i32* pY,
+		i32* pPov)
+{
+	if (pX)
+		*pX = 0;
+	if (pY)
+		*pY = 0;
+	if (pPov)
+		*pPov = -1;
+
+	memset(
+		(void*)0x006B7A34,
+		0,
+		0x20);
+}
+
+static void SpideyLogRetailControllerHotplug(
+		const char* eventName,
+		HRESULT pollHr,
+		HRESULT acquireHr,
+		i32 setupResult)
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"INPUT");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"controller_hotplug event=%s poll_call=%lu poll_hr=0x%08lX acquire_hr=0x%08lX setup_result=%d disconnected=%d disconnects=%lu reconnects=%lu retail_device=0x%08lX input11_connected=%d\n",
+		eventName ?
+			eventName :
+			"unknown",
+		gSpideyRetailControllerPollCalls,
+		(unsigned long)pollHr,
+		(unsigned long)acquireHr,
+		setupResult,
+		gSpideyRetailControllerDisconnected,
+		gSpideyRetailControllerDisconnects,
+		gSpideyRetailControllerReconnects,
+		(unsigned long)
+			*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C,
+		SpideyInput11IsConnected());
+	fclose(f);
+}
+
+static int SpideyRetailControllerIsRecoverableFailure(
+		HRESULT hr)
+{
+	return
+		hr == DIERR_INPUTLOST ||
+		hr == DIERR_NOTACQUIRED ||
+		hr == DIERR_UNPLUGGED ||
+		hr == DIERR_OTHERAPPHASPRIO;
+}
+
+static i32 SpideyTryRebuildRetailController()
+{
+	// Only rebuild when the modern helper has independently confirmed that a
+	// controller exists again. This prevents repeated DirectInput enumeration
+	// while the pad is intentionally powered off.
+	if (!SpideyInput11IsConnected())
+		return 0;
+
+	if (gSpideyRetailControllerPollCalls -
+			gSpideyRetailControllerLastRebuildPoll <
+			60)
+	{
+		return 0;
+	}
+
+	gSpideyRetailControllerLastRebuildPoll =
+		gSpideyRetailControllerPollCalls;
+
+	LPDIRECTINPUTEFFECT effect =
+		*(LPDIRECTINPUTEFFECT*)0x006B7A68;
+	if (effect)
+	{
+		effect->Release();
+		*(LPDIRECTINPUTEFFECT*)0x006B7A68 =
+			0;
+	}
+	*(u8*)0x006B7928 =
+		0;
+
+	LPDIRECTINPUTDEVICE8A controller =
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C;
+	if (controller)
+	{
+		controller->Unacquire();
+		controller->Release();
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C =
+			0;
+	}
+
+	*(i32*)0x006B7A58 =
+		0;
+	memset(
+		(void*)0x006B7A34,
+		0,
+		0x20);
+
+	SpideyRetailSetupControllerFn setup =
+		(SpideyRetailSetupControllerFn)
+		0x00501890;
+	const i32 setupResult =
+		setup();
+
+	controller =
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C;
+
+	SpideyLogRetailControllerHotplug(
+		"rebuild",
+		DI_OK,
+		DI_OK,
+		setupResult);
+
+	return
+		setupResult &&
+		controller != 0;
+}
+
+static i32 __cdecl SpideyCompatRetailPollController(
+		i32* pX,
+		i32* pY,
+		i32* pPov)
+{
+	++gSpideyRetailControllerPollCalls;
+
+	if (!SpideySyncRetailInputForeground())
+	{
+		SpideyClearRetailControllerFrame(
+			pX,
+			pY,
+			pPov);
+		return 0;
+	}
+
+	LPDIRECTINPUTDEVICE8A controller =
+		*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C;
+
+	if (!controller)
+	{
+		SpideyClearRetailControllerFrame(
+			pX,
+			pY,
+			pPov);
+
+		if (SpideyTryRebuildRetailController())
+		{
+			controller =
+				*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C;
+		}
+
+		if (!controller)
+			return 0;
+	}
+
+	HRESULT pollHr =
+		controller->Poll();
+	HRESULT acquireHr =
+		DI_OK;
+
+	if (FAILED(pollHr))
+	{
+		if (SpideyRetailControllerIsRecoverableFailure(
+				pollHr))
+		{
+			acquireHr =
+				controller->Acquire();
+
+			if (SUCCEEDED(acquireHr))
+			{
+				pollHr =
+					controller->Poll();
+			}
+		}
+
+		if (FAILED(pollHr))
+		{
+			SpideyClearRetailControllerFrame(
+				pX,
+				pY,
+				pPov);
+
+			if (!gSpideyRetailControllerDisconnected)
+			{
+				gSpideyRetailControllerDisconnected =
+					1;
+				++gSpideyRetailControllerDisconnects;
+
+				SpideyLogRetailControllerHotplug(
+					"disconnect",
+					pollHr,
+					acquireHr,
+					0);
+			}
+
+			if (SpideyTryRebuildRetailController())
+			{
+				controller =
+					*(LPDIRECTINPUTDEVICE8A*)0x006B7A2C;
+				if (controller)
+				{
+					pollHr =
+						controller->Poll();
+					if (FAILED(pollHr))
+					{
+						acquireHr =
+							controller->Acquire();
+						if (SUCCEEDED(acquireHr))
+							pollHr =
+								controller->Poll();
+					}
+				}
+			}
+
+			if (!controller ||
+				FAILED(pollHr))
+			{
+				return 0;
+			}
+		}
+	}
+
+	DIDEVICEOBJECTDATA events[16];
+	memset(
+		events,
+		0,
+		sizeof(events));
+	DWORD eventCount =
+		16;
+
+	HRESULT dataHr =
+		controller->GetDeviceData(
+			sizeof(DIDEVICEOBJECTDATA),
+			events,
+			&eventCount,
+			0);
+
+	if (FAILED(dataHr))
+	{
+		SpideyClearRetailControllerFrame(
+			pX,
+			pY,
+			pPov);
+
+		if (SpideyRetailControllerIsRecoverableFailure(
+				dataHr))
+		{
+			if (!gSpideyRetailControllerDisconnected)
+			{
+				gSpideyRetailControllerDisconnected =
+					1;
+				++gSpideyRetailControllerDisconnects;
+				SpideyLogRetailControllerHotplug(
+					"data_disconnect",
+					dataHr,
+					DI_OK,
+					0);
+			}
+			return 0;
+		}
+
+		// A gamepad is optional input. Unknown DirectInput failures should
+		// disable only this controller frame, never terminate the process.
+		SpideyLogRetailControllerHotplug(
+			"data_error_nonfatal",
+			dataHr,
+			DI_OK,
+			0);
+		return 0;
+	}
+
+	u8* buttonState =
+		(u8*)0x006B7A34;
+	for (i32 i = 0;
+		i < 0x20;
+		++i)
+	{
+		buttonState[i] &=
+			0x7F;
+	}
+
+	const i32 buttonCount =
+		*(i32*)0x006B7A58;
+
+	for (DWORD eventIndex = 0;
+		eventIndex < eventCount;
+		++eventIndex)
+	{
+		const DWORD ofs =
+			events[eventIndex].dwOfs;
+		const DWORD data =
+			events[eventIndex].dwData;
+
+		if (ofs >= DIJOFS_BUTTON0 &&
+			ofs <
+				(DWORD)(
+					DIJOFS_BUTTON0 +
+					buttonCount))
+		{
+			u8* state =
+				(u8*)0x006B7A04 +
+				ofs;
+			*state =
+				(data & 0x80) ?
+					0xFF :
+					0x80;
+		}
+		else if (ofs == DIJOFS_X)
+		{
+			if (pX)
+				*pX =
+					(i32)data;
+		}
+		else if (ofs == DIJOFS_Y)
+		{
+			if (pY)
+				*pY =
+					(i32)data;
+		}
+		else if (ofs == DIJOFS_POV(0))
+		{
+			if (pPov)
+				*pPov =
+					(i32)data;
+		}
+	}
+
+	if (gSpideyRetailControllerDisconnected)
+	{
+		gSpideyRetailControllerDisconnected =
+			0;
+		++gSpideyRetailControllerReconnects;
+
+		SpideyLogRetailControllerHotplug(
+			"reconnected",
+			DI_OK,
+			DI_OK,
+			1);
+	}
+
+	return 1;
+}
+
 static i32 __cdecl SpideyCompatRetailPollKeyboard(void)
 {
 	if (!SpideySyncRetailInputForeground())
@@ -26564,10 +26920,14 @@ static void SpideyInstallRetailInputCompat()
 		0x00501B80;
 	const unsigned long retailMouse =
 		0x00501CC0;
+	const unsigned long retailController =
+		0x00501E50;
 
 	i32 keyboardCalls =
 		0;
 	i32 mouseCalls =
+		0;
+	i32 controllerCalls =
 		0;
 
 	for (unsigned char* p = textStart;
@@ -26597,6 +26957,12 @@ static void SpideyInstallRetailInputCompat()
 				(void*)&SpideyCompatRetailPollMouse;
 			mouseCalls++;
 		}
+		else if (target == retailController)
+		{
+			wrapper =
+				(void*)&SpideyCompatRetailPollController;
+			controllerCalls++;
+		}
 		else
 		{
 			continue;
@@ -26622,9 +26988,10 @@ static void SpideyInstallRetailInputCompat()
 	{
 		fprintf(
 			f,
-			"retail_input_compat installed keyboard_calls=%d mouse_calls=%d keyboard=0x00501B80 mouse=0x00501CC0 hwnd=0x006B7A60\n",
+			"retail_input_compat installed keyboard_calls=%d mouse_calls=%d controller_calls=%d keyboard=0x00501B80 mouse=0x00501CC0 controller=0x00501E50 hwnd=0x006B7A60 policy=controller_unplug_nonfatal_hot_rebuild\n",
 			keyboardCalls,
-			mouseCalls);
+			mouseCalls,
+			controllerCalls);
 		fclose(f);
 	}
 

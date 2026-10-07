@@ -17510,3 +17510,152 @@ Validation:
 - forced-clean matching VC6 build: PASS
 
 The post-drop type-304 thug AI freeze fix remains unchanged.
+
+
+## 2026-10-07 — Controller power-off crash: DirectInput hot-unplug support
+
+### Live crash evidence
+
+Runtime revision:
+
+`d1fdb316e630ae5412d912f417b584f8a0ceaa35`
+
+The game exited immediately after the controller was powered off.
+
+Final high-signal log sequence:
+
+`[DXERROR] DI error=0x80040209 file=...DXInput.cpp line=746 caller_return=0x00501EDA call_site=0x00501ED5`
+
+followed by teardown-side:
+
+`[DXERROR] D3D error=0x0000033B ... DXinit.cpp line=1185`
+
+and final process exit:
+
+`[SESSION] exit_code=-2147220983`
+
+Signed exit code `-2147220983` is exactly HRESULT:
+
+`0x80040209 = DIERR_UNPLUGGED`.
+
+Therefore:
+- root cause is legacy DirectInput controller hot-unplug handling;
+- the D3D error is teardown fallout, not the initiating fault;
+- this is not primarily an overlay-rendering crash.
+
+### Retail DXINPUT_PollController root cause
+
+Retail:
+
+`DXINPUT_PollController @ 0x00501E50`
+
+does:
+
+1. `IDirectInputDevice8::Poll`;
+2. on retail-recognized lost/not-acquired HRESULTs, calls `Acquire`;
+3. if `Acquire` returns a failure other than `DIERR_OTHERAPPHASPRIO`, calls:
+   `displayDIError @ 0x004FC240`
+   at callsite `0x00501ED5`;
+4. if HRESULT is still negative, enters the retail fatal/error-exit path.
+
+When the controller powers off, DirectInput returns:
+
+`DIERR_UNPLUGGED = 0x80040209`
+
+which retail does not treat as a recoverable optional-device loss.
+
+### Compatibility gap
+
+The project already owned all direct calls to:
+- `DXINPUT_PollKeyboard @ 0x00501B80`;
+- `DXINPUT_PollMouse @ 0x00501CC0`.
+
+It did **not** own:
+- `DXINPUT_PollController @ 0x00501E50`.
+
+So controller disconnects still executed untouched retail fatal behavior.
+
+### Fix implemented
+
+Added:
+
+`SpideyCompatRetailPollController`
+
+and redirected every direct call to retail `0x00501E50` through it.
+
+The compatibility poll reproduces retail controller behavior:
+- foreground gating;
+- `Poll()`;
+- recoverable `Acquire()`;
+- buffered `GetDeviceData()`;
+- 32-byte retail controller button transition array at `0x006B7A34`;
+- X axis / Y axis / POV updates;
+- retail button offset range based on `0x006B7A58`;
+- normal return value semantics:
+  - `1` = controller frame available;
+  - `0` = no controller frame.
+
+### Recoverable failures
+
+These are now treated as nonfatal controller loss:
+- `DIERR_INPUTLOST`;
+- `DIERR_NOTACQUIRED`;
+- `DIERR_UNPLUGGED`;
+- `DIERR_OTHERAPPHASPRIO`.
+
+On disconnect:
+- X/Y are zeroed;
+- POV is reset to -1;
+- retail controller button state is cleared;
+- game continues on keyboard/mouse instead of exiting.
+
+Unknown controller `GetDeviceData` failures are also controller-local/nonfatal; they disable only that controller frame.
+
+### Hot replug
+
+The modern `input11` backend already independently detects XInput connection transitions.
+
+It is now used as a reconnect signal for the legacy DirectInput controller path.
+
+If:
+- legacy DirectInput controller remains dead/disconnected;
+- `input11` reports a controller is connected;
+- at least 60 controller polls have elapsed since the previous rebuild attempt;
+
+then the compatibility layer:
+1. releases stale force-feedback effect `0x006B7A68`;
+2. clears FF-active flag `0x006B7928`;
+3. unacquires/releases stale legacy controller object `0x006B7A2C`;
+4. clears legacy button count/state;
+5. calls retail `DXINPUT_SetupController @ 0x00501890` to enumerate/configure a fresh DirectInput device.
+
+This preserves existing legacy button mappings while allowing power-off/power-on without restarting the game.
+
+### Telemetry
+
+Installer now reports:
+
+`retail_input_compat installed ... controller_calls=<n> ... controller=0x00501E50 policy=controller_unplug_nonfatal_hot_rebuild`
+
+Runtime transitions log:
+
+`controller_hotplug event=disconnect ...`
+
+`controller_hotplug event=rebuild ...`
+
+`controller_hotplug event=reconnected ...`
+
+Fields include:
+- Poll HRESULT;
+- Acquire HRESULT;
+- setup result;
+- current retail controller pointer;
+- input11 connection state;
+- disconnect/reconnect counters.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+Existing camera, bomb-timer, post-drop thug-AI, and BaddyList compatibility fixes remain unchanged.
