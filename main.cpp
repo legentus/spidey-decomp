@@ -6238,6 +6238,459 @@ static void SpideyLogChaseCameraAI20Stats()
 	fclose(f);
 }
 
+// Ceiling drop-attack hang trace.
+//
+// Runtime has now shown two distinct post-smash freezes:
+//   - one pathological repeated-smash landing that left state 0x01000000;
+//   - one completely healthy 133 -> 134 -> stand -> run recovery that still
+//     froze a few ticks later.
+//
+// The second case means the busy spin can live later in the same Logic pass,
+// including player physics/hit handling or one of Logic's body-list dispatches.
+// Arm a short, high-signal trace whenever ceiling-smash animation 133 is seen.
+// The trace is diagnostic only: wrappers forward unchanged to retail.
+static int gSpideyDropHangTraceArmed = 0;
+static unsigned long gSpideyDropHangTraceUntilTick = 0;
+static unsigned long gSpideyDropHangTraceSequence = 0;
+static unsigned long gSpideyDropHangTraceGeneration = 0;
+static unsigned long gSpideyDropHangTraceLogicPass = 0;
+
+static unsigned long SpideyDropHangTraceTick()
+{
+	return
+		(unsigned long)
+		*(volatile long*)0x006B4CA8;
+}
+
+static CPlayer* SpideyDropHangTracePlayer()
+{
+	CPlayer* player =
+		0;
+	__try
+	{
+		player =
+			*(CPlayer**)0x006A9038;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		player =
+			0;
+	}
+	return player;
+}
+
+static int SpideyDropHangTraceIsActive()
+{
+	if (!gSpideyDropHangTraceArmed)
+		return 0;
+
+	const unsigned long tick =
+		SpideyDropHangTraceTick();
+
+	if ((long)(
+			tick -
+			gSpideyDropHangTraceUntilTick) > 0)
+	{
+		gSpideyDropHangTraceArmed =
+			0;
+		return 0;
+	}
+
+	return 1;
+}
+
+static void SpideyDropHangTraceLog(
+		const char* eventName,
+		CPlayer* player,
+		CBody** list,
+		long value)
+{
+	if (!SpideyDropHangTraceIsActive())
+		return;
+
+	unsigned long listHead =
+		0;
+	int listReadOk =
+		0;
+
+	if (list)
+	{
+		__try
+		{
+			listHead =
+				(unsigned long)(*list);
+			listReadOk =
+				1;
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			listReadOk =
+				0;
+		}
+	}
+
+	++gSpideyDropHangTraceSequence;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"drop_hang_trace seq=%lu generation=%lu logic_pass=%lu event=%s tick=%lu player=0x%08lX state=0x%08lX anim=%u frame=%d finished=%u collision=0x%08lX wall=%u ceiling=%u pos=%ld,%ld,%ld vel=%ld,%ld,%ld list=0x%08lX list_head=0x%08lX list_read=%d value=%ld\n",
+		gSpideyDropHangTraceSequence,
+		gSpideyDropHangTraceGeneration,
+		gSpideyDropHangTraceLogicPass,
+		eventName ?
+			eventName :
+			"unknown",
+		SpideyDropHangTraceTick(),
+		(unsigned long)player,
+		player ?
+			(unsigned long)player->field_E1C :
+			0UL,
+		player ?
+			(unsigned int)player->mAnim :
+			0U,
+		player ?
+			(int)player->mFrame :
+			0,
+		player ?
+			(unsigned int)player->mAnimFinished :
+			0U,
+		player ?
+			(unsigned long)player->mCollision :
+			0UL,
+		player ?
+			(unsigned int)player->field_8E8 :
+			0U,
+		player ?
+			(unsigned int)player->field_8E9 :
+			0U,
+		player ?
+			(long)player->mPos.vx :
+			0L,
+		player ?
+			(long)player->mPos.vy :
+			0L,
+		player ?
+			(long)player->mPos.vz :
+			0L,
+		player ?
+			(long)player->mVel.vx :
+			0L,
+		player ?
+			(long)player->mVel.vy :
+			0L,
+		player ?
+			(long)player->mVel.vz :
+			0L,
+		(unsigned long)list,
+		listHead,
+		listReadOk,
+		value);
+	fclose(f);
+}
+
+static void SpideyDropHangTraceUpdateArmBeforeLogic()
+{
+	CPlayer* player =
+		SpideyDropHangTracePlayer();
+	const unsigned long tick =
+		SpideyDropHangTraceTick();
+
+	if (player &&
+		player->field_E1C ==
+			0x01000000 &&
+		player->mAnim ==
+			133)
+	{
+		const int wasArmed =
+			SpideyDropHangTraceIsActive();
+
+		if (!wasArmed)
+		{
+			gSpideyDropHangTraceArmed =
+				1;
+			++gSpideyDropHangTraceGeneration;
+			gSpideyDropHangTraceLogicPass =
+				0;
+			gSpideyDropHangTraceUntilTick =
+				tick +
+				240;
+
+			SpideyDropHangTraceLog(
+				"arm_ceiling_smash",
+				player,
+				0,
+				240);
+		}
+		else
+		{
+			// Keep four seconds of canonical 60-Hz trace after the last
+			// observed smash frame, without logging a duplicate arm event.
+			gSpideyDropHangTraceUntilTick =
+				tick +
+				240;
+		}
+
+		return;
+	}
+
+	if (gSpideyDropHangTraceArmed &&
+		(long)(
+			tick -
+			gSpideyDropHangTraceUntilTick) > 0)
+	{
+		gSpideyDropHangTraceArmed =
+			0;
+	}
+}
+
+static void SpideyDropHangTraceRetailObAI(
+		CBody** list,
+		int arg)
+{
+	typedef void (__cdecl *SpideyDropHangRetailObAIFn)(
+		CBody**,
+		int);
+
+	CPlayer* player =
+		SpideyDropHangTracePlayer();
+	const int trace =
+		SpideyDropHangTraceIsActive();
+
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"ob_ai_enter",
+			player,
+			list,
+			arg);
+	}
+
+	SpideyDropHangRetailObAIFn retail =
+		(SpideyDropHangRetailObAIFn)
+		0x00460FC0;
+	retail(
+		list,
+		arg);
+
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"ob_ai_return",
+			player,
+			list,
+			arg);
+	}
+}
+
+static void __cdecl SpideyDropHangTraceObAI(
+		CBody** list,
+		int arg)
+{
+	SpideyDropHangTraceRetailObAI(
+		list,
+		arg);
+}
+
+static void __fastcall SpideyDropHangTraceDoPhysics(
+		CPlayer* player,
+		void*)
+{
+	typedef void (__fastcall *SpideyDropHangRetailDoPhysicsFn)(
+		CPlayer*,
+		void*);
+
+	const int trace =
+		SpideyDropHangTraceIsActive();
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"player_do_physics_enter",
+			player,
+			0,
+			0);
+	}
+
+	SpideyDropHangRetailDoPhysicsFn retail =
+		(SpideyDropHangRetailDoPhysicsFn)
+		0x00466CE0;
+	retail(
+		player,
+		0);
+
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"player_do_physics_return",
+			player,
+			0,
+			0);
+	}
+}
+
+static int __fastcall SpideyDropHangTraceCheckWebShot(
+		CPlayer* player,
+		void*)
+{
+	typedef int (__fastcall *SpideyDropHangRetailCheckWebShotFn)(
+		CPlayer*,
+		void*);
+
+	const int trace =
+		SpideyDropHangTraceIsActive();
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"check_web_shot_enter",
+			player,
+			0,
+			0);
+	}
+
+	SpideyDropHangRetailCheckWebShotFn retail =
+		(SpideyDropHangRetailCheckWebShotFn)
+		0x004C2090;
+	const int result =
+		retail(
+			player,
+			0);
+
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"check_web_shot_return",
+			player,
+			0,
+			result);
+	}
+
+	return result;
+}
+
+static int __fastcall SpideyDropHangTracePlayerHit(
+		CPlayer* player,
+		void*,
+		SHitInfo* hit)
+{
+	typedef int (__fastcall *SpideyDropHangRetailPlayerHitFn)(
+		CPlayer*,
+		void*,
+		SHitInfo*);
+
+	const int trace =
+		SpideyDropHangTraceIsActive();
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"player_hit_enter",
+			player,
+			0,
+			(long)hit);
+	}
+
+	SpideyDropHangRetailPlayerHitFn retail =
+		(SpideyDropHangRetailPlayerHitFn)
+		0x004BD890;
+	const int result =
+		retail(
+			player,
+			0,
+			hit);
+
+	if (trace)
+	{
+		SpideyDropHangTraceLog(
+			"player_hit_return",
+			player,
+			0,
+			result);
+	}
+
+	return result;
+}
+
+static int SpideyInstallDropHangTraceDiagnostics()
+{
+	static const unsigned long obAiCalls[] =
+	{
+		0x004554A8UL,
+		0x004554B9UL,
+		0x004554C5UL,
+		0x004554D1UL,
+		0x004554DDUL,
+		0x004554E9UL
+	};
+
+	int listHooks =
+		0;
+	for (unsigned int i = 0;
+			i < sizeof(obAiCalls) / sizeof(obAiCalls[0]);
+			++i)
+	{
+		if (SpideyPatchDirectCall(
+				obAiCalls[i],
+				0x00460FC0,
+				(void*)&SpideyDropHangTraceObAI,
+				"drop_hang_ob_ai"))
+		{
+			++listHooks;
+		}
+	}
+
+	const int physicsHook =
+		SpideyPatchDirectCall(
+			0x004B1B18,
+			0x00466CE0,
+			(void*)&SpideyDropHangTraceDoPhysics,
+			"drop_hang_player_do_physics");
+
+	const int webShotHook =
+		SpideyPatchDirectCall(
+			0x004B2309,
+			0x004C2090,
+			(void*)&SpideyDropHangTraceCheckWebShot,
+			"drop_hang_check_web_shot");
+
+	const unsigned long originalHit =
+		0x004BD890UL;
+	const unsigned long replacementHit =
+		(unsigned long)
+		(void*)&SpideyDropHangTracePlayerHit;
+	const int hitHook =
+		SpideyPatchBytes(
+			0x0053C470,
+			(const unsigned char*)&originalHit,
+			(const unsigned char*)&replacementHit,
+			sizeof(originalHit),
+			"drop_hang_player_hit_vtable");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"drop_hang_trace_install list_hooks=%d expected_list_hooks=6 physics_hook=%d physics_call=0x004B1B18 web_shot_hook=%d web_shot_call=0x004B2309 hit_hook=%d hit_vtable=0x0053C470 baddy_and_control_lists=shared_chase_wrapper trace_window_ticks=240 policy=telemetry_only_after_ceiling_smash\n",
+			listHooks,
+			physicsHook,
+			webShotHook,
+			hitHook);
+		fclose(f);
+	}
+
+	return
+		listHooks == 6 &&
+		physicsHook &&
+		webShotHook &&
+		hitHook;
+}
+
 // Chase Venom world-actor / script-controller cadence compatibility.
 //
 // Retail Logic updates the two coupled lists back-to-back:
@@ -6289,10 +6742,6 @@ static void __cdecl SpideyChaseWorldAI20Hz(
 		CBody** list,
 		int arg)
 {
-	SpideyRetailObAIFn retail =
-		(SpideyRetailObAIFn)
-		0x00460FC0;
-
 	const unsigned long listAddress =
 		(unsigned long)list;
 	const int isBaddyList =
@@ -6328,7 +6777,7 @@ static void __cdecl SpideyChaseWorldAI20Hz(
 			SpideyResetChaseWorldAI20State();
 		}
 
-		retail(
+		SpideyDropHangTraceRetailObAI(
 			list,
 			arg);
 		return;
@@ -6388,7 +6837,7 @@ static void __cdecl SpideyChaseWorldAI20Hz(
 		return;
 	}
 
-	retail(
+	SpideyDropHangTraceRetailObAI(
 		list,
 		arg);
 
@@ -8793,10 +9242,33 @@ static int __fastcall SpideyModernAimCheckForwards(
 
 	if (!effectiveAim)
 	{
-		return retail(
-			player,
-			0,
-			allowTurn);
+		const int trace =
+			SpideyDropHangTraceIsActive();
+		if (trace)
+		{
+			SpideyDropHangTraceLog(
+				"check_forwards_enter",
+				player,
+				0,
+				allowTurn);
+		}
+
+		const int result =
+			retail(
+				player,
+				0,
+				allowTurn);
+
+		if (trace)
+		{
+			SpideyDropHangTraceLog(
+				"check_forwards_return",
+				player,
+				0,
+				result);
+		}
+
+		return result;
 	}
 
 	const int movementHeld =
@@ -8866,6 +9338,17 @@ static int __fastcall SpideyModernAimCheckForwards(
 	int result =
 		0;
 
+	const int dropHangTrace =
+		SpideyDropHangTraceIsActive();
+	if (dropHangTrace)
+	{
+		SpideyDropHangTraceLog(
+			"check_forwards_enter",
+			player,
+			0,
+			allowTurn);
+	}
+
 	__try
 	{
 		result =
@@ -8881,6 +9364,15 @@ static int __fastcall SpideyModernAimCheckForwards(
 			input[0x40] =
 				savedAimControl;
 		}
+	}
+
+	if (dropHangTrace)
+	{
+		SpideyDropHangTraceLog(
+			"check_forwards_return",
+			player,
+			0,
+			result);
 	}
 
 	++gSpideyModernAimMovementCalls;
@@ -20780,7 +21272,18 @@ static void __cdecl SpideyCompatLogicTiming()
 		(SpideyRetailLogicFn)0x00455400;
 
 	SpideyRecordChaseLogicScheduler();
+	SpideyDropHangTraceUpdateArmBeforeLogic();
 	SpideyFixRepeatedSmashRecoveryBeforeLogic();
+
+	if (SpideyDropHangTraceIsActive())
+	{
+		++gSpideyDropHangTraceLogicPass;
+		SpideyDropHangTraceLog(
+			"logic_enter",
+			SpideyDropHangTracePlayer(),
+			0,
+			0);
+	}
 
 	LARGE_INTEGER retailStart;
 	LARGE_INTEGER retailEnd;
@@ -20789,6 +21292,15 @@ static void __cdecl SpideyCompatLogicTiming()
 	retail();
 	QueryPerformanceCounter(
 		&retailEnd);
+
+	if (SpideyDropHangTraceIsActive())
+	{
+		SpideyDropHangTraceLog(
+			"logic_return",
+			SpideyDropHangTracePlayer(),
+			0,
+			0);
+	}
 
 	SpideyTracePlayerStateAfterLogic();
 
@@ -25477,6 +25989,7 @@ void game_patches(void)
 	SpideyInstallModernCameraCompat();
 	SpideyInstallModernManualAimCompat();
 	SpideyInstallCameraWebTargetingCompat();
+	SpideyInstallDropHangTraceDiagnostics();
 	SpideyInstallQuadBitCameraAnchorCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();

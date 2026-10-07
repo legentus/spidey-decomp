@@ -16922,3 +16922,207 @@ A final forced-clean matching VC6 build was produced with that behavior commit s
 - behavior commit string present in DLL: PASS
 
 The frozen diagnostic process may now be terminated. Use the normal `TEST_LATEST_BUILD.bat` workflow to install and run this fix candidate.
+
+
+## 2026-10-07 — Second ceiling drop-attack freeze: healthy landing, post-landing Logic hang trace
+
+### Frozen runtime analyzed live
+
+Runtime revision:
+
+`a83e057881b51db2666e426f4516882ae286dffa`
+
+This runtime contains behavior fix:
+
+`c245b3abce64619ca22394fe6841f3968e7727dd` — repeated ceiling-smash bad-recovery repair.
+
+The process froze again after a ceiling drop attack and remained open for live analysis.
+
+### Important result: previous fix did NOT miss its condition
+
+No:
+
+`repeated_smash_recovery ...`
+
+marker appears in this run.
+
+The final drop attack is:
+
+- tick 5386:
+  `state=0x01000000 anim=133 ... ceiling=1`
+- tick 5400:
+  `state=0x01000000 anim=133 frame=5 finished=1 ... collision=0`
+- tick 5410:
+  `state=0x00000001 anim=134 ... collision=0x2`
+- tick 5418:
+  `state=0x00000010 anim=1 ... collision=0x2`
+- tick 5419:
+  both R1 and R2 Zip checks return normally while still in `state=0x10 anim=1`.
+
+Therefore:
+
+- the smash state transitioned back to stand normally;
+- animation 134 itself completed the expected landing handoff;
+- the player entered ordinary run state;
+- the `field_8DC=0x29A` pathological tuple did not occur;
+- the prior `c245b3ab` fix remains valid for the first freeze pattern but is not the whole story.
+
+### Same-run comparison
+
+This same runtime session contains several earlier successful ceiling smash/drop attacks:
+
+- tick 2433 -> healthy 134 recovery at 2454;
+- tick 2566 -> healthy 134 recovery at 2578;
+- tick 2771 -> healthy 134 recovery at 2795;
+- tick 3374 -> healthy 134 recovery at 3398;
+- final attack tick 5386 -> healthy 134 recovery at 5410, then freeze shortly after ordinary run state resumed.
+
+Healthy and frozen attacks therefore share the visible:
+
+`133 -> 134 -> state 1 -> state 0x10`
+
+sequence.
+
+The failure is now classified as a **post-landing Logic busy-spin**, not necessarily a state-transition failure.
+
+### Stronger Logic-level hypothesis
+
+Retail `Logic @ 0x00455400` ordering is:
+
+1. player `Ob_AI` at `0x004554A8`;
+2. additional world/body lists;
+3. `BaddyList` at `0x004554F5`;
+4. `ControlBaddyList` at `0x00455501`;
+5. pending triggers and later world/camera work.
+
+The last live telemetry before the freeze comes from inside the player AI and shows normal state.
+
+A one-core spin can therefore still be:
+
+- inside the next player update;
+- inside player `DoPhysics`;
+- inside `CPlayer::Hit`;
+- inside post-R2 `CheckWebShot` / `CheckForwards`;
+- or after the player returns, while Logic iterates a world/body/baddy list altered by the drop attack.
+
+### New behavior-neutral armed trace
+
+Added a short diagnostic window that arms when:
+
+`state=0x01000000 && anim=133`
+
+is observed before Logic.
+
+The window remains active for 240 canonical 60-Hz ticks after the last observed smash frame.
+
+New marker family:
+
+`drop_hang_trace ...`
+
+Each record includes:
+
+- sequence;
+- generation;
+- Logic pass;
+- canonical tick;
+- player state/animation/frame;
+- collision;
+- wall/ceiling flags;
+- player position/velocity;
+- list pointer and current list head where applicable.
+
+### Outer Logic breadcrumbs
+
+While armed:
+
+- `logic_enter`
+- `logic_return`
+
+If the next freeze ends with `logic_enter` and no `logic_return`, the spin is inside retail Logic.
+
+### Logic body-list breadcrumbs
+
+Direct `Ob_AI` calls in Logic are wrapped for telemetry at:
+
+- `0x004554A8` — player list;
+- `0x004554B9`;
+- `0x004554C5`;
+- `0x004554D1`;
+- `0x004554DD`;
+- `0x004554E9`.
+
+The existing Chase cadence wrapper continues to own:
+
+- `0x004554F5` — BaddyList;
+- `0x00455501` — ControlBaddyList.
+
+Its actual retail `Ob_AI` calls are now routed through the same trace helper, without changing cadence decisions.
+
+Markers:
+
+- `ob_ai_enter`
+- `ob_ai_return`
+
+The `list=...` field identifies the exact list. A final unmatched `ob_ai_enter` will identify the spinning list.
+
+### Player-path breadcrumbs
+
+Added behavior-neutral wrappers around:
+
+- player `DoPhysics` direct call:
+  `0x004B1B18 -> 0x00466CE0`
+  - `player_do_physics_enter`
+  - `player_do_physics_return`
+
+- post-R2 ground-branch `CheckWebShot`:
+  `0x004B2309 -> 0x004C2090`
+  - `check_web_shot_enter`
+  - `check_web_shot_return`
+
+- existing modern `CheckForwards` wrapper:
+  - `check_forwards_enter`
+  - `check_forwards_return`
+
+- `CPlayer::Hit` vtable slot:
+  `0x0053C470 -> retail 0x004BD890`
+  - `player_hit_enter`
+  - `player_hit_return`
+
+All wrappers forward arguments/results unchanged.
+
+### Installer marker
+
+`drop_hang_trace_install ... policy=telemetry_only_after_ceiling_smash`
+
+Expected:
+
+- six direct non-baddy Logic list hooks;
+- player physics hook;
+- ground-branch CheckWebShot hook;
+- player Hit vtable hook;
+- Baddy/Control lists reported as using the shared Chase wrapper.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+### Next reproduction
+
+1. use normal `TEST_LATEST_BUILD.bat`;
+2. enter a fight;
+3. perform ceiling drop attacks normally;
+4. if the game freezes, leave it frozen;
+5. pull the final `drop_hang_trace` lines.
+
+Interpretation should be immediate:
+
+- `logic_enter` only -> inside Logic;
+- `ob_ai_enter list=...` without matching return -> exact spinning body list;
+- `player_do_physics_enter` only -> player physics/collision;
+- `player_hit_enter` only -> player damage/hit handler;
+- `check_web_shot_enter` only -> CheckWebShot;
+- `check_forwards_enter` only -> locomotion path;
+- all player/list events return but no `logic_return` -> later Logic subsystem after list dispatch.
+
+The validated first-person camera behavior is unchanged.
