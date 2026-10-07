@@ -246,3 +246,111 @@ Run:
 For the highest-value test, simply load **Hostage Situation** and let its opening sequence run. No zip button input is required.
 
 If Spider-Man remains suspended, exit or press Space afterward only if needed to regain control. The new `l1a3_startup` records should identify the exact broken handoff without requiring any additional manual actions.
+
+
+## 2026-10-07 — Generic web-zip compatibility candidate: stale modern-aim gate
+
+### Direction
+The Hostage Situation opening remains a useful automatic reproducer, but this batch deliberately targets **generic web-zipping**, not L1A3-specific behavior.
+
+Static RE now proves:
+- manual R1/R2 web-zip and Hostage Situation's synthesized ZIPLINE action converge on the same retail zip starters;
+- retail R1 is `0x004C0EE0`;
+- retail R2 is `0x004C1460`;
+- both reject immediately before raycast when `player->field_8EA != 0`;
+- `field_8EA` is the retail lookaround/manual-aim ownership flag;
+- `EnterLookaroundMode @ 0x004C3580` is the only relevant setter and sets it to 1;
+- retail lookaround camera mode is 7 at `0x004C370B`;
+- our modern manual-aim compatibility intentionally patches that visible camera mode from 7 to 3 so aiming remains in the modern third-person camera.
+
+The actual zip geometry is player/surface owned:
+- R1 ray direction uses `field_C84`, the player's local surface/up basis;
+- `CheckZipWebAvailability` uses `field_A8`, the surface normal Spider-Man is aligned to;
+- the render/DX11 camera does not own either vector.
+
+Therefore DX11 camera matrices are not directly involved in zip collision/raycast geometry.
+
+### Other shared gates checked
+R1's early gates are:
+1. `field_8EA == 0`
+2. no held object
+3. player byte `+0x550 == 0`
+4. processed ZIPLINE held record `input+0x60 != 0`
+
+The `+0x550` latch is transient and is cleared early in `SpideyAI0` whenever the swing record `input+0x70` is not held. It is not a good candidate for unconditional bypass.
+
+Input update order is correct:
+- `ReadAnalogueInput @ 0x004B1CF9` runs before every R1/R2 callsite;
+- Hostage Situation's synthesized action 6 therefore exists in time for the same-frame retail R1 checks.
+
+The scripted timing is also already elapsed-time based:
+- `CScriptOnlyBaddy::AI` subtracts `field_80` from delay `+0x230`;
+- synthesized-input worker type 3 subtracts `field_80` from its duration.
+So the automatic ZIPLINE pulse is not simply 3x too short at native 60 Hz.
+
+### Candidate fix
+The existing R1/R2 diagnostic wrappers still call the untouched retail functions.
+
+Added a compatibility-only stale-aim repair before each retail call:
+
+`SpideyZipClearStaleModernAimGate`
+
+It clears `field_8EA` only when all of these are true:
+- `field_8EA != 0`;
+- processed real aim control at `input+0x40` is **not held**;
+- current camera mode is modern mode 3 / `CAMERAMODE_DEMO`;
+- the modern aimed-locomotion sidecar does **not** currently own the player.
+
+This combination represents a modern-camera-specific stale retail aim bit:
+- genuine retail lookaround would use camera mode 7;
+- genuine active modern aim still has the aim control held or its sidecar active.
+
+Behavior:
+- temporarily clear stale `field_8EA`;
+- call retail R1/R2 unchanged;
+- if retail zip still fails, restore `field_8EA=1`;
+- if retail succeeds and enters the canonical zip path, keep it zero because retail itself expects zip to start from non-lookaround state.
+
+No held-object, swing-latch, raycast, face-filter, target, web allocation, animation or physics condition is bypassed.
+
+Telemetry:
+- `web_zip_compat event=clear_stale_modern_aim ...`
+- `web_zip_compat event=stale_aim_zip_success ...`
+
+Existing direct traces remain:
+- all 6 R1 callsites;
+- all 5 R2 callsites;
+- both `CheckZipWebAvailability` callsites;
+- `player_state_trace`;
+- `web_zip_physics`;
+- exact L1A3 startup controller / synth-switch tracing.
+
+### Static geometry conclusion
+`field_A8` is explicitly documented/reconstructed in player crawling physics as the surface normal Spider-Man is aligned to.
+`field_C84` is used throughout crawling/ground probing as the player's local away-from-surface/up basis.
+
+Modern camera code does not author these fields.
+
+This makes a renderer/DX11 projection problem unlikely for web-zip initiation.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+- `Release/spider.dll`: 929,792 bytes
+- pre-commit SHA-256:
+  `3750fc34b2953a28f49e96a76f3b0178de9b279570fa5dacf99e296e1f6e28f6`
+
+### Next runtime
+Run:
+`F:\Spider-Man 2000 Recomp\project main\TEST_LATEST_BUILD.bat`
+
+Best test:
+1. Load **Hostage Situation** and let the opening automatic zip run without pressing zip.
+2. If Spider-Man still hangs, press Space only afterward if needed to regain control.
+3. Once controllable, try ordinary web-zip several times in known-valid geometry.
+
+Interpretation:
+- if `web_zip_compat ... stale_aim_zip_success` appears and zip works, modern manual-aim ownership was the shared blocker;
+- if stale-aim compatibility never fires, inspect `web_zip_check` for which gate actually blocks;
+- if R1 reaches `web_zip_availability` but rejects, the problem is geometric/collision rather than camera ownership;
+- if availability succeeds and state becomes `0x40000` but travel still fails, continue in the already-instrumented zip animation/physics path.

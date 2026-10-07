@@ -18797,6 +18797,115 @@ static unsigned long gSpideyZipR1LastSignature = 0xFFFFFFFFUL;
 static unsigned long gSpideyZipR2LastSignature = 0xFFFFFFFFUL;
 static unsigned long gSpideyZipAvailabilityCalls = 0;
 static unsigned long gSpideyZipAvailabilityStored = 0;
+static unsigned long gSpideyZipStaleAimClears = 0;
+static unsigned long gSpideyZipStaleAimSuccess = 0;
+static unsigned long gSpideyZipStaleAimRestores = 0;
+static unsigned long gSpideyZipStaleAimLogs = 0;
+
+static int SpideyZipClearStaleModernAimGate(
+		CPlayer* player,
+		const SpideyZipButtonRecordSnapshot& aimButton)
+{
+	if (!player ||
+		!player->field_8EA ||
+		aimButton.held)
+	{
+		return 0;
+	}
+
+	// Retail lookaround uses camera mode 7 while field_8EA is active.
+	// Our modern manual-aim compatibility deliberately keeps the visible
+	// third-person camera in mode 3 instead. If the raw retail aim bit
+	// survives after the actual aim control has been released, untouched
+	// R1/R2 zip code rejects immediately on field_8EA before it can raycast.
+	//
+	// Only treat that modern-only combination as stale. Do not interfere
+	// with a live modern-aim sidecar or with genuine retail lookaround.
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+
+	if (!camera ||
+		camera->mCameraMode !=
+			CAMERAMODE_DEMO ||
+		gSpideyModernAimLocomotionMaskedPlayer ==
+			player)
+	{
+		return 0;
+	}
+
+	player->field_8EA =
+		0;
+	++gSpideyZipStaleAimClears;
+
+	if (gSpideyZipStaleAimLogs < 64)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"web_zip_compat event=clear_stale_modern_aim count=%lu tick=%ld state=0x%08lX anim=%u camera_mode=%d aim_held=%u modern_camera_active=%d\n",
+				gSpideyZipStaleAimClears,
+				(long)*(volatile long*)0x006B4CA8,
+				(unsigned long)player->field_E1C,
+				(unsigned int)player->mAnim,
+				(int)camera->mCameraMode,
+				aimButton.held,
+				gSpideyModernCameraActive);
+			fclose(f);
+		}
+		++gSpideyZipStaleAimLogs;
+	}
+
+	return 1;
+}
+
+static void SpideyZipRestoreStaleModernAimGate(
+		CPlayer* player,
+		int cleared,
+		u8 retailResult)
+{
+	if (!player ||
+		!cleared)
+	{
+		return;
+	}
+
+	if (retailResult)
+	{
+		// Retail began zip from a state where field_8EA was expected to be
+		// zero. Preserve that canonical state for the subsequent 0x40000
+		// animation/physics path.
+		++gSpideyZipStaleAimSuccess;
+
+		if (gSpideyZipStaleAimLogs < 64)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"web_zip_compat event=stale_aim_zip_success success=%lu tick=%ld state=0x%08lX anim=%u\n",
+					gSpideyZipStaleAimSuccess,
+					(long)*(volatile long*)0x006B4CA8,
+					(unsigned long)player->field_E1C,
+					(unsigned int)player->mAnim);
+				fclose(f);
+			}
+			++gSpideyZipStaleAimLogs;
+		}
+
+		return;
+	}
+
+	player->field_8EA =
+		1;
+	++gSpideyZipStaleAimRestores;
+}
 
 static unsigned long SpideyBuildZipGateSignature(
 		CPlayer* player,
@@ -19012,10 +19121,21 @@ static u8 __fastcall SpideyTraceR1ZipCheck(
 			zipButton,
 			r2Button);
 
+	const int staleAimCleared =
+		SpideyZipClearStaleModernAimGate(
+			player,
+			aimButton);
+
 	const u8 result =
 		retail(
 			player,
 			0);
+
+	SpideyZipRestoreStaleModernAimGate(
+		player,
+		staleAimCleared,
+		result);
+
 	if (result)
 		++gSpideyZipR1Success;
 
@@ -19080,10 +19200,21 @@ static u8 __fastcall SpideyTraceR2ZipCheck(
 			zipButton,
 			r2Button);
 
+	const int staleAimCleared =
+		SpideyZipClearStaleModernAimGate(
+			player,
+			aimButton);
+
 	const u8 result =
 		retail(
 			player,
 			0);
+
+	SpideyZipRestoreStaleModernAimGate(
+		player,
+		staleAimCleared,
+		result);
+
 	if (result)
 		++gSpideyZipR2Success;
 
