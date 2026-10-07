@@ -7680,6 +7680,375 @@ static int SpideyInstallChaseSynth20HzCompat()
 		rampInstalled > 0;
 }
 
+typedef CBody* (__cdecl *SpideyRetailTrigCreateObjectFn)(
+		i32);
+typedef void (__fastcall *SpideyRetailScriptOnlyAIFn)(
+		CScriptOnlyBaddy*,
+		void*);
+typedef i16* (__fastcall *SpideyRetailSwitchSynthInputFn)(
+		CPlayer*,
+		void*,
+		i16*);
+
+static unsigned long gSpideyL1A3CreateTraceCalls = 0;
+static unsigned long gSpideyL1A3ScriptOnlyAiCalls = 0;
+static unsigned long gSpideyL1A3ScriptOnlyAiStored = 0;
+static unsigned long gSpideyL1A3SynthSwitchCalls = 0;
+static int gSpideyL1A3ScriptOnlyInstalled = 0;
+
+static int SpideyIsL1A3StartupControllerNode(
+		int node)
+{
+	return node == 66 ||
+		node == 132 ||
+		node == 134 ||
+		node == 165 ||
+		node == 214 ||
+		node == 395;
+}
+
+static CBody* __cdecl SpideyTraceL1A3TrigCreateObject(
+		i32 nodeIndex)
+{
+	SpideyRetailTrigCreateObjectFn retail =
+		(SpideyRetailTrigCreateObjectFn)0x004DEE70;
+
+	CBody* result =
+		retail(
+			nodeIndex);
+
+	if (SpideyRetailGetLevelId() == 0x103 &&
+		(SpideyIsL1A3StartupControllerNode(
+			nodeIndex) ||
+		 nodeIndex == 301))
+	{
+		++gSpideyL1A3CreateTraceCalls;
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"l1a3_startup event=create_object call=%lu tick=%ld node=%d result=0x%08lX item_type=%d expected_role=%s\n",
+				gSpideyL1A3CreateTraceCalls,
+				(long)*(volatile long*)0x006B4CA8,
+				nodeIndex,
+				(unsigned long)result,
+				result ?
+					(int)*(i16*)(
+						(unsigned char*)result +
+						0x38) :
+					-1,
+				nodeIndex == 301 ?
+					"powerup" :
+					"scriptonly_controller");
+			fclose(f);
+		}
+	}
+
+	return result;
+}
+
+static void __fastcall SpideyTraceL1A3ScriptOnlyAI(
+		CScriptOnlyBaddy* baddy,
+		void*)
+{
+	SpideyRetailScriptOnlyAIFn retail =
+		(SpideyRetailScriptOnlyAIFn)0x00407840;
+
+	++gSpideyL1A3ScriptOnlyAiCalls;
+
+	if (!baddy ||
+		SpideyRetailGetLevelId() != 0x103)
+	{
+		retail(
+			baddy,
+			0);
+		return;
+	}
+
+	int node = -1;
+	int active = 0;
+	int delay = 0;
+	int special = 0;
+	int raw238 = 0;
+	unsigned int command = 0xFFFF;
+	i16* script = 0;
+
+	__try
+	{
+		unsigned char* raw =
+			(unsigned char*)baddy;
+		node =
+			(int)*(i16*)(raw + 0x0DE);
+		active =
+			(int)*(unsigned char*)(raw + 0x20C);
+		delay =
+			*(i32*)(raw + 0x230);
+		special =
+			(int)*(unsigned char*)(raw + 0x234);
+		raw238 =
+			*(i32*)(raw + 0x238);
+		script =
+			*(i16**)(raw + 0x24C);
+		if (script)
+		{
+			command =
+				(unsigned int)(
+					*(u16*)script);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		node = -1;
+	}
+
+	if (SpideyIsL1A3StartupControllerNode(
+			node) &&
+		gSpideyL1A3ScriptOnlyAiStored < 512)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"l1a3_startup event=scriptonly_ai phase=pre call=%lu sample=%lu tick=%ld node=%d this=0x%08lX field80=%ld active=%d delay=%d special=%d raw238=%d script=0x%08lX command=0x%04X\n",
+				gSpideyL1A3ScriptOnlyAiCalls,
+				gSpideyL1A3ScriptOnlyAiStored,
+				(long)*(volatile long*)0x006B4CA8,
+				node,
+				(unsigned long)baddy,
+				(long)baddy->field_80,
+				active,
+				delay,
+				special,
+				raw238,
+				(unsigned long)script,
+				command);
+			fclose(f);
+			++gSpideyL1A3ScriptOnlyAiStored;
+		}
+	}
+
+	// Do not inspect baddy after retail AI returns. Terminal 0x4100 can mark
+	// the controller dead and its lifetime is owned by the retail list code.
+	retail(
+		baddy,
+		0);
+}
+
+static i16* __fastcall SpideyTraceL1A3SwitchToSynthesizedInput(
+		CPlayer* player,
+		void*,
+		i16* program)
+{
+	SpideyRetailSwitchSynthInputFn retail =
+		(SpideyRetailSwitchSynthInputFn)0x004BC1A0;
+
+	++gSpideyL1A3SynthSwitchCalls;
+
+	int words[16];
+	for (int i = 0;
+		 i < 16;
+		 ++i)
+	{
+		words[i] =
+			-1;
+	}
+
+	if (program)
+	{
+		__try
+		{
+			for (int i = 0;
+				 i < 16;
+				 ++i)
+			{
+				words[i] =
+					(int)(u16)program[i];
+			}
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
+	const int isL1A3 =
+		SpideyRetailGetLevelId() == 0x103;
+
+	if (isL1A3)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"l1a3_startup event=synth_switch phase=pre call=%lu tick=%ld player=0x%08lX program=0x%08lX words=%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X,%04X state=0x%08lX active=%d clock=%d parse=%d workers=0x%08lX aim=%u crawl=%u\n",
+				gSpideyL1A3SynthSwitchCalls,
+				(long)*(volatile long*)0x006B4CA8,
+				(unsigned long)player,
+				(unsigned long)program,
+				words[0] & 0xFFFF,
+				words[1] & 0xFFFF,
+				words[2] & 0xFFFF,
+				words[3] & 0xFFFF,
+				words[4] & 0xFFFF,
+				words[5] & 0xFFFF,
+				words[6] & 0xFFFF,
+				words[7] & 0xFFFF,
+				words[8] & 0xFFFF,
+				words[9] & 0xFFFF,
+				words[10] & 0xFFFF,
+				words[11] & 0xFFFF,
+				words[12] & 0xFFFF,
+				words[13] & 0xFFFF,
+				words[14] & 0xFFFF,
+				words[15] & 0xFFFF,
+				player ?
+					(unsigned long)player->field_E1C :
+					0,
+				player ?
+					(int)player->field_1AC :
+					-1,
+				player ?
+					*(i32*)((unsigned char*)player + 0x1B0) :
+					-1,
+				player ?
+					(int)*(unsigned char*)((unsigned char*)player + 0x1B4) :
+					-1,
+				player ?
+					(unsigned long)player->field_1BC :
+					0,
+				player ?
+					(unsigned int)player->field_8EA :
+					0,
+				player ?
+					(unsigned int)player->field_AD4 :
+					0);
+			fclose(f);
+		}
+	}
+
+	i16* result =
+		retail(
+			player,
+			0,
+			program);
+
+	if (isL1A3 &&
+		player)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"l1a3_startup event=synth_switch phase=post call=%lu tick=%ld result=0x%08lX state=0x%08lX active=%d clock=%d parse=%d script=0x%08lX workers=0x%08lX aim=%u crawl=%u\n",
+				gSpideyL1A3SynthSwitchCalls,
+				(long)*(volatile long*)0x006B4CA8,
+				(unsigned long)result,
+				(unsigned long)player->field_E1C,
+				(int)player->field_1AC,
+				*(i32*)((unsigned char*)player + 0x1B0),
+				(int)*(unsigned char*)((unsigned char*)player + 0x1B4),
+				(unsigned long)*(i16**)((unsigned char*)player + 0x1B8),
+				(unsigned long)player->field_1BC,
+				(unsigned int)player->field_8EA,
+				(unsigned int)player->field_AD4);
+			fclose(f);
+		}
+	}
+
+	return result;
+}
+
+static int SpideyInstallL1A3StartupTelemetry()
+{
+	const int createObjectInstalled =
+		SpideyPatchDirectCall(
+			0x004DFC7B,
+			0x004DEE70,
+			(void*)&SpideyTraceL1A3TrigCreateObject,
+			"l1a3_startup_create_object_trace");
+
+	const int synthSwitchInstalled =
+		SpideyPatchDirectCall(
+			0x004E1499,
+			0x004BC1A0,
+			(void*)&SpideyTraceL1A3SwitchToSynthesizedInput,
+			"l1a3_startup_synth_switch_trace");
+
+	void** vtable =
+		(void**)0x0053B2E8;
+	const unsigned long expectedAI =
+		0x00407840;
+	const unsigned long foundAI =
+		(unsigned long)vtable[2];
+
+	int scriptOnlyInstalled =
+		0;
+	if (foundAI ==
+		expectedAI)
+	{
+		DWORD oldProtect =
+			0;
+		if (VirtualProtect(
+				&vtable[2],
+				sizeof(void*),
+				PAGE_EXECUTE_READWRITE,
+				&oldProtect))
+		{
+			vtable[2] =
+				(void*)&SpideyTraceL1A3ScriptOnlyAI;
+
+			DWORD ignoredProtect =
+				0;
+			VirtualProtect(
+				&vtable[2],
+				sizeof(void*),
+				oldProtect,
+				&ignoredProtect);
+			FlushInstructionCache(
+				GetCurrentProcess(),
+				&vtable[2],
+				sizeof(void*));
+			scriptOnlyInstalled =
+				1;
+		}
+	}
+
+	gSpideyL1A3ScriptOnlyInstalled =
+		scriptOnlyInstalled;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"l1a3_startup_trace_install create=%d create_call=0x004DFC7B create_retail=0x004DEE70 scriptonly=%d vtable=0x0053B2E8 ai_slot=2 ai_retail=0x%08lX ai_found=0x%08lX synth=%d synth_call=0x004E1499 synth_retail=0x004BC1A0 level=0x103 policy=retail_behavior_unchanged_trace_node214_to_node234_c7\n",
+			createObjectInstalled,
+			scriptOnlyInstalled,
+			expectedAI,
+			foundAI,
+			synthSwitchInstalled);
+		fclose(f);
+	}
+
+	return createObjectInstalled &&
+		scriptOnlyInstalled &&
+		synthSwitchInstalled;
+}
+
 typedef void (__fastcall *SpideyRetailScorpionAIFn)(
 		CScorpion*,
 		void*);
@@ -7901,6 +8270,8 @@ static void SpideyInstallHighFpsTimingCompat()
 
 	int mysterioLaserInstalled =
 		0;
+	const int l1a3StartupTelemetryInstalled =
+		SpideyInstallL1A3StartupTelemetry();
 	const int scorpionAiTelemetryInstalled =
 		SpideyInstallScorpionAITelemetry();
 	const int mysterioSoftSpotHitTelemetryInstalled =
@@ -7980,8 +8351,9 @@ static void SpideyInstallHighFpsTimingCompat()
 	{
 		fprintf(
 			f,
-			"high_fps_compat mysterio_laser=%d scorpion_ai_telemetry=%d softspot_hit_telemetry=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_setpos_20hz_sampling\n",
+			"high_fps_compat mysterio_laser=%d l1a3_startup_telemetry=%d scorpion_ai_telemetry=%d softspot_hit_telemetry=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_setpos_20hz_sampling\n",
 			mysterioLaserInstalled,
+			l1a3StartupTelemetryInstalled,
 			scorpionAiTelemetryInstalled,
 			mysterioSoftSpotHitTelemetryInstalled,
 			mysterioLaserAttackTelemetryInstalled,
