@@ -16905,3 +16905,20 @@ Highest-value reproduction:
 6. continue fighting for several more target-loss/hit cycles.
 
 The validated wall/ceiling first-person camera remains unchanged.
+
+
+### Final revision-stamped repeated-smash fix artifact
+
+Behavior commit:
+
+`c245b3ab` — **Fix repeated ceiling smash combat freeze**
+
+A final forced-clean matching VC6 build was produced with that behavior commit stamped into `RUNTIME_VERSION`.
+
+`Release/spider.dll` verification:
+
+- size: 937,984 bytes
+- SHA-256: `f066829d80d96c60461f01b57f42a2541fc159d57cc280317cf525a970d8b2d7`
+- behavior commit string present in DLL: PASS
+
+The frozen diagnostic process may now be terminated. Use the normal `TEST_LATEST_BUILD.bat` workflow to install and run this fix candidate.
