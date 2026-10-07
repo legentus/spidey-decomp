@@ -7536,6 +7536,216 @@ static int SpideyInstallChaseSynth20HzCompat()
 		rampInstalled > 0;
 }
 
+typedef void (__fastcall *SpideyRetailScorpionAIFn)(
+		CScorpion*,
+		void*);
+
+static unsigned long gSpideyScorpionAiCalls =
+	0;
+static unsigned long gSpideyScorpionAiLogged =
+	0;
+static int gSpideyScorpionAiInstalled =
+	0;
+static CScorpion* gSpideyScorpionAiLastObject =
+	0;
+static int gSpideyScorpionAiLastState =
+	0x7FFFFFFF;
+static int gSpideyScorpionAiLastAnim =
+	-1;
+static int gSpideyScorpionAiLastHealth =
+	0x7FFFFFFF;
+
+static void SpideyLogScorpionAiSnapshot(
+		const char* phase,
+		CScorpion* scorpion,
+		unsigned long call,
+		unsigned long tick)
+{
+	if (!scorpion)
+		return;
+
+	const int state =
+		scorpion->field_31C.bothFlags;
+	const int stateAux =
+		scorpion->dumbAssPad;
+	const int anim =
+		(int)scorpion->mAnim;
+	const int frame =
+		(int)scorpion->mFrame;
+	const int finished =
+		(int)scorpion->mAnimFinished;
+	const int health =
+		(int)scorpion->mHealth;
+	const int field80 =
+		(int)scorpion->field_80;
+	const int field1F8 =
+		(int)scorpion->field_1F8;
+	const int fieldBD8 =
+		(int)scorpion->field_BD8;
+	const int fieldBF8 =
+		(int)scorpion->field_BF8;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"scorpion_ai phase=%s call=%lu tick=%lu this=0x%08lX state=0x%08X state_aux=0x%08X anim=%d frame=%d finished=%d health=%d field80=%d field1F8=%d fieldBD8=%d fieldBF8=%d target_handle=%08lX:%08lX pos=%ld,%ld,%ld\n",
+		phase ? phase : "unknown",
+		call,
+		tick,
+		(unsigned long)scorpion,
+		(unsigned int)state,
+		(unsigned int)stateAux,
+		anim,
+		frame,
+		finished,
+		health,
+		field80,
+		field1F8,
+		fieldBD8,
+		fieldBF8,
+		(unsigned long)scorpion->hCurrentTarget.pWhatever,
+		(unsigned long)scorpion->hCurrentTarget.Id,
+		(long)scorpion->mPos.vx,
+		(long)scorpion->mPos.vy,
+		(long)scorpion->mPos.vz);
+	fclose(f);
+	++gSpideyScorpionAiLogged;
+}
+
+static void __fastcall SpideyScorpionAITelemetry(
+		CScorpion* scorpion,
+		void*)
+{
+	SpideyRetailScorpionAIFn retail =
+		(SpideyRetailScorpionAIFn)0x00488590;
+
+	++gSpideyScorpionAiCalls;
+	const unsigned long call =
+		gSpideyScorpionAiCalls;
+	const unsigned long tick =
+		(unsigned long)*(volatile long*)0x006B4CA8;
+
+	if (!scorpion)
+	{
+		retail(
+			scorpion,
+			0);
+		return;
+	}
+
+	const int stateBefore =
+		scorpion->field_31C.bothFlags;
+	const int animBefore =
+		(int)scorpion->mAnim;
+	const int healthBefore =
+		(int)scorpion->mHealth;
+
+	const int changedBefore =
+		gSpideyScorpionAiLastObject !=
+			scorpion ||
+		gSpideyScorpionAiLastState !=
+			stateBefore ||
+		gSpideyScorpionAiLastAnim !=
+			animBefore ||
+		gSpideyScorpionAiLastHealth !=
+			healthBefore;
+
+	if (changedBefore ||
+		(call % 30UL) == 0)
+	{
+		SpideyLogScorpionAiSnapshot(
+			"pre",
+			scorpion,
+			call,
+			tick);
+	}
+
+	gSpideyScorpionAiLastObject =
+		scorpion;
+	gSpideyScorpionAiLastState =
+		stateBefore;
+	gSpideyScorpionAiLastAnim =
+		animBefore;
+	gSpideyScorpionAiLastHealth =
+		healthBefore;
+
+	// Do not inspect the object after retail AI returns. Some death/teardown
+	// paths may invalidate the object during AI; the next surviving AI call
+	// will naturally expose any state transition without making telemetry a
+	// lifetime hazard.
+	retail(
+		scorpion,
+		0);
+}
+
+static int SpideyInstallScorpionAITelemetry()
+{
+	void** vtable =
+		(void**)0x0053BE2C;
+	const unsigned long expectedAI =
+		0x00488590;
+	const unsigned long foundAI =
+		(unsigned long)vtable[2];
+
+	int installed =
+		0;
+
+	if (foundAI ==
+		expectedAI)
+	{
+		DWORD oldProtect =
+			0;
+		if (VirtualProtect(
+				&vtable[2],
+				sizeof(void*),
+				PAGE_EXECUTE_READWRITE,
+				&oldProtect))
+		{
+			vtable[2] =
+				(void*)&SpideyScorpionAITelemetry;
+
+			DWORD ignoredProtect =
+				0;
+			VirtualProtect(
+				&vtable[2],
+				sizeof(void*),
+				oldProtect,
+				&ignoredProtect);
+			FlushInstructionCache(
+				GetCurrentProcess(),
+				&vtable[2],
+				sizeof(void*));
+			installed =
+				1;
+		}
+	}
+
+	gSpideyScorpionAiInstalled =
+		installed;
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"scorpion_ai_telemetry_install installed=%d vtable=0x0053BE2C slot=2 expected=0x%08lX found=0x%08lX wrapper=0x%08lX policy=retail_ai_unchanged_precall_transition_and_periodic_trace\n",
+			installed,
+			expectedAI,
+			foundAI,
+			(unsigned long)&SpideyScorpionAITelemetry);
+		fclose(f);
+	}
+
+	return installed;
+}
+
 static void SpideyInstallHighFpsTimingCompat()
 {
 	void** mysterioLaserVtable =
@@ -7547,6 +7757,8 @@ static void SpideyInstallHighFpsTimingCompat()
 
 	int mysterioLaserInstalled =
 		0;
+	const int scorpionAiTelemetryInstalled =
+		SpideyInstallScorpionAITelemetry();
 	const int mysterioSoftSpotHitTelemetryInstalled =
 		SpideyInstallMysterioSoftSpotHitTelemetry();
 	const int mysterioYawTowardsInstalled =
@@ -7624,8 +7836,9 @@ static void SpideyInstallHighFpsTimingCompat()
 	{
 		fprintf(
 			f,
-			"high_fps_compat mysterio_laser=%d softspot_hit_telemetry=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_setpos_20hz_sampling\n",
+			"high_fps_compat mysterio_laser=%d scorpion_ai_telemetry=%d softspot_hit_telemetry=%d attack_telemetry=%d attack_call=0x0045F489 attack_retail=0x0045D200 vtable=0x0053BB34 destructor_expected=0x%08lX destructor_found=0x%08lX move_expected=0x%08lX move_found=0x%08lX clock=gTimerRelated_60hz grace_ticks=%lu grace_ms=50 marker_offset=0x44 policy=elapsed_tick_liveness_plus_setpos_20hz_sampling\n",
 			mysterioLaserInstalled,
+			scorpionAiTelemetryInstalled,
 			mysterioSoftSpotHitTelemetryInstalled,
 			mysterioLaserAttackTelemetryInstalled,
 			expectedDestructor,
@@ -11977,6 +12190,148 @@ static void __cdecl SpideyCompatMysterioBossHolderFrame(
 	}
 }
 
+static unsigned long gSpideyScorpionChaseBarScaleSamples =
+	0;
+static unsigned long gSpideyScorpionChaseBarScaledPolys =
+	0;
+
+// Race to the Bugle's Scorpion/Jonah progress meter is one authored
+// top-right composite. Its three holder pieces must share the same anchor;
+// choosing an anchor independently per piece tears the meter apart at modern
+// resolutions, exactly like the earlier Mysterio boss holder failure.
+static void SpideyCompactScorpionChaseBarPoly(
+		POLY_FT4* poly,
+		const char* source)
+{
+	if (!poly ||
+		gSpideyFrontendUiActive ||
+		!gSpideyShadowPreviewEnabled ||
+		gSpideyModernLogicalWidth <= 640 ||
+		gSpideyModernLogicalHeight <= 480)
+	{
+		return;
+	}
+
+	float densityX = 1.0f;
+	float densityY = 1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	if (densityX >= 1.0f &&
+		densityY >= 1.0f)
+	{
+		return;
+	}
+
+	const short beforeX0 = poly->x0;
+	const short beforeY0 = poly->y0;
+	const short beforeX1 = poly->x1;
+	const short beforeY1 = poly->y1;
+	const short beforeX2 = poly->x2;
+	const short beforeY2 = poly->y2;
+	const short beforeX3 = poly->x3;
+	const short beforeY3 = poly->y3;
+
+	const float anchorX = 512.0f;
+	const float anchorY = 0.0f;
+
+	poly->x0 = SpideyScaleGameplayUiCoord(poly->x0, anchorX, densityX);
+	poly->x1 = SpideyScaleGameplayUiCoord(poly->x1, anchorX, densityX);
+	poly->x2 = SpideyScaleGameplayUiCoord(poly->x2, anchorX, densityX);
+	poly->x3 = SpideyScaleGameplayUiCoord(poly->x3, anchorX, densityX);
+	poly->y0 = SpideyScaleGameplayUiCoord(poly->y0, anchorY, densityY);
+	poly->y1 = SpideyScaleGameplayUiCoord(poly->y1, anchorY, densityY);
+	poly->y2 = SpideyScaleGameplayUiCoord(poly->y2, anchorY, densityY);
+	poly->y3 = SpideyScaleGameplayUiCoord(poly->y3, anchorY, densityY);
+
+	++gSpideyScorpionChaseBarScaledPolys;
+
+	if (gSpideyScorpionChaseBarScaleSamples < 48)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"scorpion_chase_bar_scale source=%s item_type=%d policy=shared_top_right_anchor logical=%lux%lu density=%.6f,%.6f user_percent=%d before=%d,%d,%d,%d,%d,%d,%d,%d after=%d,%d,%d,%d,%d,%d,%d,%d count=%lu\n",
+				source ? source : "unknown",
+				*(volatile int*)0x0060F654,
+				gSpideyModernLogicalWidth,
+				gSpideyModernLogicalHeight,
+				(double)densityX,
+				(double)densityY,
+				gSpideyGameplayUiScalePercent,
+				(int)beforeX0,
+				(int)beforeY0,
+				(int)beforeX1,
+				(int)beforeY1,
+				(int)beforeX2,
+				(int)beforeY2,
+				(int)beforeX3,
+				(int)beforeY3,
+				(int)poly->x0,
+				(int)poly->y0,
+				(int)poly->x1,
+				(int)poly->y1,
+				(int)poly->x2,
+				(int)poly->y2,
+				(int)poly->x3,
+				(int)poly->y3,
+				gSpideyScorpionChaseBarScaledPolys);
+			fclose(log);
+		}
+
+		++gSpideyScorpionChaseBarScaleSamples;
+	}
+}
+
+static void __cdecl SpideyCompatScorpionChaseBarTexture(
+		i32 x,
+		i32 y,
+		POLY_FT4* poly,
+		void* texture,
+		i32 width,
+		i32 height)
+{
+	SpideyRetailPanelSetCoordsFn retail =
+		(SpideyRetailPanelSetCoordsFn)0x00462CD0;
+	retail(
+		x,
+		y,
+		poly,
+		texture,
+		width,
+		height);
+	SpideyCompactScorpionChaseBarPoly(
+		poly,
+		"texture");
+}
+
+static void __cdecl SpideyCompatScorpionChaseBarFrame(
+		i32 x,
+		i32 y,
+		POLY_FT4* poly,
+		void* frame,
+		i32 width,
+		i32 height)
+{
+	SpideyRetailPanelSetCoordsFn retail =
+		(SpideyRetailPanelSetCoordsFn)0x00462C30;
+	retail(
+		x,
+		y,
+		poly,
+		frame,
+		width,
+		height);
+	SpideyCompactScorpionChaseBarPoly(
+		poly,
+		"frame");
+}
+
 // @Ok
 static void __cdecl SpideyCompatMysterioBossQPoly2D(
 		float x0,
@@ -12157,6 +12512,25 @@ static void SpideyInstallGameplayUiScaleCompat()
 			(unsigned long)(void*)&SpideyCompatPanelSetCoordsFrame,
 			(void*)&SpideyCompatMysterioBossHolderFrame,
 			"mysterio_health_holder_frame");
+
+	const int scorpionChaseTextureOne =
+		SpideyPatchDirectCall(
+			0x004651CF,
+			(unsigned long)(void*)&SpideyCompatPanelSetCoordsTexture,
+			(void*)&SpideyCompatScorpionChaseBarTexture,
+			"scorpion_chase_bar_texture_1");
+	const int scorpionChaseTextureTwo =
+		SpideyPatchDirectCall(
+			0x004653E3,
+			(unsigned long)(void*)&SpideyCompatPanelSetCoordsTexture,
+			(void*)&SpideyCompatScorpionChaseBarTexture,
+			"scorpion_chase_bar_texture_2");
+	const int scorpionChaseFrame =
+		SpideyPatchDirectCall(
+			0x004655F2,
+			(unsigned long)(void*)&SpideyCompatPanelSetCoordsFrame,
+			(void*)&SpideyCompatScorpionChaseBarFrame,
+			"scorpion_chase_bar_frame");
 
 	const unsigned long venomChaseBarCoordSites[] =
 	{
@@ -12339,10 +12713,13 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_holders=texture:%d,frame:%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor scorpion_chase_holders=%d,%d,%d scorpion_chase_policy=item_310_shared_top_right_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_holders=texture:%d,frame:%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
 			frameCalls,
 			textureCalls,
 			venomChaseBarCoordCalls,
+			scorpionChaseTextureOne,
+			scorpionChaseTextureTwo,
+			scorpionChaseFrame,
 			cartridgeTextInstalled,
 			compassArrowQPolyInstalled,
 			healthQPolyOne,

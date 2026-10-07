@@ -35,6 +35,7 @@
 #include "baddy.h"
 #include "utils.h"
 #include "my_patch.h"
+#include <stdio.h>
 
 EXPORT void Physics_SetGravity(CVector *);
 
@@ -792,6 +793,76 @@ static float * const gGroundProbeSpread = (float*)0x0054EC84;
 // shipped build. Kept because the original still tests it. Tentative name.
 static i32 * const gUseWideGroundProbe = (i32*)0x0060F894;
 
+static unsigned long gSpideyZipPhysicsSamples =
+	0;
+static unsigned long gSpideyZipPhysicsLastTick =
+	0;
+static i32 gSpideyZipPhysicsWasActive =
+	0;
+static i32 gSpideyZipPhysicsSampleThisCall =
+	0;
+static i32 gSpideyZipPhysicsLastAnim =
+	-1;
+static i32 gSpideyZipPhysicsLastFrame =
+	-1;
+
+static void SpideyLogZipPhysicsState(
+		CPlayer* player,
+		const char* phase,
+		unsigned long tick)
+{
+	if (!player)
+		return;
+
+	const i32* target =
+		reinterpret_cast<const i32*>(
+			reinterpret_cast<const u8*>(player) +
+			0xDC0);
+	const i32* normal =
+		reinterpret_cast<const i32*>(
+			reinterpret_cast<const u8*>(player) +
+			0xDA0);
+
+	FILE* f =
+		fopen(
+			"spidey-decomp.log",
+			"a");
+	if (!f)
+		return;
+
+	fprintf(
+		f,
+		"[TIMING] web_zip_physics phase=%s sample=%lu tick=%lu state=0x%08lX field80=%ld anim=%u frame=%d frame_frac=%d finished=%u pos=%ld,%ld,%ld vel=%ld,%ld,%ld acc=%ld,%ld,%ld target=%ld,%ld,%ld delta=%ld,%ld,%ld normal=%ld,%ld,%ld\n",
+		phase ? phase : "unknown",
+		gSpideyZipPhysicsSamples,
+		tick,
+		(unsigned long)player->field_E1C,
+		(long)player->field_80,
+		(unsigned int)player->mAnim,
+		(int)player->mFrame,
+		(int)player->mFrameFrac,
+		(unsigned int)player->mAnimFinished,
+		(long)player->mPos.vx,
+		(long)player->mPos.vy,
+		(long)player->mPos.vz,
+		(long)player->mVel.vx,
+		(long)player->mVel.vy,
+		(long)player->mVel.vz,
+		(long)player->mAcc.vx,
+		(long)player->mAcc.vy,
+		(long)player->mAcc.vz,
+		(long)target[0],
+		(long)target[1],
+		(long)target[2],
+		(long)(target[0] - player->mPos.vx),
+		(long)(target[1] - player->mPos.vy),
+		(long)(target[2] - player->mPos.vz),
+		(long)normal[0],
+		(long)normal[1],
+		(long)normal[2]);
+	fclose(f);
+}
+
 // @Ok
 // Original 0x466CE0. Spider-Man's per-frame physics while he is neither web
 // swinging nor crawling: integrate mVel/mAcc, sweep the movement against the
@@ -867,6 +938,68 @@ void CPlayer::DoPhysics(void)
 	startPos.vy = this->mPos.vy;
 	startPos.vz = this->mPos.vz;
 
+	gSpideyZipPhysicsSampleThisCall =
+		0;
+	const unsigned long zipTick =
+		(unsigned long)*(volatile long*)0x006B4CA8;
+	const i32 zipActive =
+		this->field_E1C ==
+			0x40000;
+
+	if (zipActive)
+	{
+		const i32 animationChanged =
+			gSpideyZipPhysicsLastAnim !=
+				(i32)this->mAnim;
+		const i32 frameReset =
+			gSpideyZipPhysicsLastFrame >
+				(i32)this->mFrame;
+		const unsigned long elapsed =
+			zipTick -
+			gSpideyZipPhysicsLastTick;
+
+		if (!gSpideyZipPhysicsWasActive ||
+			animationChanged ||
+			frameReset ||
+			zipTick <
+				gSpideyZipPhysicsLastTick ||
+			elapsed >=
+				3)
+		{
+			++gSpideyZipPhysicsSamples;
+			SpideyLogZipPhysicsState(
+				this,
+				gSpideyZipPhysicsWasActive ?
+					"pre" :
+					"enter",
+				zipTick);
+			gSpideyZipPhysicsSampleThisCall =
+				1;
+			gSpideyZipPhysicsLastTick =
+				zipTick;
+		}
+
+		gSpideyZipPhysicsLastAnim =
+			(i32)this->mAnim;
+		gSpideyZipPhysicsLastFrame =
+			(i32)this->mFrame;
+	}
+	else if (gSpideyZipPhysicsWasActive)
+	{
+		++gSpideyZipPhysicsSamples;
+		SpideyLogZipPhysicsState(
+			this,
+			"exit",
+			zipTick);
+		gSpideyZipPhysicsLastAnim =
+			-1;
+		gSpideyZipPhysicsLastFrame =
+			-1;
+	}
+
+	gSpideyZipPhysicsWasActive =
+		zipActive;
+
 	if (this->field_80 == 1)
 	{
 		SpideyPhysicsIntegrateVelocity60(&this->mVel, &this->mAcc, &this->mFric);
@@ -890,6 +1023,14 @@ void CPlayer::DoPhysics(void)
 
 			if (this->field_80 > 2)
 				this->mPos += this->mVel * (this->field_80 - 2);
+		}
+
+		if (gSpideyZipPhysicsSampleThisCall)
+		{
+			SpideyLogZipPhysicsState(
+				this,
+				"post_move",
+				zipTick);
 		}
 
 		return;
