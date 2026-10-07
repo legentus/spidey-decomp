@@ -18898,6 +18898,55 @@ static unsigned long gSpideyZipStaleAimClears = 0;
 static unsigned long gSpideyZipStaleAimSuccess = 0;
 static unsigned long gSpideyZipStaleAimRestores = 0;
 static unsigned long gSpideyZipStaleAimLogs = 0;
+static unsigned long gSpideyZipModernAimBlocks = 0;
+static unsigned long gSpideyZipModernAimBlockLogs = 0;
+
+static int SpideyZipBlockedByModernAimLocomotion(
+		CPlayer* player,
+		const SpideyZipButtonRecordSnapshot& aimButton)
+{
+	if (!player ||
+		!aimButton.held ||
+		player->field_8EA ||
+		gSpideyModernAimLocomotionMaskedPlayer !=
+			player)
+	{
+		return 0;
+	}
+
+	// Retail never permits R1/R2 zip while lookaround/manual aim owns the
+	// player: field_8EA is its first rejection gate. Our modern aimed-
+	// locomotion compatibility temporarily masks field_8EA so movement can
+	// proceed without dropping the modern reticle/camera. Preserve retail's
+	// semantic gate explicitly during that masked window, otherwise a held
+	// Aim + Zipline can start the old surface-normal, collision-free zip
+	// path even though the user is aiming somewhere entirely different.
+	++gSpideyZipModernAimBlocks;
+
+	if (gSpideyZipModernAimBlockLogs < 64)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"web_zip_compat event=block_modern_aim_zip count=%lu tick=%ld state=0x%08lX anim=%u aim_held=%u masked_player=1 axes=%d,%d\n",
+				gSpideyZipModernAimBlocks,
+				(long)*(volatile long*)0x006B4CA8,
+				(unsigned long)player->field_E1C,
+				(unsigned int)player->mAnim,
+				aimButton.held,
+				(int)player->field_E2D,
+				(int)player->field_E2E);
+			fclose(f);
+		}
+		++gSpideyZipModernAimBlockLogs;
+	}
+
+	return 1;
+}
 
 static int SpideyZipClearStaleModernAimGate(
 		CPlayer* player,
@@ -19218,20 +19267,30 @@ static u8 __fastcall SpideyTraceR1ZipCheck(
 			zipButton,
 			r2Button);
 
-	const int staleAimCleared =
-		SpideyZipClearStaleModernAimGate(
+	u8 result =
+		0;
+	const int blockedByModernAim =
+		SpideyZipBlockedByModernAimLocomotion(
 			player,
 			aimButton);
 
-	const u8 result =
-		retail(
-			player,
-			0);
+	if (!blockedByModernAim)
+	{
+		const int staleAimCleared =
+			SpideyZipClearStaleModernAimGate(
+				player,
+				aimButton);
 
-	SpideyZipRestoreStaleModernAimGate(
-		player,
-		staleAimCleared,
-		result);
+		result =
+			retail(
+				player,
+				0);
+
+		SpideyZipRestoreStaleModernAimGate(
+			player,
+			staleAimCleared,
+			result);
+	}
 
 	if (result)
 		++gSpideyZipR1Success;
@@ -19297,20 +19356,30 @@ static u8 __fastcall SpideyTraceR2ZipCheck(
 			zipButton,
 			r2Button);
 
-	const int staleAimCleared =
-		SpideyZipClearStaleModernAimGate(
+	u8 result =
+		0;
+	const int blockedByModernAim =
+		SpideyZipBlockedByModernAimLocomotion(
 			player,
 			aimButton);
 
-	const u8 result =
-		retail(
-			player,
-			0);
+	if (!blockedByModernAim)
+	{
+		const int staleAimCleared =
+			SpideyZipClearStaleModernAimGate(
+				player,
+				aimButton);
 
-	SpideyZipRestoreStaleModernAimGate(
-		player,
-		staleAimCleared,
-		result);
+		result =
+			retail(
+				player,
+				0);
+
+		SpideyZipRestoreStaleModernAimGate(
+			player,
+			staleAimCleared,
+			result);
+	}
 
 	if (result)
 		++gSpideyZipR2Success;

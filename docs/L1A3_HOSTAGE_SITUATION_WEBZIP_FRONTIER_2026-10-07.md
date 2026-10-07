@@ -470,3 +470,65 @@ Expected next log:
 - successful R1/R2 -> `0x40000`;
 - `web_zip_move_halfstep` records with changing before/after position;
 - no long interval where animation 270/271 advances while position stays constant.
+
+
+## 2026-10-07 — Live aimed web-zip wall tunneling root cause and fix
+
+Live runtime:
+- revision `4079f2cd79d69ea5f8b4704e1fc0aa283bb07d08`
+- live log: `C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`
+
+### User-visible issue
+Holding modern Aim and pressing Zipline could launch Spider-Man through nearby geometry / far past a wall, after which he could fall into the abyss.
+
+### Exact runtime proof
+At ticks 13440–13449:
+- Aim processed record `input40 held=1`;
+- Zipline processed record `input60 held=1`;
+- retail `field_8EA=1`;
+- R1/R2 both return 0 as retail intends.
+
+Then modern aimed-locomotion masking engages while Aim remains physically held:
+- `modern_manual_aim ... actual_aim_state=0 locomotion_mask=1`;
+- retail `field_8EA` becomes 0 temporarily so locomotion can proceed.
+
+At tick 13456:
+- Aim is still held: `input40=1`;
+- Zipline is pressed: `input60=1,1`;
+- `field_8EA=0` only because the modern locomotion mask is active;
+- untouched retail R1 therefore returns 1 and enters state `0x40000`.
+
+Accepted retail zip target:
+- player: `-11987681,-397312,-2740846`
+- target: `-11987681,-4397056,-2740846`
+- target normal: approximately +Y.
+
+The target is purely along the legacy surface-normal axis and is **not** the modern camera reticle target. Nearby modern reticle telemetry points far away in X/Z.
+
+The zip travel phase is intentionally a special no-collision displacement path, so allowing old surface-normal zip while the player visually believes they are aiming elsewhere can tunnel through intervening geometry.
+
+### Compatibility fix
+Added `SpideyZipBlockedByModernAimLocomotion`.
+
+It blocks R1/R2 only when:
+- physical Aim processed record is still held;
+- retail `field_8EA` has been temporarily masked to 0;
+- `gSpideyModernAimLocomotionMaskedPlayer == player`.
+
+This exactly restores retail semantics across the modern locomotion mask:
+- genuine retail aim already blocks on `field_8EA`;
+- modern aim no longer leaks zip permission while the compatibility layer hides that bit.
+
+Unaffected:
+- quick/manual zip with Aim released;
+- Hostage Situation scripted zip (no Aim held);
+- raycast/availability;
+- 60-Hz zip half-displacement fix;
+- landing/cleanup.
+
+Telemetry:
+`web_zip_compat event=block_modern_aim_zip ...`
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
