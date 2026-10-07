@@ -8636,11 +8636,9 @@ static void SpideyModernAimValidateZipReleaseLatchAtFrameEnd()
 	}
 }
 
-static int SpideySurfaceFirstPersonAimPrepare(
+static int SpideySurfaceFirstPersonApplyCameraPose(
 		CPlayer* player,
 		CCamera* camera);
-static void SpideySurfaceFirstPersonAimRelease(
-		CPlayer* player);
 
 static void SpideyModernAimDropForZip(
 		CPlayer* player)
@@ -8660,25 +8658,6 @@ static void SpideyModernAimDropForZip(
 			0;
 		++gSpideyModernAimLocomotionRestoreCount;
 	}
-
-	CCamera* camera =
-		*(CCamera**)0x0056F3B8;
-	if (camera &&
-		camera->mCameraMode ==
-			CAMERAMODE_FRONT)
-	{
-		typedef void (__fastcall *SpideyRetailCameraPopModeFn)(
-			CCamera*,
-			void*);
-		SpideyRetailCameraPopModeFn popMode =
-			(SpideyRetailCameraPopModeFn)0x00416780;
-		popMode(
-			camera,
-			0);
-	}
-
-	SpideySurfaceFirstPersonAimRelease(
-		player);
 
 	player->field_8EA =
 		0;
@@ -8752,16 +8731,16 @@ static void __fastcall SpideyModernAimEnterLookaroundMode(
 		0);
 
 	// Retail EnterLookaroundMode pushes the previous camera mode and switches
-	// to CAMERAMODE_FRONT (7). Keep that true first-person mode only when
-	// Spider-Man is crawling on a wall or ceiling. Ordinary floor manual aim
-	// retains the already validated third-person mode-3 camera.
+	// to CAMERAMODE_FRONT (7). Modern manual aim always returns immediately to
+	// ordinary mode 3. Floor aim keeps the validated third-person orbit, while
+	// wall/ceiling aim applies a custom first-person camera position later in
+	// the shared camera postprocess. Keeping mode 3 prevents retail FRONT from
+	// rotating the view into Spider-Man's crawl/surface basis.
 	if (player)
 	{
 		CCamera* camera =
 			*(CCamera**)0x0056F3B8;
 		if (camera &&
-			!player->field_8E8 &&
-			!player->field_8E9 &&
 			camera->mCameraMode ==
 				CAMERAMODE_FRONT)
 		{
@@ -8823,26 +8802,6 @@ static int __fastcall SpideyModernAimCheckForwards(
 	const int movementHeld =
 		player->field_E2D != 0 ||
 		player->field_E2E != 0;
-
-	// Surface manual aim now uses retail's true first-person FRONT camera.
-	// Keep field_8EA visible and let retail aim own the player while on a wall
-	// or ceiling; masking it here would make SetupLookaroundCamera return
-	// immediately and would reintroduce the competing movement/view controls
-	// that the first-person policy is specifically meant to avoid.
-	if (player->field_8E8 ||
-		player->field_8E9)
-	{
-		if (gSpideyModernAimLocomotionMaskedPlayer ==
-			player)
-		{
-			SpideyModernAimRestoreLocomotionState();
-		}
-
-		return retail(
-			player,
-			0,
-			allowTurn);
-	}
 
 	if (movementHeld &&
 		gSpideyModernAimLocomotionMaskedPlayer ==
@@ -9218,7 +9177,7 @@ static int SpideyModernAimApplyCameraPoint(
 		(player->field_8E8 ||
 		 player->field_8E9) &&
 		camera->mCameraMode ==
-			CAMERAMODE_FRONT;
+			CAMERAMODE_DEMO;
 	const int floorThirdPerson =
 		!player->field_8E8 &&
 		!player->field_8E9 &&
@@ -9300,95 +9259,17 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 	const int effectiveAim =
 		SpideyModernAimIsEffectivelyActive(
 			player);
-	const int surfaceAim =
-		effectiveAim &&
-		(player->field_8E8 ||
-		 player->field_8E9);
-
-	if (surfaceAim &&
-		camera)
-	{
-		// EnterLookaroundMode normally put us in retail FRONT mode. Also handle
-		// floor->wall/ceiling transitions while Aim remains held.
-		if (camera->mCameraMode ==
-			CAMERAMODE_DEMO)
-		{
-			camera->mCameraMode =
-				CAMERAMODE_FRONT;
-		}
-
-		if (camera->mCameraMode ==
-			CAMERAMODE_FRONT &&
-			SpideySurfaceFirstPersonAimPrepare(
-				player,
-				camera))
-		{
-			unsigned char* rawPlayer =
-				(unsigned char*)player;
-
-			// SetupLookaroundCamera contains the original lookaround zip/swing
-			// action tail. Keep this call camera/reticle-only so our current
-			// camera-directed aimed Zipline remains the single action owner.
-			// Retail Setup normally clears this latch on every return, so do
-			// not restore a pre-call 1 after masking it.
-			rawPlayer[0x54F] =
-				0;
-			retail(
-				player,
-				0);
-
-			SpideyModernAimApplyCameraPoint(
-				player,
-				camera);
-			++gSpideyModernAimLookaroundCalls;
-
-			if (gSpideyModernAimLookaroundCalls <= 12 ||
-				(gSpideyModernAimLookaroundCalls % 60) == 0)
-			{
-				FILE* f =
-					SpideyOpenConsolidatedLog(
-						"CAMERA");
-				if (f)
-				{
-					fprintf(
-						f,
-						"modern_manual_aim event=surface_first_person call=%lu camera=0x%08lX mode=%d aim_point=%d,%d,%d camera_pos=%d,%d,%d camera_focus=%d,%d,%d wall=%u ceiling=%u state=0x%08lX anim=%u\n",
-						gSpideyModernAimLookaroundCalls,
-						(unsigned long)camera,
-						(int)camera->mCameraMode,
-						player->field_DC0.vx,
-						player->field_DC0.vy,
-						player->field_DC0.vz,
-						camera->mPos.vx,
-						camera->mPos.vy,
-						camera->mPos.vz,
-						camera->field_144.vx,
-						camera->field_144.vy,
-						camera->field_144.vz,
-						(unsigned int)player->field_8E8,
-						(unsigned int)player->field_8E9,
-						(unsigned long)player->field_E1C,
-						(unsigned int)player->mAnim);
-					fclose(f);
-				}
-			}
-
-			return;
-		}
-	}
-
+	// Never let retail FRONT mode own modern manual aim. It rotates the view
+	// into the crawler's surface/body frame and suppresses normal crawl movement.
+	// First-person wall/ceiling aim is implemented as a final camera-position
+	// override while the continuous modern mode-3 view remains authoritative.
 	if (effectiveAim &&
 		camera &&
-		!player->field_8E8 &&
-		!player->field_8E9 &&
 		camera->mCameraMode ==
 			CAMERAMODE_FRONT)
 	{
-		// Surface -> floor transition while Aim remains held.
 		camera->mCameraMode =
 			CAMERAMODE_DEMO;
-		SpideySurfaceFirstPersonAimRelease(
-			player);
 	}
 
 	const int modernAim =
@@ -9399,15 +9280,13 @@ static void __fastcall SpideyModernAimSetupLookaroundCamera(
 
 	if (!modernAim)
 	{
-		SpideySurfaceFirstPersonAimRelease(
-			player);
 		retail(
 			player,
 			0);
 		return;
 	}
 
-	// Do NOT run retail SetupLookaroundCamera in floor modern manual aim.
+	// Do NOT run retail SetupLookaroundCamera in modern manual aim.
 	//
 	// Runtime proved that it still owns the legacy lookaround accumulators
 	// and pose/joint steering: WASD continued moving the old cursor while
@@ -9542,9 +9421,9 @@ static void SpideyInstallModernManualAimCompat()
 		0x90
 	};
 
-	// Do not patch retail EnterLookaroundMode's push 7 anymore. Retail FRONT
-	// mode is now intentionally retained for wall/ceiling manual aim; the enter
-	// wrapper switches back to DEMO only for ordinary floor manual aim.
+	// Keep retail EnterLookaroundMode's original push 7 bytes intact, but the
+	// wrapper immediately returns modern manual aim to mode 3. Wall/ceiling
+	// first-person is now a final-position override, not retail FRONT ownership.
 	const int cameraInstalled =
 		1;
 	const int movementAimGateInstalled =
@@ -9581,7 +9460,7 @@ static void SpideyInstallModernManualAimCompat()
 	{
 		fprintf(
 			f,
-				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B policy=floor_mode3_tps_surface_mode7_first_person movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 enter_reentry_calls=%d enter_target=0x004C3580 aim_control=input_plus_0x40 floor_movement=modern_masked surface_movement=retail_aim_owned surface_angles=modern_mouse_plus_stick surface_reticle=final_front_camera_ray effective_aim_sidecar=1 frame_end_release_guard=1\n",
+				"modern_manual_aim_install camera_mode=%d enter_mode_site=0x004C370B policy=mode3_continuous_surface_first_person_position_only movement_aim_gate=%d movement_control=%d movement_call=0x004B231A reticle=%d reticle_call=0x004B8673 enter_reentry_calls=%d enter_target=0x004C3580 aim_control=input_plus_0x40 floor_movement=modern_masked surface_movement=modern_masked surface_angles=mode3_modern_camera surface_reticle=custom_first_person_camera_ray surface_orientation=no_flip effective_aim_sidecar=1 frame_end_release_guard=1\n",
 				cameraInstalled,
 				movementAimGateInstalled,
 				movementControlInstalled,
@@ -14989,30 +14868,14 @@ static int SpideyRoundCameraDouble(
 	return (int)(value - 0.5);
 }
 
-static CPlayer* gSpideySurfaceFirstPersonPlayer = 0;
-static int gSpideySurfaceFirstPersonWorldYaw = 0;
-static int gSpideySurfaceFirstPersonPitch = 0;
-static unsigned long gSpideySurfaceFirstPersonLastSequence = 0xFFFFFFFFUL;
-static unsigned long gSpideySurfaceFirstPersonPrepareCalls = 0;
-static unsigned long gSpideySurfaceFirstPersonLogs = 0;
+static const int kSpideySurfaceFirstPersonEyeHeightUnits = 72;
+static const int kSpideySurfaceFirstPersonSurfaceOffsetUnits = 12;
+static const int kSpideySurfaceFirstPersonViewOffsetUnits = 8;
+static const int kSpideySurfaceFirstPersonRayUnits = 2048;
+static unsigned long gSpideySurfaceFirstPersonPoseCalls = 0;
+static unsigned long gSpideySurfaceFirstPersonPoseLogs = 0;
 
-static void SpideySurfaceFirstPersonAimRelease(
-		CPlayer* player)
-{
-	if (player &&
-		gSpideySurfaceFirstPersonPlayer !=
-			player)
-	{
-		return;
-	}
-
-	gSpideySurfaceFirstPersonPlayer =
-		0;
-	gSpideySurfaceFirstPersonLastSequence =
-		0xFFFFFFFFUL;
-}
-
-static int SpideySurfaceFirstPersonAimPrepare(
+static int SpideySurfaceFirstPersonApplyCameraPose(
 		CPlayer* player,
 		CCamera* camera)
 {
@@ -15023,146 +14886,134 @@ static int SpideySurfaceFirstPersonAimPrepare(
 		(!player->field_8E8 &&
 		 !player->field_8E9) ||
 		camera->mCameraMode !=
-			CAMERAMODE_FRONT)
+			CAMERAMODE_DEMO)
 	{
 		return 0;
 	}
 
-	const SpideyInput11LegacyState* input =
-		SpideyInput11GetState();
+	double forwardX = 0.0;
+	double forwardY = 0.0;
+	double forwardZ = -1.0;
 
-	if (gSpideySurfaceFirstPersonPlayer !=
-		player)
+	if (gSpideyModernCameraActive &&
+		gSpideyModernCameraOwner ==
+			camera)
 	{
-		const double dx =
+		const double yawRadians =
+			(double)gSpideyModernCameraYaw *
+			kSpideyRadiansPerAngleUnit;
+		const double pitchRadians =
+			(double)gSpideyModernCameraPitch *
+			kSpideyRadiansPerAngleUnit;
+		const double cosPitch =
+			cos(pitchRadians);
+
+		forwardX =
+			-sin(yawRadians) *
+			cosPitch;
+		forwardY =
+			sin(pitchRadians);
+		forwardZ =
+			-cos(yawRadians) *
+			cosPitch;
+	}
+	else
+	{
+		forwardX =
 			(double)camera->field_144.vx -
 			(double)camera->mPos.vx;
-		const double dy =
+		forwardY =
 			(double)camera->field_144.vy -
 			(double)camera->mPos.vy;
-		const double dz =
+		forwardZ =
 			(double)camera->field_144.vz -
 			(double)camera->mPos.vz;
-		const double horizontal =
+		const double length =
 			sqrt(
-				dx * dx +
-				dz * dz);
-
-		if (horizontal < 1.0)
+				forwardX * forwardX +
+				forwardY * forwardY +
+				forwardZ * forwardZ);
+		if (length <= 1.0)
 		{
-			gSpideySurfaceFirstPersonWorldYaw =
-				(int)camera->field_236 &
-				0x0FFF;
-			gSpideySurfaceFirstPersonPitch =
-				0;
+			return 0;
 		}
-		else
-		{
-			gSpideySurfaceFirstPersonWorldYaw =
-				SpideyManualAimRadiansToUnits(
-					atan2(
-						-dx,
-						-dz)) &
-				0x0FFF;
-			gSpideySurfaceFirstPersonPitch =
-				SpideyClampModernCameraPitch(
-					SpideyManualAimRadiansToUnits(
-						atan2(
-							dy,
-							horizontal)));
-		}
-
-		gSpideySurfaceFirstPersonPlayer =
-			player;
-		gSpideySurfaceFirstPersonLastSequence =
-			gSpideyModernCameraInputSequence;
+		forwardX /=
+			length;
+		forwardY /=
+			length;
+		forwardZ /=
+			length;
 	}
 
-	const int newInputFrame =
-		gSpideySurfaceFirstPersonLastSequence !=
-			gSpideyModernCameraInputSequence;
+	// field_89C is Spider-Man's current world orientation. Its local -Y axis
+	// runs through the character's head/upper body. Rotate a 72-world-unit
+	// local eye offset with that matrix so walls and ceilings use Spider-Man's
+	// actual pose instead of assuming world-up. Add a small surface-normal
+	// offset to stay on the playable side of the crawl plane, then move a few
+	// units along the unchanged view ray to keep the camera clear of the face.
+	CVector eyePos =
+		player->mPos;
+	eyePos.vx +=
+		player->field_89C.m[0][1] *
+			-kSpideySurfaceFirstPersonEyeHeightUnits;
+	eyePos.vy +=
+		player->field_89C.m[1][1] *
+			-kSpideySurfaceFirstPersonEyeHeightUnits;
+	eyePos.vz +=
+		player->field_89C.m[2][1] *
+			-kSpideySurfaceFirstPersonEyeHeightUnits;
 
-	if (newInputFrame)
-	{
-		const int mouseX =
-			gSpideyFrameMouseDeltaX;
-		const int mouseY =
-			gSpideyFrameMouseDeltaY;
-		const float stickX =
-			input &&
-			input->connected ?
-				input->cameraX :
-				0.0f;
-		const float stickY =
-			input &&
-			input->connected ?
-				input->cameraY :
-				0.0f;
-		const int sensitivity =
-			SpideyClampCameraSensitivityPercent(
-				gSpideyCameraSensitivityPercent);
-		const int yawDelta =
-			(mouseX *
-			 kSpideyModernCameraMouseYawScale *
-			 sensitivity) /
-				100 +
-			(int)(
-				stickX *
-				(float)kSpideyModernCameraStickYawPerFrame *
-				(float)sensitivity /
-				100.0f);
-		const int pitchDelta =
-			((-mouseY) *
-			 kSpideyModernCameraMousePitchScale *
-			 sensitivity) /
-				100 +
-			(int)(
-				stickY *
-				(float)kSpideyModernCameraStickPitchPerFrame *
-				(float)sensitivity /
-				100.0f);
+	eyePos.vx +=
+		player->field_C84.vx *
+			kSpideySurfaceFirstPersonSurfaceOffsetUnits;
+	eyePos.vy +=
+		player->field_C84.vy *
+			kSpideySurfaceFirstPersonSurfaceOffsetUnits;
+	eyePos.vz +=
+		player->field_C84.vz *
+			kSpideySurfaceFirstPersonSurfaceOffsetUnits;
 
-		gSpideySurfaceFirstPersonWorldYaw =
-			(gSpideySurfaceFirstPersonWorldYaw +
-			 yawDelta) &
-			0x0FFF;
-		gSpideySurfaceFirstPersonPitch =
-			SpideyClampModernCameraPitch(
-				gSpideySurfaceFirstPersonPitch -
-					pitchDelta);
-		gSpideySurfaceFirstPersonLastSequence =
-			gSpideyModernCameraInputSequence;
-	}
+	eyePos.vx +=
+		SpideyRoundCameraDouble(
+			forwardX *
+			(double)kSpideySurfaceFirstPersonViewOffsetUnits *
+			4096.0);
+	eyePos.vy +=
+		SpideyRoundCameraDouble(
+			forwardY *
+			(double)kSpideySurfaceFirstPersonViewOffsetUnits *
+			4096.0);
+	eyePos.vz +=
+		SpideyRoundCameraDouble(
+			forwardZ *
+			(double)kSpideySurfaceFirstPersonViewOffsetUnits *
+			4096.0);
 
-	const int heading =
-		(int)player->GetEffectiveHeading() &
-		0x0FFF;
-	const int relativeYaw =
-		SpideyModernCameraSignedAngle(
-			gSpideySurfaceFirstPersonWorldYaw -
-				heading);
+	camera->mPos =
+		eyePos;
+	camera->field_144.vx =
+		eyePos.vx +
+		SpideyRoundCameraDouble(
+			forwardX *
+			(double)kSpideySurfaceFirstPersonRayUnits *
+			4096.0);
+	camera->field_144.vy =
+		eyePos.vy +
+		SpideyRoundCameraDouble(
+			forwardY *
+			(double)kSpideySurfaceFirstPersonRayUnits *
+			4096.0);
+	camera->field_144.vz =
+		eyePos.vz +
+		SpideyRoundCameraDouble(
+			forwardZ *
+			(double)kSpideySurfaceFirstPersonRayUnits *
+			4096.0);
 
-	// SetupLookaroundCamera consumes these four globals as target/smoothed
-	// pitch and body-relative yaw. Write both sides together so the modern
-	// mouse view is immediate and the old keyboard-era +/-0xC0 smoothing
-	// cannot drag the reticle behind the camera.
-	*(volatile int*)0x006A818C =
-		gSpideySurfaceFirstPersonPitch;
-	*(volatile int*)0x006A82B4 =
-		gSpideySurfaceFirstPersonPitch;
-	*(volatile int*)0x006A7FFC =
-		relativeYaw;
-	*(volatile int*)0x006A8D54 =
-		relativeYaw;
-	*(volatile int*)0x006A8D44 =
-		heading;
-
-	++gSpideySurfaceFirstPersonPrepareCalls;
-
-	if (gSpideySurfaceFirstPersonLogs < 96 &&
-		(gSpideySurfaceFirstPersonPrepareCalls <= 12 ||
-		 (gSpideySurfaceFirstPersonPrepareCalls % 30) == 0 ||
-		 newInputFrame))
+	++gSpideySurfaceFirstPersonPoseCalls;
+	if (gSpideySurfaceFirstPersonPoseLogs < 96 &&
+		(gSpideySurfaceFirstPersonPoseCalls <= 12 ||
+		 (gSpideySurfaceFirstPersonPoseCalls % 30) == 0))
 	{
 		FILE* f =
 			SpideyOpenConsolidatedLog(
@@ -15171,43 +15022,26 @@ static int SpideySurfaceFirstPersonAimPrepare(
 		{
 			fprintf(
 				f,
-				"modern_manual_camera event=surface_first_person_angles call=%lu tick=%ld world_yaw=%d pitch=%d heading=%d relative_yaw=%d input_seq=%lu mouse=%d,%d stick=%.4f,%.4f wall=%u ceiling=%u camera_pos=%d,%d,%d camera_focus=%d,%d,%d\n",
-				gSpideySurfaceFirstPersonPrepareCalls,
-				(long)*(volatile long*)0x006B4CA8,
-				gSpideySurfaceFirstPersonWorldYaw,
-				gSpideySurfaceFirstPersonPitch,
-				heading,
-				relativeYaw,
-				gSpideyModernCameraInputSequence,
-				newInputFrame ?
-					gSpideyFrameMouseDeltaX :
-					0,
-				newInputFrame ?
-					gSpideyFrameMouseDeltaY :
-					0,
-				(double)(
-					newInputFrame &&
-					input &&
-					input->connected ?
-						input->cameraX :
-						0.0f),
-				(double)(
-					newInputFrame &&
-					input &&
-					input->connected ?
-						input->cameraY :
-						0.0f),
-				(unsigned int)player->field_8E8,
-				(unsigned int)player->field_8E9,
+				"modern_manual_camera event=surface_first_person_pose call=%lu mode=%d pos=%d,%d,%d focus=%d,%d,%d forward=%.5f,%.5f,%.5f wall=%u ceiling=%u eye_height=%d surface_offset=%d view_offset=%d movement_policy=modern_masked\n",
+				gSpideySurfaceFirstPersonPoseCalls,
+				(int)camera->mCameraMode,
 				camera->mPos.vx,
 				camera->mPos.vy,
 				camera->mPos.vz,
 				camera->field_144.vx,
 				camera->field_144.vy,
-				camera->field_144.vz);
+				camera->field_144.vz,
+				forwardX,
+				forwardY,
+				forwardZ,
+				(unsigned int)player->field_8E8,
+				(unsigned int)player->field_8E9,
+				kSpideySurfaceFirstPersonEyeHeightUnits,
+				kSpideySurfaceFirstPersonSurfaceOffsetUnits,
+				kSpideySurfaceFirstPersonViewOffsetUnits);
 			fclose(f);
 		}
-		++gSpideySurfaceFirstPersonLogs;
+		++gSpideySurfaceFirstPersonPoseLogs;
 	}
 
 	return 1;
@@ -15983,7 +15817,7 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 		(player->field_8E8 ||
 		 player->field_8E9) &&
 		camera->mCameraMode ==
-			CAMERAMODE_FRONT;
+			CAMERAMODE_DEMO;
 	const int manualAim =
 		effectiveAim &&
 		!player->field_8E8 &&
@@ -16016,11 +15850,23 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 	// clipped position before publish.
 	if (gSpideyModernCameraActive &&
 		camera->mCameraMode ==
-			CAMERAMODE_DEMO)
+			CAMERAMODE_DEMO &&
+		!surfaceFirstPersonAim)
 	{
 		SpideyModernCameraClipToWorld(
 			camera,
 			player);
+	}
+
+	// Surface manual aim keeps the exact same mode-3 yaw/pitch that was visible
+	// before Aim was pressed. Only the final camera position moves to Spider-Man's
+	// eye/head position; this prevents the retail FRONT-mode surface flip while
+	// retaining the normal modern look controls and crawl locomotion.
+	if (surfaceFirstPersonAim)
+	{
+		SpideySurfaceFirstPersonApplyCameraPose(
+			player,
+			camera);
 	}
 
 	if (manualAim ||
@@ -19827,7 +19673,7 @@ static u8 SpideyTryModernAimedR1Zip(
 		(player->field_8E8 ||
 		 player->field_8E9) &&
 		camera->mCameraMode ==
-			CAMERAMODE_FRONT;
+			CAMERAMODE_DEMO;
 
 	if (!floorThirdPerson &&
 		!surfaceFirstPerson)

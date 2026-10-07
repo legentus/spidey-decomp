@@ -16283,3 +16283,155 @@ A maximum-context handoff ZIP is being created from this checkpoint with:
 - build/test scripts;
 - high-value camera/web-zip runtime logs;
 - SHA-256 manifest.
+
+
+## 2026-10-07 — Surface first-person aim runtime verdict + no-flip/movement candidate
+
+### Runtime evaluated
+
+Live consolidated log:
+
+`C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`
+
+Runtime revision:
+
+`7f6aeadacf098bb871b0b5f62a610ad80ab56319`
+
+This docs HEAD contains behavior commit:
+
+`56b191cef67887fdd2562a5ac99f0aeb01247820`
+
+The run exited cleanly:
+
+`[SESSION] exit_code=0`
+
+### What the log proved
+
+The `56b191ce` candidate did enter retail FRONT / mode 7 for both crawl surface types:
+
+- ceiling samples: `wall=0 ceiling=1 mode=7`;
+- wall samples: `wall=1 ceiling=0 mode=7`;
+- `modern_manual_camera event=surface_first_person_angles` responded to real mouse deltas;
+- camera-directed aimed Zipline still succeeded once:
+  `web_zip_aimed event=retail_r1 attempt=1 ... success=1 result=1`.
+
+Therefore the failure was not “surface first-person code did not run.”
+
+### User-visible failure / corrected interpretation
+
+User reported:
+
+- the camera flips into a Spider-Man/surface-relative perspective instead of simply entering first person;
+- the camera should **not rotate/flip at Aim entry**;
+- while first-person aiming on a wall/ceiling, Spider-Man must still be able to crawl/move.
+
+This identifies the design problem in `56b191ce`:
+
+- retail `CAMERAMODE_FRONT (7)` is not a neutral first-person placement layer;
+- `SetupLookaroundCamera` owns orientation in Spider-Man's crawl/surface basis, producing the visible flip;
+- keeping `field_8EA` visible and handing control to retail aim also intentionally stopped crawl locomotion.
+
+### New candidate policy
+
+Retail FRONT ownership is removed from active modern manual aim.
+
+All modern manual aim now remains in ordinary camera mode 3:
+
+- **floor:** preserve the already validated third-person manual-aim camera unchanged;
+- **wall/ceiling:** preserve the exact current mode-3 yaw/pitch and move only the final camera position into first person;
+- no surface-relative orientation flip;
+- mouse/right-stick continue through the existing mode-3 modern camera controller;
+- wall/ceiling locomotion uses the same scoped `field_8EA` masking path already proven for moving while floor aiming;
+- retail `SetupLookaroundCamera` stays bypassed during modern aim, so WASD/left-stick are not consumed by the legacy cursor controller.
+
+### Custom first-person camera pose
+
+Added:
+
+`SpideySurfaceFirstPersonApplyCameraPose`
+
+The helper runs only when:
+
+- manual Aim is effectively active;
+- `field_8E8 || field_8E9`;
+- camera mode is 3.
+
+Placement:
+
+1. start from `player->mPos`;
+2. use `player->field_89C` to rotate a local -Y eye/head offset into world space;
+3. eye-height offset: 72 world units;
+4. add 12 world units along `field_C84` to remain on the playable side of the crawl surface/body;
+5. add 8 world units along the unchanged visible view ray to keep the camera clear of Spider-Man's face;
+6. set `camera->mPos` to that eye position;
+7. set `camera->field_144` 2048 world units along the same view ray.
+
+View direction:
+
+- if the modern mode-3 camera is active, derive forward directly from `gSpideyModernCameraYaw/gSpideyModernCameraPitch`;
+- otherwise normalize the currently visible `camera->mPos -> field_144` ray.
+
+This means pressing Aim changes **position only**, not orientation.
+
+New telemetry:
+
+`modern_manual_camera event=surface_first_person_pose ... movement_policy=modern_masked`
+
+### Movement change
+
+Removed the `56b191ce` surface special-case in `SpideyModernAimCheckForwards` that returned directly to retail with `field_8EA` visible.
+
+Wall/ceiling aim now uses the normal modern aim locomotion mask:
+
+- hide held Aim only while retail movement evaluates;
+- keep E2D/E2E movement axes intact;
+- keep the effective-aim sidecar active;
+- restore retail aim state when movement/Aim is released.
+
+### Reticle / aimed Zipline
+
+Surface first-person is now recognized as:
+
+`wall_or_ceiling && camera->mCameraMode == CAMERAMODE_DEMO`
+
+instead of mode 7.
+
+The final first-person camera pose is applied before the shared caller rebuilds orientation, then:
+
+- `field_DC0` is rebuilt from the final eye-position camera ray;
+- aimed Zipline accepts the same surface mode-3 policy;
+- floor aimed Zipline behavior is unchanged.
+
+### Camera collision policy for this candidate
+
+The third-person orbit-arm collision clamp is skipped while surface first-person aim is active, because its focus-to-orbit-arm assumptions do not apply to an eye-position camera.
+
+The first-person eye pose is intentionally kept close to Spider-Man and offset to the playable side of the crawl plane. If runtime shows eye-camera clipping near adjacent geometry, add a dedicated short eye-position collision probe rather than reusing the third-person arm clamp.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+- `Release/spider.dll`: 933,888 bytes
+- SHA-256:
+  `e9b01b13cea6c3f60e985a0c7725cf9355878a85e513ecc376f45521f0e4b032`
+
+### Next runtime test
+
+Use the normal local test workflow and validate in one session:
+
+1. crawl on a ceiling without Aim and place the camera at an obvious non-default yaw/pitch;
+2. press/hold Aim;
+3. camera should move into first person **without changing/flipping the view direction**;
+4. move mouse through yaw/pitch; reticle should stay on the center view ray;
+5. hold Aim and use WASD/left stick; Spider-Man should continue crawling;
+6. release Aim; ordinary third-person crawler camera should resume;
+7. repeat on a wall;
+8. test Aim + Zipline once from the first-person surface view;
+9. briefly verify floor third-person aim is unchanged.
+
+Expected new marker:
+
+`modern_manual_camera event=surface_first_person_pose`
+
+Preserve the user-confirmed `1a82373...` floor/camera/Zipline baseline while evaluating this candidate.
