@@ -16435,3 +16435,143 @@ Expected new marker:
 `modern_manual_camera event=surface_first_person_pose`
 
 Preserve the user-confirmed `1a82373...` floor/camera/Zipline baseline while evaluating this candidate.
+
+
+## 2026-10-07 — Surface first-person camera VALIDATED; live combat hang narrowed
+
+Runtime revision:
+
+`91d5e3d8468234ea8a053c09a224041378a6781d`
+
+Live log:
+
+`C:\Program Files (x86)\Activision\Spider-Man\spidey-decomp.log`
+
+### Surface first-person result
+
+User report:
+
+> camera is perfect now
+
+The log confirms the new position-only first-person policy ran on both walls and ceilings:
+
+`modern_manual_camera event=surface_first_person_pose ... mode=3 ... movement_policy=modern_masked`
+
+Examples include:
+
+- wall: `wall=1 ceiling=0`;
+- ceiling: `wall=0 ceiling=1`;
+- mode remains `3` throughout;
+- view forward changes continuously under modern camera input.
+
+Treat commit `91d5e3d8...` surface first-person behavior as **runtime validated**. Do not reopen the old retail FRONT/mode-7 design.
+
+### New freeze report
+
+User reported the game froze while fighting.
+
+Console also displayed:
+
+`D3D Error: [C:\backup\SpideyPC\SpideyPC\D3d\PCTex.cpp], line 1740: Unknown (00000001)`
+
+### D3D warning is not the freeze cause
+
+The consolidated log captured that D3D error at log line ~1636:
+
+`[DXERROR] D3D error=0x00000001 ... PCTex.cpp line=1740 caller_return=0x0050F2BC call_site=0x0050F2B7`
+
+The game then continued for more than 5,400 additional log lines and thousands of gameplay frames before the freeze.
+
+The companion texture log also completed all texture creation entries normally and stopped long before the freeze point.
+
+Therefore do **not** treat the PCTex warning as causal for this hang.
+
+### Hang behavior
+
+There is no normal:
+
+`[SESSION] exit_code=...`
+
+The log simply stops.
+
+Live process inspection while frozen showed:
+
+- `SpideyPC.exe` still alive;
+- Windows reports the process responding;
+- process CPU increased by ~1.58 CPU-seconds over ~1.5 wall-seconds;
+- one game thread is in `Running` state while the other sampled threads are waiting/suspended.
+
+This is a **busy/infinite-loop style hang**, not a blocking deadlock and not a clean crash.
+
+A non-destructive minidump/current-EIP capture was attempted, but Windows denied thread-context/dump access with access-denied / `0x80070005` at Local Commander's current integrity level. The frozen game was not terminated by the diagnostic attempt.
+
+### Freeze is unrelated to the new surface camera
+
+At the final freeze boundary:
+
+- `wall=0`;
+- `ceiling=0`;
+- `aim=0`;
+- camera mode is normal mode 3;
+- no `surface_first_person_pose` activity is present near the stop.
+
+So the validated wall/ceiling first-person work is not the active code path at the hang.
+
+### Combat context
+
+The active target near the freeze is a normal:
+
+`name=thug`
+
+There are no live Mysterio laser/soft-spot runtime events in this session.
+
+This is therefore a generic/normal combat freeze, not the prior Mysterio laser path.
+
+### Strongest boundary found
+
+Immediately before the log stops, modern auto-aim targeting transitions from a valid thug target to no target:
+
+`camera_web_target event=select ... source=render_camera_no_target ... target=0x00000000 ...`
+
+The wrapper itself returned and logged successfully.
+
+Retail disassembly immediately after the patched `SelectTargetBaddy` call at:
+
+`0x004C5B2F`
+
+shows the null-target branch:
+
+- `cmp eax, 0`;
+- `je 0x004C5C1E`;
+- load existing helper at `player+0x878`;
+- if present, call `CBody::DeleteFrom @ 0x00460280`;
+- then invoke its virtual destructor;
+- clear `player+0x878`.
+
+The helper is allocated as a plain 0xF8-byte `CBody`, initialized with the retail item group string `"items"`, and used by the auto-aim path.
+
+The decompiled base `CBody::~CBody` destroys `mpShadow`.
+
+Therefore the current leading boundary is:
+
+**target becomes invalid / lost -> auto-aim helper at player+0x878 is detached and destroyed -> busy spin occurs before the next gameplay heartbeat.**
+
+This is not yet proof of which exact substep spins. Next diagnostic should distinguish:
+
+1. entry/return of the `CBody::DeleteFrom` call at `0x004C5AF9 / 0x004C5C2F`;
+2. entry/return of the following virtual destructor;
+3. `CBody::~CBody -> delete mpShadow`;
+4. heap/object cleanup immediately after destruction.
+
+Do not bypass the cleanup speculatively until the exact substep is observed.
+
+### Next combat-hang diagnostic
+
+Add behavior-neutral breadcrumbs around the two auto-aim helper cleanup sites in `sub_4C5AA0` / SelectAutoAimTarget:
+
+- replacement-old-target cleanup around `0x004C5AF9`;
+- lost-target cleanup around `0x004C5C2F`;
+- virtual destructor entry/return if practical;
+- capture helper pointer, vtable, next/previous list links, `mCBodyFlags`, `mpShadow`, list head, and target pointer.
+
+The next reproduction should identify the exact spinning cleanup stage without changing combat behavior.
