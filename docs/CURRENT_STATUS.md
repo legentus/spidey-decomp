@@ -17145,3 +17145,123 @@ A forced-clean matching VC6 build was produced with that commit stamped into `RU
 The currently frozen `a83e0578...` game process has yielded all available evidence through the present Local Commander interface and may be terminated.
 
 Use normal `TEST_LATEST_BUILD.bat` for the next run. If another ceiling-drop freeze occurs, leave the process open and inspect the final `drop_hang_trace` sequence first.
+
+
+## 2026-10-07 — Bomb timer holder/text alignment fix
+
+### User report
+
+While the game was live in the bomb level, the countdown timer was visibly outside/misaligned with its holder.
+
+### Retail timer draw path
+
+Retail `Panel_DisplayTimer @ 0x00461D00` builds the visible countdown as a composite HUD element.
+
+The actual countdown text is formatted as `00:00` and drawn at:
+
+- call site `0x0046236F`
+- target `Mess_DrawText @ 0x00458700`
+- authored position: `x=234`, `y=timerY+38`.
+
+The black timer backing is drawn immediately afterward at:
+
+- call site `0x0046239F`
+- target `DCPanel_DrawFlatShadedPoly @ 0x00462D60`
+- authored rectangle:
+  - `x=222`
+  - `y=timerY+23`
+  - `width=78`
+  - `height=20`.
+
+Therefore the retail text inset is exactly:
+
+- +12 px from the backing left edge;
+- +15 px from the backing top edge.
+
+The timer also contains two textured frame pieces built through:
+
+`Panel_SetStretchedScreenCoords @ 0x00462CD0`
+
+inside the same function.
+
+### Root cause
+
+The modern gameplay HUD compatibility globally redirects all direct calls to:
+
+`Panel_SetStretchedScreenCoords @ 0x00462CD0`
+
+through `SpideyCompatPanelSetCoordsTexture`, which compacts/scales those textured timer frame pieces.
+
+The timer text call `0x0046236F` and the timer backing call `0x0046239F` were not on that same transform path.
+
+Result:
+
+- textured timer frame/holder: modern compacted coordinates;
+- `00:00` text: raw retail coordinates;
+- black backing: raw retail coordinates.
+
+This split coordinate domain explains the visible timer-outside-holder bug.
+
+### Fix
+
+Added bomb-timer-specific wrappers:
+
+`SpideyCompatBombTimerText`
+
+at:
+
+`0x0046236F -> Mess_DrawText @ 0x00458700`
+
+and:
+
+`SpideyCompatBombTimerBacking`
+
+at:
+
+`0x0046239F -> DCPanel_DrawFlatShadedPoly @ 0x00462D60`.
+
+The timer text wrapper derives its anchor from the actual authored backing rectangle:
+
+`222..300 x (textY-15)..(textY+5)`
+
+and applies the same gameplay HUD density/anchor policy used by the compacted timer frame.
+
+It also temporarily scales the active message-font scale with:
+
+`SpideyGetGameplayHudTextScale(savedScale)`
+
+so the text size shrinks with the compacted holder, then restores the retail scale after drawing.
+
+The backing wrapper applies the same center/top anchor transform used by generic compacted panel geometry.
+
+This preserves the authored text inset inside the holder while keeping the complete timer assembly together at modern resolutions.
+
+### New telemetry
+
+`bomb_timer_alignment source=text ...`
+
+records:
+- authored and transformed text position;
+- backing authored rectangle;
+- selected anchors;
+- gameplay HUD density;
+- original and HUD text scales;
+- rendered timer string.
+
+`bomb_timer_alignment source=backing ...`
+
+records:
+- backing before/after rectangle;
+- anchors;
+- HUD density.
+
+Installer telemetry now includes:
+
+`bomb_timer=text:<n>,backing:<n>`.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+No camera, combat-freeze, or drop-hang diagnostic behavior was changed.

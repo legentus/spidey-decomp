@@ -12518,6 +12518,289 @@ static int SpideyGetGameplayHudTextScale(
 	return (int)scaled;
 }
 
+static unsigned long gSpideyBombTimerAlignmentSamples =
+	0;
+
+// @Ok
+// Panel_DisplayTimer is a composite HUD element. Its two textured frame pieces
+// already pass through the generic gameplay-HUD compactor because their
+// Panel_SetStretchedScreenCoords calls target 0x00462CD0. Retail draws the
+// actual "00:00" text separately at 0x0046236F, so leaving that call in raw
+// authored coordinates pulls the timer text away from the compacted frame.
+//
+// Derive the text anchor from the timer backing rectangle authored immediately
+// after it:
+//   backing = x 222..300, y (textY - 15)..(textY + 5)
+//   text    = x 234,      y textY
+//
+// This preserves the original 12px/15px inset while using the exact same
+// anchor policy/density as the rest of the timer composite.
+static int __cdecl SpideyCompatBombTimerText(
+		i32 x,
+		i32 y,
+		const char* text,
+		i32 option4,
+		u32 option5)
+{
+	const int beforeX =
+		x;
+	const int beforeY =
+		y;
+
+	float densityX =
+		1.0f;
+	float densityY =
+		1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	const float holderLeft =
+		222.0f;
+	const float holderTop =
+		(float)y -
+		15.0f;
+	const float holderRight =
+		holderLeft +
+		78.0f;
+	const float holderBottom =
+		holderTop +
+		20.0f;
+
+	const float anchorX =
+		SpideyChooseGameplayUiFloatAnchor(
+			holderLeft,
+			holderRight,
+			holderLeft,
+			holderRight,
+			512.0f);
+	const float anchorY =
+		SpideyChooseGameplayUiFloatAnchor(
+			holderTop,
+			holderTop,
+			holderBottom,
+			holderBottom,
+			240.0f);
+
+	if (!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f))
+	{
+		x =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)x,
+					anchorX,
+					densityX));
+		y =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)y,
+					anchorY,
+					densityY));
+	}
+
+	const u16 savedScale =
+		*(u16*)0x0060D5A4;
+	const int hudScale =
+		SpideyGetGameplayHudTextScale(
+			(int)savedScale);
+	*(u16*)0x0060D5A4 =
+		(u16)hudScale;
+
+	if (gSpideyBombTimerAlignmentSamples < 24)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"bomb_timer_alignment source=text before=%d,%d after=%d,%d holder_authored=222,%.2f,300,%.2f anchor=%.1f,%.1f density=%.6f,%.6f saved_scale=%u hud_scale=%d text=%s\n",
+				beforeX,
+				beforeY,
+				x,
+				y,
+				(double)holderTop,
+				(double)holderBottom,
+				(double)anchorX,
+				(double)anchorY,
+				(double)densityX,
+				(double)densityY,
+				(unsigned int)savedScale,
+				hudScale,
+				text ?
+					text :
+					"<null>");
+			fclose(log);
+		}
+		++gSpideyBombTimerAlignmentSamples;
+	}
+
+	SpideyRetailMessDrawTextFn retail =
+		(SpideyRetailMessDrawTextFn)0x00458700;
+	const int result =
+		retail(
+			x,
+			y,
+			text,
+			option4,
+			option5);
+
+	*(u16*)0x0060D5A4 =
+		savedScale;
+
+	return result;
+}
+
+// @Ok
+// Companion wrapper for the black timer backing drawn at 0x0046239F. This is
+// the same transform used by SpideyCompatPanelFlatPoly, kept timer-specific so
+// the composite can be diagnosed without affecting unrelated panel fills.
+static void __cdecl SpideyCompatBombTimerBacking(
+		float z,
+		i32 x,
+		i32 y,
+		i32 width,
+		i32 height,
+		u8 red,
+		u8 green,
+		u8 blue,
+		i32 option9,
+		i32 option10)
+{
+	const int beforeX =
+		x;
+	const int beforeY =
+		y;
+	const int beforeWidth =
+		width;
+	const int beforeHeight =
+		height;
+
+	float densityX =
+		1.0f;
+	float densityY =
+		1.0f;
+	SpideyGetGameplayUiDensity(
+		&densityX,
+		&densityY);
+
+	float anchorX =
+		256.0f;
+	float anchorY =
+		0.0f;
+
+	if (!gSpideyFrontendUiActive &&
+		(densityX < 0.9995f ||
+		 densityX > 1.0005f ||
+		 densityY < 0.9995f ||
+		 densityY > 1.0005f))
+	{
+		const float right =
+			(float)x +
+			(float)width;
+		const float bottom =
+			(float)y +
+			(float)height;
+
+		anchorX =
+			SpideyChooseGameplayUiFloatAnchor(
+				(float)x,
+				right,
+				(float)x,
+				right,
+				512.0f);
+		anchorY =
+			SpideyChooseGameplayUiFloatAnchor(
+				(float)y,
+				(float)y,
+				bottom,
+				bottom,
+				240.0f);
+
+		const int scaledLeft =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)x,
+					anchorX,
+					densityX));
+		const int scaledRight =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					right,
+					anchorX,
+					densityX));
+		const int scaledTop =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					(float)y,
+					anchorY,
+					densityY));
+		const int scaledBottom =
+			SpideyRoundGameplayUiCoord(
+				SpideyScaleGameplayUiFloatCoord(
+					bottom,
+					anchorY,
+					densityY));
+
+		x =
+			scaledLeft;
+		y =
+			scaledTop;
+		width =
+			scaledRight -
+			scaledLeft;
+		height =
+			scaledBottom -
+			scaledTop;
+	}
+
+	if (gSpideyBombTimerAlignmentSamples < 48)
+	{
+		FILE* log =
+			SpideyOpenConsolidatedLog(
+				"COMPAT");
+		if (log)
+		{
+			fprintf(
+				log,
+				"bomb_timer_alignment source=backing before=%d,%d,%d,%d after=%d,%d,%d,%d anchor=%.1f,%.1f density=%.6f,%.6f\n",
+				beforeX,
+				beforeY,
+				beforeWidth,
+				beforeHeight,
+				x,
+				y,
+				width,
+				height,
+				(double)anchorX,
+				(double)anchorY,
+				(double)densityX,
+				(double)densityY);
+			fclose(log);
+		}
+		++gSpideyBombTimerAlignmentSamples;
+	}
+
+	SpideyRetailFlatUiPolyFn retail =
+		(SpideyRetailFlatUiPolyFn)0x00462D60;
+	retail(
+		z,
+		x,
+		y,
+		width,
+		height,
+		red,
+		green,
+		blue,
+		option9,
+		option10);
+}
+
 // @Ok
 static int __cdecl SpideyCompatCartridgeCountText(
 		i32 x,
@@ -13963,6 +14246,19 @@ static void SpideyInstallGameplayUiScaleCompat()
 			(void*)&SpideyCompatCartridgeCountText,
 			"cartridge_count_text");
 
+	const int bombTimerTextInstalled =
+		SpideyPatchDirectCall(
+			0x0046236F,
+			0x00458700,
+			(void*)&SpideyCompatBombTimerText,
+			"bomb_timer_text");
+	const int bombTimerBackingInstalled =
+		SpideyPatchDirectCall(
+			0x0046239F,
+			0x00462D60,
+			(void*)&SpideyCompatBombTimerBacking,
+			"bomb_timer_backing");
+
 	const int compassArrowQPolyInstalled =
 		SpideyPatchDirectCall(
 			0x00463D19,
@@ -14112,7 +14408,7 @@ static void SpideyInstallGameplayUiScaleCompat()
 	{
 		fprintf(
 			log,
-			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor scorpion_chase_holders=%d,%d,%d scorpion_chase_policy=item_310_shared_top_right_anchor cartridge_text=%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_holders=texture:%d,frame:%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
+			"gameplay_ui_scale_install frame_target=0x00462C30 frame_calls=%d texture_target=0x00462CD0 texture_calls=%d venom_chase_bar_calls=%d venom_chase_bar_policy=level_0x501_shared_top_center_anchor scorpion_chase_holders=%d,%d,%d scorpion_chase_policy=item_310_shared_top_right_anchor cartridge_text=%d bomb_timer=text:%d,backing:%d compass_arrow_qpoly=%d compass_live_qpoly_passthrough=2 health_qpoly=%d,%d,%d health_flat=%d,%d mysterio_boss_fill=qpoly:%d,flat:%d,gouraud:%d,%d mysterio_holders=texture:%d,frame:%d mysterio_boss_type=311 panel_qpoly=%d panel_gouraud=%d panel_flat=%d reference=512x240 baseline_output=640x480 policy=compact_holders_compass_arrow_only_cartridge_gouraud_flat_panel_qpoly_passthrough user_percent=%d\n",
 			frameCalls,
 			textureCalls,
 			venomChaseBarCoordCalls,
@@ -14120,6 +14416,8 @@ static void SpideyInstallGameplayUiScaleCompat()
 			scorpionChaseTextureTwo,
 			scorpionChaseFrame,
 			cartridgeTextInstalled,
+			bombTimerTextInstalled,
+			bombTimerBackingInstalled,
 			compassArrowQPolyInstalled,
 			healthQPolyOne,
 			healthQPolyTwo,
