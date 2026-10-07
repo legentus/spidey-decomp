@@ -844,3 +844,122 @@ Manual-aim framing records now include:
 ### Validation
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-07 — Surface-only first-person manual aim (wall/ceiling)
+
+### Requested policy
+The projected third-person wall/ceiling framing from `1e839d2` did not solve the remaining reticle problem.
+
+New explicit policy:
+- **floor manual aim:** preserve the current validated third-person mode-3 camera unchanged;
+- **wall or ceiling manual aim:** switch to a true first-person/front camera;
+- releasing Aim returns to the pushed third-person crawler camera;
+- aimed Zipline continues to use the exact visible center-camera ray.
+
+### Retail RE proof
+`CPlayer::EnterLookaroundMode @ 0x004C3580` is already a real first-person/front-camera entry path:
+- sets `player+0x8EA = 1`;
+- calls `CCamera::PushMode @ 0x00416720`;
+- `0x004C370B: push 7`;
+- calls `CCamera::SetMode @ 0x004167F0`;
+- camera enum mode 7 is `CAMERAMODE_FRONT`.
+
+The previous modern-manual-aim installer globally patched that `push 7` to `push 3`, which prevented retail FRONT mode from ever being used.
+
+`CPlayer::ExitLookaroundMode @ 0x004C3810`:
+- clears retail aim/reticle state;
+- calls `CCamera::PopMode @ 0x00416780`.
+Therefore normal Aim release already provides the correct first-person -> third-person lifecycle.
+
+### Camera dispatcher proof
+`CCamera::AI @ 0x00417CB0` dispatch mapping:
+- mode 3 -> `CM_Normal @ 0x00418E00`;
+- mode 7 -> dispatcher target `0x00418456`, immediately after all mode-specific generators.
+
+Mode 7 therefore has no independent camera-AI generator. Its first-person camera position/orientation is built by `CPlayer::SetupLookaroundCamera @ 0x004C38A0`; camera AI then runs shared:
+- `CCamera_MoveToDesiredPos @ 0x00416B10`;
+- `Utils_CalcAim @ 0x004E62D0`;
+- `LoadIntoMikeCamera @ 0x00416A20`.
+
+### Retail look-angle RE
+Retail Setup consumes:
+- `0x006A818C`: pitch target;
+- `0x006A82B4`: smoothed pitch;
+- `0x006A7FFC`: body-relative yaw target;
+- `0x006A8D54`: smoothed body-relative yaw;
+- `0x006A8D44`: previous effective body heading.
+
+Setup feeds the smoothed pitch/yaw to `M3dMaths_RotMatrixYXZ @ 0x0046E730`.
+
+Old `SpideyAI0` updates those targets from movement axes, causing the historical WASD-cursor/body-twist conflict.
+
+### New surface first-person controller
+Added:
+- `SpideySurfaceFirstPersonAimPrepare`;
+- `SpideySurfaceFirstPersonAimRelease`.
+
+On wall/ceiling + active Aim + `CAMERAMODE_FRONT`:
+1. seed world yaw/pitch from the current visible camera ray;
+2. update yaw/pitch from the same modern mouse/right-stick deltas and sensitivity used by mode-3 camera;
+3. clamp pitch to ±1024 game-angle units (±90 degrees);
+4. convert world yaw to body-relative yaw using `CPlayer::GetEffectiveHeading`;
+5. write target and smoothed retail globals together, eliminating old keyboard-era look smoothing/lag;
+6. run retail `SetupLookaroundCamera` for true first-person placement/collision.
+
+Telemetry:
+`modern_manual_camera event=surface_first_person_angles ...`
+
+### Dynamic mode policy
+The old binary patch:
+`0x004C370B: push 7 -> push 3`
+is removed.
+
+`SpideyModernAimEnterLookaroundMode` now:
+- calls retail Enter normally;
+- keeps mode 7 when `field_8E8 || field_8E9` (wall/ceiling);
+- switches immediately back to mode 3 only on ordinary floor aim.
+
+Transitions while Aim stays held are also handled:
+- floor -> wall/ceiling: mode 3 -> FRONT;
+- wall/ceiling -> floor: FRONT -> mode 3.
+
+### Movement policy
+Floor manual aim keeps the existing modern locomotion mask and third-person movement behavior.
+
+Surface first-person aim deliberately does **not** hide `field_8EA`.
+Retail aim owns the player while in first-person, so crawling movement pauses while Aim is held. This prevents the old simultaneous movement/lookaround controller conflict.
+
+Ordinary wall/ceiling crawling with Aim released is untouched.
+
+### Reticle / aimed Zipline
+`SpideyModernAimApplyCameraPoint` now accepts:
+- floor mode 3 -> existing framed TPS focus;
+- wall/ceiling mode 7 -> final retail FRONT camera focus directly.
+
+The shared camera postprocess rebuilds `field_DC0` after the final camera move in both policies.
+
+`SpideyTryModernAimedR1Zip` now accepts surface mode 7 as well as floor mode 3. Aim+Zipline therefore continues to use the exact visible first-person center ray.
+
+On successful aimed Zipline from FRONT mode:
+- call retail `CCamera::PopMode @ 0x00416780`;
+- clear first-person sidecar;
+- clear aim/reticle state;
+- then let existing state `0x40000` travel own the player.
+
+### Legacy action isolation
+Retail `SetupLookaroundCamera` also contains its original lookaround zip/swing action tail controlled by `player+0x54F`.
+
+RE:
+- `SpideyAI0 @ 0x004B1EA1` sets `+0x54F = 1`;
+- Setup reads it around `0x004C4411/0x004C4535`;
+- Setup normally clears it on all exits.
+
+For the surface first-person camera call, `+0x54F` is forced to zero so retail Setup remains camera/reticle-only and cannot compete with the already-working custom camera-directed aimed Zipline. It is intentionally left zero after the call, matching retail Setup cleanup semantics.
+
+### Previous wall/ceiling framing
+The projected-screen-up framing added in `1e839d2` remains in source but is no longer used for active wall/ceiling manual aim because those states now run mode 7. Floor behavior remains mode-0 fixed world-up framing exactly as before.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
