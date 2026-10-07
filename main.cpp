@@ -47,6 +47,7 @@
 #include "mem.h"
 #include "exp.h"
 #include "m3dcolij.h"
+#include "m3dzone.h"
 #include "m3dinit.h"
 #include "spidey.h"
 #include "message.h"
@@ -8506,6 +8507,7 @@ static int gSpideyModernAimLastBodyPosValid = 0;
 // our modern wrappers. Restore as soon as movement or the aim control is
 // released.
 static CPlayer* gSpideyModernAimLocomotionMaskedPlayer = 0;
+static CPlayer* gSpideyModernAimZipReleaseLatchPlayer = 0;
 static unsigned char gSpideyModernAimLocomotionSavedState = 0;
 static unsigned long gSpideyModernAimLocomotionMaskCount = 0;
 static unsigned long gSpideyModernAimLocomotionRestoreCount = 0;
@@ -8514,7 +8516,9 @@ static int SpideyModernAimIsEffectivelyActive(
 		CPlayer* player)
 {
 	if (!player ||
-		SpideyIsMysterioBossActive())
+		SpideyIsMysterioBossActive() ||
+		gSpideyModernAimZipReleaseLatchPlayer ==
+			player)
 	{
 		return 0;
 	}
@@ -8598,6 +8602,66 @@ static void SpideyModernAimValidateLocomotionMaskAtFrameEnd()
 	}
 }
 
+static void SpideyModernAimValidateZipReleaseLatchAtFrameEnd()
+{
+	CPlayer* player =
+		gSpideyModernAimZipReleaseLatchPlayer;
+	if (!player)
+		return;
+
+	int keepLatch =
+		0;
+	__try
+	{
+		unsigned char* input =
+			(unsigned char*)player->field_E0C;
+		CPlayer* currentPlayer =
+			*(CPlayer**)0x006A9038;
+		keepLatch =
+			currentPlayer == player &&
+			input &&
+			input[0x40] != 0;
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		keepLatch =
+			0;
+	}
+
+	if (!keepLatch)
+	{
+		gSpideyModernAimZipReleaseLatchPlayer =
+			0;
+	}
+}
+
+static void SpideyModernAimDropForZip(
+		CPlayer* player)
+{
+	if (!player)
+		return;
+
+	if (gSpideyModernAimLocomotionMaskedPlayer ==
+		player)
+	{
+		// Do not call the normal restore helper here: that would restore the
+		// saved retail aim flag to 1. A successful aimed zip deliberately
+		// exits aim before entering the 0x40000 travel state.
+		gSpideyModernAimLocomotionMaskedPlayer =
+			0;
+		gSpideyModernAimLocomotionSavedState =
+			0;
+		++gSpideyModernAimLocomotionRestoreCount;
+	}
+
+	player->field_8EA =
+		0;
+	gSpideyModernAimZipReleaseLatchPlayer =
+		player;
+	gSpideyModernAimLastBodyPosValid =
+		0;
+}
+
 typedef int (__fastcall *SpideyRetailCheckForwardsFn)(
 		CPlayer*,
 		void*,
@@ -8619,6 +8683,17 @@ static void __fastcall SpideyModernAimEnterLookaroundMode(
 {
 	SpideyRetailEnterLookaroundModeFn retail =
 		(SpideyRetailEnterLookaroundModeFn)0x004C3580;
+
+	if (player &&
+		gSpideyModernAimZipReleaseLatchPlayer ==
+			player)
+	{
+		// A camera-directed zip exits manual aim. Keep retail lookaround from
+		// immediately re-entering while the physical Aim control is still
+		// held; the frame-end latch clears as soon as Aim is released.
+		++gSpideyModernAimEnterSuppressedCalls;
+		return;
+	}
 
 	if (player &&
 		gSpideyModernAimLocomotionMaskedPlayer ==
@@ -14324,6 +14399,8 @@ static unsigned long gSpideyCameraTelemetryLastIntentFrame = 0;
 static CCamera* gSpideyModernCameraOwner = 0;
 static int gSpideyModernCameraActive = 0;
 static int gSpideyModernCameraYaw = 0;
+static int gSpideyModernCameraPitch = 0;
+static int gSpideyModernCameraRadius = 0;
 static int gSpideyModernCameraYDistance = -150;
 static unsigned long gSpideyModernCameraInputSequence = 0;
 static unsigned long gSpideyModernCameraLastConsumedSequence = 0xFFFFFFFFUL;
@@ -14343,7 +14420,7 @@ static int gSpideyManualAimViewPitchOffset = 0;
 static unsigned long gSpideyManualAimViewLastLogSequence = 0;
 
 static const int kSpideyManualAimMaxYawOffset = 768;
-static const int kSpideyManualAimMaxPitchOffset = 512;
+static const int kSpideyManualAimMaxPitchOffset = 1024;
 static const double kSpideyAngleUnitsPerRadian =
 	651.8986469044033;
 static const double kSpideyRadiansPerAngleUnit =
@@ -14499,8 +14576,9 @@ static const int kSpideyModernCameraMouseYawScale = 3;
 static const int kSpideyModernCameraMousePitchScale = 2;
 static const int kSpideyModernCameraStickYawPerFrame = 32;
 static const int kSpideyModernCameraStickPitchPerFrame = 7;
-static const int kSpideyModernCameraMinYDistance = -480;
-static const int kSpideyModernCameraMaxYDistance = 260;
+static const int kSpideyModernCameraMaxPitch = 1024;
+static const int kSpideyModernCameraCollisionMarginUnits = 24;
+static const int kSpideyModernCameraCollisionStartInsetUnits = 16;
 
 static const char* SpideyCameraModeName(
 		int mode)
@@ -14535,22 +14613,199 @@ static const char* SpideyCameraModeName(
 	}
 }
 
-static int SpideyClampModernCameraYDistance(
-		int distance)
+static int SpideyModernCameraSignedAngle(
+		int angle)
 {
-	if (distance <
-		kSpideyModernCameraMinYDistance)
+	angle &=
+		0x0FFF;
+	if (angle > 2048)
+		angle -= 4096;
+	return angle;
+}
+
+static int SpideyClampModernCameraPitch(
+		int pitch)
+{
+	if (pitch <
+		-kSpideyModernCameraMaxPitch)
 	{
-		return kSpideyModernCameraMinYDistance;
+		return -kSpideyModernCameraMaxPitch;
 	}
 
-	if (distance >
-		kSpideyModernCameraMaxYDistance)
+	if (pitch >
+		kSpideyModernCameraMaxPitch)
 	{
-		return kSpideyModernCameraMaxYDistance;
+		return kSpideyModernCameraMaxPitch;
 	}
 
-	return distance;
+	return pitch;
+}
+
+static int SpideyRoundCameraDouble(
+		double value)
+{
+	if (value >= 0.0)
+		return (int)(value + 0.5);
+	return (int)(value - 0.5);
+}
+
+static unsigned long gSpideyModernCameraCollisionChecks = 0;
+static unsigned long gSpideyModernCameraCollisionHits = 0;
+static unsigned long gSpideyModernCameraCollisionLogs = 0;
+
+static int SpideyModernCameraClipToWorld(
+		CCamera* camera,
+		CPlayer* player)
+{
+	if (!camera)
+		return 0;
+
+	CVector start =
+		camera->field_144;
+
+	// Begin slightly inside the playable side of Spider-Man's current
+	// surface. This prevents a floor/ceiling/wall contact from starting the
+	// camera ray exactly on the plane that is supposed to constrain it.
+	if (player)
+	{
+		start.vx +=
+			player->field_C84.vx *
+			kSpideyModernCameraCollisionStartInsetUnits;
+		start.vy +=
+			player->field_C84.vy *
+			kSpideyModernCameraCollisionStartInsetUnits;
+		start.vz +=
+			player->field_C84.vz *
+			kSpideyModernCameraCollisionStartInsetUnits;
+	}
+
+	const CVector desired =
+		camera->mPos;
+
+	if (start.vx == desired.vx &&
+		start.vy == desired.vy &&
+		start.vz == desired.vz)
+	{
+		return 0;
+	}
+
+	SLineInfo lineInfo;
+	lineInfo.StartCoords =
+		start;
+	lineInfo.EndCoords =
+		desired;
+
+	typedef void (__cdecl *SpideyRetailInitLineInfoFn)(
+		SLineInfo*);
+	typedef void (__cdecl *SpideyRetailZoneLineFn)(
+		SLineInfo*,
+		i32);
+
+	SpideyRetailInitLineInfoFn initLine =
+		(SpideyRetailInitLineInfoFn)0x004524C0;
+	SpideyRetailZoneLineFn lineToWorld =
+		(SpideyRetailZoneLineFn)0x004549A0;
+
+	initLine(
+		&lineInfo);
+	lineInfo.RecordTriggerZoneHits =
+		0;
+	lineToWorld(
+		&lineInfo,
+		1);
+	++gSpideyModernCameraCollisionChecks;
+
+	if (!lineInfo.pItem)
+		return 0;
+
+	const double dx =
+		(double)lineInfo.Position.vx -
+		(double)start.vx;
+	const double dy =
+		(double)lineInfo.Position.vy -
+		(double)start.vy;
+	const double dz =
+		(double)lineInfo.Position.vz -
+		(double)start.vz;
+	const double length =
+		sqrt(
+			dx * dx +
+			dy * dy +
+			dz * dz);
+
+	if (length <= 1.0)
+	{
+		camera->mPos =
+			start;
+	}
+	else
+	{
+		const double margin =
+			(double)(
+				kSpideyModernCameraCollisionMarginUnits *
+				4096);
+		double keptLength =
+			length -
+			margin;
+		if (keptLength < 0.0)
+			keptLength = 0.0;
+
+		const double scale =
+			keptLength /
+			length;
+
+		camera->mPos.vx =
+			start.vx +
+			SpideyRoundCameraDouble(
+				dx * scale);
+		camera->mPos.vy =
+			start.vy +
+			SpideyRoundCameraDouble(
+				dy * scale);
+		camera->mPos.vz =
+			start.vz +
+			SpideyRoundCameraDouble(
+				dz * scale);
+	}
+
+	++gSpideyModernCameraCollisionHits;
+
+	if (gSpideyModernCameraCollisionLogs < 64)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"CAMERA");
+		if (f)
+		{
+			fprintf(
+				f,
+				"modern_camera_collision hit=%lu check=%lu pitch=%d start=%d,%d,%d desired=%d,%d,%d contact=%d,%d,%d clipped=%d,%d,%d distance=%ld margin_units=%d player_surface=%d,%d,%d\n",
+				gSpideyModernCameraCollisionHits,
+				gSpideyModernCameraCollisionChecks,
+				gSpideyModernCameraPitch,
+				start.vx,
+				start.vy,
+				start.vz,
+				desired.vx,
+				desired.vy,
+				desired.vz,
+				lineInfo.Position.vx,
+				lineInfo.Position.vy,
+				lineInfo.Position.vz,
+				camera->mPos.vx,
+				camera->mPos.vy,
+				camera->mPos.vz,
+				(long)lineInfo.Distance,
+				kSpideyModernCameraCollisionMarginUnits,
+				player ? player->field_C84.vx : 0,
+				player ? player->field_C84.vy : 0,
+				player ? player->field_C84.vz : 0);
+			fclose(f);
+		}
+		++gSpideyModernCameraCollisionLogs;
+	}
+
+	return 1;
 }
 
 static int SpideyModernCameraHasIntent(
@@ -14595,11 +14850,13 @@ static void SpideyModernCameraRelease(
 	{
 		fprintf(
 			f,
-			"modern_camera event=release reason=%s camera=0x%08lX mode=%d yaw=%d y_dist=%d\n",
+			"modern_camera event=release reason=%s camera=0x%08lX mode=%d yaw=%d pitch=%d radius=%d y_dist=%d\n",
 			reason ? reason : "unknown",
 			(unsigned long)camera,
 			mode,
 			gSpideyModernCameraYaw,
+			gSpideyModernCameraPitch,
+			gSpideyModernCameraRadius,
 			gSpideyModernCameraYDistance);
 		fclose(f);
 	}
@@ -14767,9 +15024,28 @@ static void __fastcall SpideyModernMode3Camera(
 		gSpideyModernCameraYaw =
 			(int)camera->field_236 &
 			0x0FFF;
+
+		const int seedXZDistance =
+			*(int*)0x00548860;
+		const int seedYDistance =
+			*(int*)0x00548864;
+		gSpideyModernCameraRadius =
+			M3dMaths_SquareRoot0(
+				seedXZDistance *
+					seedXZDistance +
+				seedYDistance *
+					seedYDistance);
+		if (gSpideyModernCameraRadius < 1)
+			gSpideyModernCameraRadius = 1;
+
+		gSpideyModernCameraPitch =
+			SpideyClampModernCameraPitch(
+				SpideyModernCameraSignedAngle(
+					ratan2(
+						-seedYDistance,
+						seedXZDistance)));
 		gSpideyModernCameraYDistance =
-			SpideyClampModernCameraYDistance(
-				*(int*)0x00548864);
+			seedYDistance;
 		gSpideyModernCameraActive =
 			1;
 		gSpideyModernCameraLastLogSequence =
@@ -14782,9 +15058,11 @@ static void __fastcall SpideyModernMode3Camera(
 		{
 			fprintf(
 				f,
-				"modern_camera event=acquire camera=0x%08lX mode=3 seed_yaw=%d seed_y_dist=%d mouse=%d,%d stick=%.4f,%.4f ownership=mode3_only\n",
+				"modern_camera event=acquire camera=0x%08lX mode=3 seed_yaw=%d seed_pitch=%d seed_radius=%d seed_y_dist=%d mouse=%d,%d stick=%.4f,%.4f ownership=mode3_only\n",
 				(unsigned long)camera,
 				gSpideyModernCameraYaw,
+				gSpideyModernCameraPitch,
+				gSpideyModernCameraRadius,
 				gSpideyModernCameraYDistance,
 				mouseX,
 				mouseY,
@@ -14841,26 +15119,38 @@ static void __fastcall SpideyModernMode3Camera(
 			(gSpideyModernCameraYaw +
 			 yawDelta) &
 			0x0FFF;
-		gSpideyModernCameraYDistance =
-			SpideyClampModernCameraYDistance(
-				gSpideyModernCameraYDistance +
+		// The old implementation changed a Y offset and derived pitch from
+		// that value, which could never reach a true vertical view. Preserve
+		// the existing input direction while storing pitch explicitly:
+		// increasing the old Y distance decreased the derived vertical angle.
+		gSpideyModernCameraPitch =
+			SpideyClampModernCameraPitch(
+				gSpideyModernCameraPitch -
 					pitchDelta);
 	}
 
-	const int xzDistance =
-		*(int*)0x00548860;
+	const double pitchRadians =
+		(double)gSpideyModernCameraPitch *
+		kSpideyRadiansPerAngleUnit;
+	int xzDistance =
+		SpideyRoundCameraDouble(
+			cos(pitchRadians) *
+			(double)gSpideyModernCameraRadius);
+	if (xzDistance < 1)
+		xzDistance = 1;
+
 	const int yDistance =
-		gSpideyModernCameraYDistance;
-	const int distanceSquared =
-		xzDistance * xzDistance +
-		yDistance * yDistance;
+		SpideyRoundCameraDouble(
+			-sin(pitchRadians) *
+			(double)gSpideyModernCameraRadius);
 	const int radialDistance =
-		M3dMaths_SquareRoot0(
-			distanceSquared);
+		gSpideyModernCameraRadius;
 	const int verticalAngle =
-		ratan2(
-			-yDistance,
-			xzDistance);
+		gSpideyModernCameraPitch &
+		0x0FFF;
+
+	gSpideyModernCameraYDistance =
+		yDistance;
 
 	camera->field_236 =
 		(i16)(
@@ -14872,6 +15162,8 @@ static void __fastcall SpideyModernMode3Camera(
 	// after CM_Normal sees the same modern vertical orbit request.
 	*(int*)0x00548864 =
 		yDistance;
+	*(int*)0x00548860 =
+		xzDistance;
 	*(int*)0x0054885C =
 		radialDistance;
 	*(int*)0x00548858 =
@@ -15138,6 +15430,20 @@ static void __fastcall SpideyModernAimCameraPostprocess(
 				camera);
 	}
 
+	// The original camera collision was authored for the game's narrow
+	// vertical orbit. At modern pitch angles, explicitly constrain the whole
+	// focus-to-camera arm against world geometry before retail computes the
+	// final orientation. This makes walls, floors and ceilings equivalent
+	// camera boundaries, including while Spider-Man is ceiling-crawling.
+	if (gSpideyModernCameraActive &&
+		camera->mCameraMode ==
+			CAMERAMODE_DEMO)
+	{
+		SpideyModernCameraClipToWorld(
+			camera,
+			player);
+	}
+
 	retail(
 		camera,
 		0);
@@ -15215,13 +15521,14 @@ static void SpideyInstallModernCameraCompat()
 	{
 		fprintf(
 			f,
-			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_y_dist=%d..%d collision=retail_after_mode3 manual_aim_free_view=0 manual_tps_unified=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=framed_above_body manual_framing=%d manual_framing_call=0x00418458 framing_up_units=%d manual_publish=%d manual_publish_call=retail_untouched_0x0041865F retail_publish=0x00416A20\n",
+			"modern_camera_install installed=%d call=0x00418414 retail_mode3=0x00418E00 ownership=mode3_only activation=input_intent mouse=relative_directinput stick=input11_right sensitivity_percent=%d sensitivity_range=%d-%d pitch_limit_units=%d pitch_limit_degrees=90 collision=world_arm_clip collision_margin_units=%d collision_start_inset_units=%d manual_aim_free_view=0 manual_tps_unified=1 manual_yaw_offset_limit=%d manual_pitch_offset_limit=%d manual_focus=framed_above_body manual_framing=%d manual_framing_call=0x00418458 framing_up_units=%d manual_publish=%d manual_publish_call=retail_untouched_0x0041865F retail_publish=0x00416A20\n",
 			installed,
 			gSpideyCameraSensitivityPercent,
 			kSpideyCameraSensitivityMinPercent,
 			kSpideyCameraSensitivityMaxPercent,
-			kSpideyModernCameraMinYDistance,
-			kSpideyModernCameraMaxYDistance,
+			kSpideyModernCameraMaxPitch,
+			kSpideyModernCameraCollisionMarginUnits,
+			kSpideyModernCameraCollisionStartInsetUnits,
 			kSpideyManualAimMaxYawOffset,
 			kSpideyManualAimMaxPitchOffset,
 			manualFramingInstalled,
@@ -18901,6 +19208,230 @@ static unsigned long gSpideyZipStaleAimLogs = 0;
 static unsigned long gSpideyZipModernAimBlocks = 0;
 static unsigned long gSpideyZipModernAimBlockLogs = 0;
 
+static unsigned long gSpideyModernAimedZipAttempts = 0;
+static unsigned long gSpideyModernAimedZipCameraHits = 0;
+static unsigned long gSpideyModernAimedZipSuccess = 0;
+static unsigned long gSpideyModernAimedZipLogs = 0;
+static CPlayer* gSpideyModernAimedZipValidationPlayer = 0;
+
+static u8 SpideyTryModernAimedR1Zip(
+		CPlayer* player,
+		SpideyRetailZipCheckFn retail,
+		const SpideyZipButtonRecordSnapshot& aimButton,
+		const SpideyZipButtonRecordSnapshot& zipButton,
+		int* handled)
+{
+	if (handled)
+		*handled = 0;
+
+	if (!player ||
+		!retail ||
+		!aimButton.held ||
+		!zipButton.held ||
+		!SpideyModernAimIsEffectivelyActive(
+			player))
+	{
+		return 0;
+	}
+
+	CCamera* camera =
+		*(CCamera**)0x0056F3B8;
+	if (!camera ||
+		camera->mCameraMode !=
+			CAMERAMODE_DEMO)
+	{
+		return 0;
+	}
+
+	if (handled)
+		*handled = 1;
+	++gSpideyModernAimedZipAttempts;
+
+	// Refresh the center-camera ray from the current camera/focus pair. This
+	// is the same ray that drives the visible manual-aim reticle.
+	SpideyModernAimApplyCameraPoint(
+		player,
+		camera);
+
+	SLineInfo cameraLine;
+	cameraLine.StartCoords =
+		camera->mPos;
+	cameraLine.EndCoords =
+		player->field_DC0;
+
+	typedef void (__cdecl *SpideyRetailInitLineInfoFn)(
+		SLineInfo*);
+	typedef void (__cdecl *SpideyRetailZoneLineFn)(
+		SLineInfo*,
+		i32);
+
+	SpideyRetailInitLineInfoFn initLine =
+		(SpideyRetailInitLineInfoFn)0x004524C0;
+	SpideyRetailZoneLineFn lineToWorld =
+		(SpideyRetailZoneLineFn)0x004549A0;
+
+	initLine(
+		&cameraLine);
+	cameraLine.RecordTriggerZoneHits =
+		0;
+	lineToWorld(
+		&cameraLine,
+		1);
+
+	if (!cameraLine.pItem)
+	{
+		if (gSpideyModernAimedZipLogs < 96)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"web_zip_aimed event=no_camera_hit attempt=%lu tick=%ld camera=%ld,%ld,%ld ray_end=%ld,%ld,%ld body=%ld,%ld,%ld\n",
+					gSpideyModernAimedZipAttempts,
+					(long)*(volatile long*)0x006B4CA8,
+					(long)camera->mPos.vx,
+					(long)camera->mPos.vy,
+					(long)camera->mPos.vz,
+					(long)player->field_DC0.vx,
+					(long)player->field_DC0.vy,
+					(long)player->field_DC0.vz,
+					(long)player->mPos.vx,
+					(long)player->mPos.vy,
+					(long)player->mPos.vz);
+				fclose(f);
+			}
+			++gSpideyModernAimedZipLogs;
+		}
+		return 0;
+	}
+
+	++gSpideyModernAimedZipCameraHits;
+
+	const double dx =
+		(double)cameraLine.Position.vx -
+		(double)player->mPos.vx;
+	const double dy =
+		(double)cameraLine.Position.vy -
+		(double)player->mPos.vy;
+	const double dz =
+		(double)cameraLine.Position.vz -
+		(double)player->mPos.vz;
+	const double length =
+		sqrt(
+			dx * dx +
+			dy * dy +
+			dz * dz);
+
+	if (length < 4096.0)
+	{
+		return 0;
+	}
+
+	CVector aimedDirection;
+	aimedDirection.vx =
+		SpideyRoundCameraDouble(
+			dx * 4096.0 /
+			length);
+	aimedDirection.vy =
+		SpideyRoundCameraDouble(
+			dy * 4096.0 /
+			length);
+	aimedDirection.vz =
+		SpideyRoundCameraDouble(
+			dz * 4096.0 /
+			length);
+
+	const CVector savedSurfaceDirection =
+		player->field_C84;
+	const unsigned char savedAimState =
+		player->field_8EA;
+
+	// Retail R1 normally searches along Spider-Man's current surface-normal
+	// basis and rejects while lookaround owns field_8EA. For modern aimed
+	// zip, substitute only the search direction and clear that one gate.
+	// Retail still performs its own body->surface raycast, range/face checks,
+	// web creation, target/normal capture and transition to state 0x40000.
+	player->field_C84 =
+		aimedDirection;
+	player->field_8EA =
+		0;
+	gSpideyModernAimedZipValidationPlayer =
+		player;
+
+	u8 result =
+		0;
+	__try
+	{
+		result =
+			retail(
+				player,
+				0);
+	}
+	__finally
+	{
+		gSpideyModernAimedZipValidationPlayer =
+			0;
+		player->field_C84 =
+			savedSurfaceDirection;
+
+		if (!result)
+		{
+			player->field_8EA =
+				savedAimState;
+		}
+	}
+
+	if (result)
+	{
+		++gSpideyModernAimedZipSuccess;
+		SpideyModernAimDropForZip(
+			player);
+	}
+
+	if (gSpideyModernAimedZipLogs < 96)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"web_zip_aimed event=retail_r1 attempt=%lu camera_hits=%lu success=%lu tick=%ld result=%u camera_hit=%ld,%ld,%ld camera_hit_distance=%ld aimed_dir=%ld,%ld,%ld retail_target=%ld,%ld,%ld retail_normal=%ld,%ld,%ld saved_surface=%ld,%ld,%ld state=0x%08lX anim=%u\n",
+				gSpideyModernAimedZipAttempts,
+				gSpideyModernAimedZipCameraHits,
+				gSpideyModernAimedZipSuccess,
+				(long)*(volatile long*)0x006B4CA8,
+				(unsigned int)result,
+				(long)cameraLine.Position.vx,
+				(long)cameraLine.Position.vy,
+				(long)cameraLine.Position.vz,
+				(long)cameraLine.Distance,
+				(long)aimedDirection.vx,
+				(long)aimedDirection.vy,
+				(long)aimedDirection.vz,
+				(long)player->field_DC0.vx,
+				(long)player->field_DC0.vy,
+				(long)player->field_DC0.vz,
+				(long)player->field_DA0.vx,
+				(long)player->field_DA0.vy,
+				(long)player->field_DA0.vz,
+				(long)savedSurfaceDirection.vx,
+				(long)savedSurfaceDirection.vy,
+				(long)savedSurfaceDirection.vz,
+				(unsigned long)player->field_E1C,
+				(unsigned int)player->mAnim);
+			fclose(f);
+		}
+		++gSpideyModernAimedZipLogs;
+	}
+
+	return result;
+}
+
 static int SpideyZipBlockedByModernAimLocomotion(
 		CPlayer* player,
 		const SpideyZipButtonRecordSnapshot& aimButton)
@@ -19269,12 +19800,18 @@ static u8 __fastcall SpideyTraceR1ZipCheck(
 
 	u8 result =
 		0;
-	const int blockedByModernAim =
-		SpideyZipBlockedByModernAimLocomotion(
-			player,
-			aimButton);
+	int aimedHandled =
+		0;
 
-	if (!blockedByModernAim)
+	result =
+		SpideyTryModernAimedR1Zip(
+			player,
+			retail,
+			aimButton,
+			zipButton,
+			&aimedHandled);
+
+	if (!aimedHandled)
 	{
 		const int staleAimCleared =
 			SpideyZipClearStaleModernAimGate(
@@ -19410,12 +19947,57 @@ static u8 __fastcall SpideyTraceZipAvailability(
 		(SpideyRetailZipAvailabilityFn)0x004C30D0;
 	++gSpideyZipAvailabilityCalls;
 
-	const u8 result =
+	u8 result =
 		retail(
 			player,
 			0,
 			lineInfo,
 			maxDistance);
+
+	long faceFlags = 0;
+	if (lineInfo)
+	{
+		__try
+		{
+			if (lineInfo->pFace)
+			{
+				faceFlags =
+					(long)lineInfo->pFace[3];
+			}
+		}
+		__except(EXCEPTION_EXECUTE_HANDLER)
+		{
+			faceFlags = 0;
+		}
+	}
+
+	const long minDistance =
+		player &&
+		player->field_E1C == 4 ?
+			8 :
+			16;
+	const int aimedCameraValidation =
+		player &&
+		lineInfo &&
+		gSpideyModernAimedZipValidationPlayer ==
+			player;
+
+	if (aimedCameraValidation)
+	{
+		// The retail orientation test is defined relative to Spider-Man's
+		// current crawl/surface basis because legacy R1 can only search along
+		// that basis. Aimed zip already acquired this candidate through the
+		// center-camera ray, so retain the retail range and non-zippable-face
+		// rules while replacing only that obsolete orientation constraint.
+		result =
+			lineInfo->Distance >
+				minDistance &&
+			lineInfo->Distance <
+				maxDistance &&
+			!(faceFlags & 0x40000) ?
+				1 :
+				0;
+	}
 
 	if (!player ||
 		!lineInfo ||
@@ -19425,34 +20007,20 @@ static u8 __fastcall SpideyTraceZipAvailability(
 		return result;
 	}
 
-	long faceFlags = 0;
-	__try
-	{
-		if (lineInfo->pFace)
-		{
-			faceFlags =
-				(long)lineInfo->pFace[3];
-		}
-	}
-	__except(EXCEPTION_EXECUTE_HANDLER)
-	{
-		faceFlags = 0;
-	}
-
-	const long minDistance =
-		player->field_E1C == 4 ?
-			8 :
-			16;
 	const char* reason =
 		result ?
-			"accepted" :
+			(aimedCameraValidation ?
+				"accepted_aimed_camera" :
+				"accepted") :
 		lineInfo->Distance <= minDistance ?
 			"distance_low" :
 		lineInfo->Distance >= maxDistance ?
 			"distance_high" :
 		(faceFlags & 0x40000) ?
 			"face_no_zip" :
-			"orientation_or_other";
+			(aimedCameraValidation ?
+				"aimed_camera_rejected" :
+				"orientation_or_other");
 
 	FILE* f =
 		SpideyOpenConsolidatedLog(
@@ -19733,6 +20301,7 @@ static void SpideyRecordPresentTiming()
 		0;
 
 	SpideyModernAimValidateLocomotionMaskAtFrameEnd();
+	SpideyModernAimValidateZipReleaseLatchAtFrameEnd();
 
 	SpideyTryRebindBinkAudio(
 		"frame_safe_point");

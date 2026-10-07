@@ -15814,3 +15814,173 @@ Telemetry:
 ### Validation
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-07 — Camera-directed aimed Zipline + full ±90° modern pitch + floor/ceiling camera boundaries
+
+### Requested behavior
+This batch supersedes the temporary policy from commit `7be83fa1` that blocked Zipline while modern Aim was held.
+
+Desired behavior is now:
+1. Aim + Zipline should zip toward the actual center-reticle surface.
+2. Aim released + Zipline should retain the original retail quick/surface-normal Zipline.
+3. Normal and manual-aim camera pitch should reach straight up and straight down (±90°).
+4. Floors, ceilings and walls should constrain the modern camera arm so the camera does not cross world geometry, including while ceiling-crawling.
+
+### Live evidence that motivated aimed Zipline
+The `4079f2cd` live log showed:
+- while retail aim was visible (`field_8EA=1`), Aim + Zipline was rejected;
+- the modern aimed-locomotion mask temporarily hid `field_8EA`;
+- R1 then accepted while physical Aim was still held;
+- the accepted target was the legacy surface-normal target, not the reticle target;
+- the no-collision zip travel path could therefore tunnel through geometry toward a point unrelated to what the player was aiming at.
+
+The correct compatibility behavior is not to block aimed Zipline, but to provide a camera-directed target query.
+
+### Camera-directed R1 aimed Zipline
+Added `SpideyTryModernAimedR1Zip`.
+
+Activation:
+- processed Aim record `input+0x40` held;
+- processed Zipline record `input+0x60` held;
+- modern manual aim effectively active;
+- gameplay mode-3 camera active.
+
+Target acquisition:
+- refresh the same center-camera ray used by the visible reticle via `SpideyModernAimApplyCameraPoint`;
+- cast from final camera position to that ray endpoint using retail world collision:
+  - `M3dColij_InitLineInfo @ 0x004524C0`;
+  - `M3dZone_LineToItem @ 0x004549A0`;
+- if the reticle ray finds no world surface, aimed Zipline returns false instead of falling back to legacy surface-normal zip;
+- convert `camera-hit - player-position` to a normalized 4096-scale direction;
+- temporarily substitute only `player->field_C84` with that direction and clear retail aim gate `field_8EA`;
+- call untouched retail R1 `0x004C0EE0`;
+- immediately restore Spider-Man's real `field_C84`.
+
+Retail still owns:
+- held-object / other zip gates;
+- player-to-surface raycast;
+- maximum distance;
+- non-zippable face rules;
+- final hit position and normal;
+- web creation;
+- animation 270;
+- state `0x40000`;
+- travel/landing state machine.
+
+Important RE correction:
+- R1 register `EDI` is `player+8` / `mPos`, so the copy to `player+0x558` is a position snapshot, not a copy of `field_C84`.
+- Temporarily steering `field_C84` therefore does not poison that downstream position snapshot.
+
+### Aimed availability policy
+Retail `CheckZipWebAvailability @ 0x004C30D0` contains an orientation check tied to the old surface-normal-only R1 design.
+
+For an active camera-directed aimed R1 only, the wrapper now:
+- preserves retail minimum distance;
+- preserves retail maximum distance;
+- preserves `pFace[3] & 0x40000` non-zippable rejection;
+- treats acquisition through the center-camera ray as the orientation criterion.
+
+Quick/non-aimed Zipline uses retail availability unchanged.
+
+Telemetry:
+- `web_zip_aimed event=no_camera_hit ...`
+- `web_zip_aimed event=retail_r1 ... camera_hit=... aimed_dir=... retail_target=... retail_normal=...`
+- `web_zip_availability ... reason=accepted_aimed_camera`
+
+### Aim exit/re-entry after aimed zip
+A successful aimed zip deliberately exits manual aim before retail zip travel owns state `0x40000`.
+
+Added:
+- `gSpideyModernAimZipReleaseLatchPlayer`;
+- `SpideyModernAimDropForZip`;
+- `SpideyModernAimValidateZipReleaseLatchAtFrameEnd`.
+
+Behavior:
+- clear retail `field_8EA`;
+- discard any active aimed-locomotion mask without restoring aim=1;
+- suppress immediate `EnterLookaroundMode` re-entry while the physical Aim key remains held;
+- clear the latch when Aim is released.
+
+This prevents manual-aim control from fighting animation/travel after a successful aimed zip.
+
+### Full ±90° camera pitch
+The previous modern camera did not store pitch as an angle. It stored a Y-distance offset clamped to `-480..260`, then derived angle from fixed horizontal distance. That architecture cannot reach a true vertical view.
+
+Modern mode-3 camera now stores:
+- `gSpideyModernCameraPitch` in the game's 4096-unit full-circle angle convention;
+- `gSpideyModernCameraRadius` as the orbit radius.
+
+Pitch clamp:
+- `-1024..+1024` = `-90°..+90°`.
+
+On modern-camera acquisition:
+- preserve the current retail view by deriving radius and signed pitch from the existing XZ/Y distances.
+
+Each update:
+- mouse/right-stick modify explicit pitch;
+- solve:
+  - horizontal arm = `cos(pitch) * radius`;
+  - vertical arm = `-sin(pitch) * radius`;
+- publish coherent retail globals:
+  - `0x00548860` XZ distance;
+  - `0x00548864` Y distance;
+  - `0x0054885C` radial distance;
+  - `0x00548858` vertical angle.
+
+At the exact ±90° clamp, horizontal arm is kept at a minimum value of 1 rather than literal zero to avoid legacy normalization/divide edge cases. Visually this is effectively straight up/down.
+
+Manual aim uses the same unified mode-3 orbit, so the same ±90° range applies in both normal look and manual aim.
+
+### Modern camera floor/ceiling/wall collision
+Added `SpideyModernCameraClipToWorld`.
+
+After mode-3 generates the desired modern camera position and before the shared retail postprocess computes final orientation:
+- cast from camera focus toward desired camera position using retail world-line collision;
+- start the ray 16 world units into the playable side of Spider-Man's current surface using `field_C84`, avoiding self-contact with the floor/ceiling/wall plane;
+- if geometry blocks the camera arm, shorten it to the first hit minus a 24-world-unit safety margin;
+- then run retail camera postprocess/orientation normally.
+
+This treats:
+- walls;
+- floors;
+- ceilings
+as equivalent camera boundaries and specifically covers ceiling-crawl cases where the previous unrestricted vertical orbit could put the camera above/through the ceiling.
+
+Telemetry:
+`modern_camera_collision hit=... pitch=... start=... desired=... contact=... clipped=...`
+
+Installer telemetry now reports:
+- `pitch_limit_units=1024 pitch_limit_degrees=90`;
+- `collision=world_arm_clip`;
+- collision margin/start inset.
+
+### Scope preserved
+Untouched:
+- native-60 web-zip half-displacement fix at retail `0x00466DBC`;
+- quick Zipline when Aim is released;
+- Hostage Situation synthesized Zipline path;
+- Mysterio boss retail-camera takeover;
+- scripted player-input camera surrender;
+- legacy FX View-matrix anchoring fixes.
+
+### Validation
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+- `Release/spider.dll`: 929,792 bytes
+- pre-commit SHA-256:
+  `4c21d00ef1f6c152b9dedb062c959c29966402283aa9474825135d81d9021f2d`
+
+### Runtime test
+Run:
+`F:\Spider-Man 2000 Recomp\project main\TEST_LATEST_BUILD.bat`
+
+High-value checks:
+1. Normal camera: look continuously up and down and verify both ends reach effectively straight vertical.
+2. Hold manual Aim and repeat; reticle should stay on the same camera ray through the full pitch range.
+3. Stand near a ceiling/floor/wall and deliberately rotate the camera into it; camera should shorten its arm instead of crossing the surface.
+4. Ceiling crawl and look upward into the ceiling; camera must remain on the playable side.
+5. Hold Aim, put the reticle on a visible zippable wall/ceiling, press Zipline (keyboard `3` in current config); Spider-Man should zip toward that reticle surface.
+6. Aim into open space and press Zipline; no legacy fallback zip should occur.
+7. Release Aim and press Zipline; original quick/surface-normal retail zip should still work.
+8. Hostage Situation opening scripted zip should remain functional.
