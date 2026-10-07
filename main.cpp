@@ -6464,6 +6464,9 @@ static int gSpideyBaddyAITraceVtableCount = 0;
 static unsigned long gSpideyBaddyAITraceCalls = 0;
 static unsigned long gSpideyBaddyAITraceReturns = 0;
 
+static unsigned long gSpideyPostDropThugSafetyUntilTick = 0;
+static unsigned long gSpideyPostDropThugSkippedCalls = 0;
+
 static SpideyBaddyAITraceVtable* SpideyFindBaddyAITraceVtable(
 		unsigned long vtable)
 {
@@ -6534,6 +6537,39 @@ static void __fastcall SpideyBaddyAITraceThunk(
 	const int trace =
 		SpideyDropHangTraceIsActive();
 
+	CPlayer* player =
+		SpideyDropHangTracePlayer();
+	const unsigned long tick =
+		SpideyDropHangTraceTick();
+
+	// Live hangs are now proven to occur inside retail CThug_AI for a
+	// type-304 thug on the first frames immediately following a ceiling
+	// drop-attack landing. The BaddyList is structurally healthy, and the
+	// same thug returns normally before entering this transition.
+	//
+	// Keep a tiny post-landing quarantine window for only type-304 thug AI.
+	// This avoids the pathological retail transition without pausing other
+	// enemy classes or disabling thug AI outside the proven edge.
+	if (trace &&
+		player &&
+		player->mAnim ==
+			134 &&
+		(player->mCollision & 2))
+	{
+		gSpideyPostDropThugSafetyUntilTick =
+			tick +
+			8;
+	}
+
+	const int postDropThugGuard =
+		type ==
+			304 &&
+		(long)(
+			tick -
+			gSpideyPostDropThugSafetyUntilTick) <= 0 &&
+		gSpideyPostDropThugSafetyUntilTick !=
+			0;
+
 	++gSpideyBaddyAITraceCalls;
 
 	if (trace)
@@ -6570,6 +6606,40 @@ static void __fastcall SpideyBaddyAITraceThunk(
 					0));
 			fclose(f);
 		}
+	}
+
+	if (postDropThugGuard)
+	{
+		++gSpideyPostDropThugSkippedCalls;
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_ai_trace event=post_drop_thug_skip call=%lu skipped=%lu tick=%lu safety_until=%lu body=0x%08lX vtable=0x%08lX type=%u state=0x%08lX player_anim=%u player_frame=%d policy=skip_type304_ai_for_8_ticks_after_grounded_ceiling_smash_landing\\n",
+				gSpideyBaddyAITraceCalls,
+				gSpideyPostDropThugSkippedCalls,
+				tick,
+				gSpideyPostDropThugSafetyUntilTick,
+				(unsigned long)body,
+				vtable,
+				type,
+				player ?
+					(unsigned long)player->field_E1C :
+					0UL,
+				player ?
+					(unsigned int)player->mAnim :
+					0U,
+				player ?
+					(int)player->mFrame :
+					0);
+			fclose(f);
+		}
+
+		return;
 	}
 
 	if (!entry ||

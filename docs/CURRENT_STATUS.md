@@ -17407,3 +17407,81 @@ If no cycle is reported and the game still freezes, inspect the final:
 without a matching return. That gives the exact enemy AI callback for the next targeted repair.
 
 Bomb-timer alignment, first-person camera behavior, and the earlier repeated-smash recovery fix remain intact.
+
+
+## 2026-10-07 — Exact frozen enemy AI identified; narrow post-drop type-304 thug guard
+
+### Live freeze on acff80d7
+
+The BaddyList validator proved the list itself is healthy at the freeze:
+
+- 6 nodes;
+- no repeated pointer;
+- no self-loop;
+- no previous-link mismatch;
+- no read fault;
+- no cycle repair occurred.
+
+The per-baddy AI trace then identified the exact non-returning callback.
+
+Final sequence:
+
+- type-305 thug at body 0x169D2A40 -> AI 0x00442D10 returned;
+- type-305 thug at body 0x169D5DA0 -> AI 0x00442D10 returned;
+- type-304 thug at body 0x169D68A0 -> AI 0x004DB280 returned;
+- **type-304 thug at body 0x169D6F60 -> AI 0x004DB280 entered and never returned**.
+
+Exact last marker:
+
+`baddy_ai_trace event=enter call=2974 tick=9091 body=0x169D6F60 vtable=0x0053C550 type=304 ... original_ai=0x004DB280 ... state=0x00000001 anim=134`
+
+There is no matching `baddy_ai_trace event=return`.
+
+Symbol resolution:
+
+`0x004DB280 = CThug_AI`.
+
+Therefore this freeze is not a BaddyList traversal cycle. It is an infinite/busy loop inside retail `CThug_AI` for a type-304 thug during the immediate grounded ceiling-drop landing transition.
+
+### Targeted compatibility fix
+
+Added a very narrow post-drop safety window inside `SpideyBaddyAITraceThunk`.
+
+When the armed ceiling-smash trace sees:
+
+- player animation 134;
+- grounded collision;
+
+it sets:
+
+`gSpideyPostDropThugSafetyUntilTick = currentTick + 8`.
+
+During only that short window, calls are skipped when:
+
+- baddy `mType == 304`;
+- current tick is still inside the safety window.
+
+Other enemy classes continue updating normally.
+
+Type-304 thug AI resumes immediately after the 8-tick window.
+
+This avoids invoking the exact proven pathological retail callback during the transition where the live freeze occurs, without disabling thug AI generally.
+
+New marker:
+
+`baddy_ai_trace event=post_drop_thug_skip ... policy=skip_type304_ai_for_8_ticks_after_grounded_ceiling_smash_landing`
+
+### Why this is deliberately narrow
+
+- BaddyList structure is proven healthy.
+- Multiple type-304 thug calls return normally before the landing edge.
+- The same retail CThug_AI callback hangs only during the immediate post-drop transition.
+- A global CThug_AI bypass would unnecessarily break enemy behavior.
+- An 8-tick compatibility quarantine is limited to the proven ceiling-drop landing hazard.
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+Existing camera, bomb-timer alignment, BaddyList validation, and diagnostic tracing remain intact.
