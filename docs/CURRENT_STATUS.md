@@ -18323,3 +18323,24 @@ Validation:
 - git diff --check: PASS;
 - forced-clean matching VC6 build: PASS;
 - compiled bridge bytes verified non-virtual/direct.
+
+
+## 2026-10-08 — Heavy freeze diagnostics temporarily disabled
+
+After confirming the RotY virtual-patch recursion fix, the heavy runtime diagnostics were temporarily disabled to remove their likely hitching overhead.
+
+Disabled at install/startup:
+- SpideyInstallDropHangTraceDiagnostics()
+- SpideyInstallState26NestedTrace()
+- SpideyHangSamplerEnsureStarted() / per-Logic hang-sampler state tracking
+
+The diagnostic implementations remain in source and can be re-enabled immediately if another freeze or bug appears.
+
+Preserved:
+- actual CAIProc_RotY recursion fix
+- normal 60-Hz baddy updates outside the existing validated Venom chase exception
+- lightweight runtime/crash/error logging
+
+Validation:
+- git diff --check: PASS
+- forced-clean matching VC6 build: PASS

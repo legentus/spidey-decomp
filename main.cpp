@@ -22900,14 +22900,9 @@ static void __cdecl SpideyCompatLogicTiming()
 	SpideyRetailLogicFn retail =
 		(SpideyRetailLogicFn)0x00455400;
 
-	SpideyHangSamplerEnsureStarted();
-	gSpideyHangSamplerMainThreadId =
-		GetCurrentThreadId();
-	gSpideyHangSamplerLogicEnterMs =
-		GetTickCount();
-	++gSpideyHangSamplerLogicSequence;
-	gSpideyHangSamplerInLogic =
-		1;
+	// Runtime hang sampler temporarily disabled for hitch-free validation.
+	// Keep the implementation compiled in so it can be re-enabled immediately
+	// if another genuine freeze appears.
 
 	SpideyRecordChaseLogicScheduler();
 	SpideyDropHangTraceUpdateArmBeforeLogic();
@@ -22928,8 +22923,6 @@ static void __cdecl SpideyCompatLogicTiming()
 	QueryPerformanceCounter(
 		&retailStart);
 	retail();
-	gSpideyHangSamplerInLogic =
-		0;
 	QueryPerformanceCounter(
 		&retailEnd);
 
@@ -27996,8 +27989,10 @@ void game_patches(void)
 	SpideyInstallModernCameraCompat();
 	SpideyInstallModernManualAimCompat();
 	SpideyInstallCameraWebTargetingCompat();
-	SpideyInstallDropHangTraceDiagnostics();
-	SpideyInstallState26NestedTrace();
+	// Heavy combat diagnostics temporarily disabled after the RotY recursion fix.
+	// Re-enable these two installers if another combat freeze needs tracing.
+	// SpideyInstallDropHangTraceDiagnostics();
+	// SpideyInstallState26NestedTrace();
 	SpideyInstallQuadBitCameraAnchorCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();
