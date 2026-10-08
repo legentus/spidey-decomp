@@ -7525,6 +7525,191 @@ static int __fastcall SpideyDropHangTracePlayerHit(
 	return result;
 }
 
+typedef int (__fastcall *SpideyRetailState26SetHeightFn)(
+		CBaddy*,
+		void*,
+		int,
+		int,
+		int);
+
+typedef void (__fastcall *SpideyRetailState26DieFn)(
+		CBaddy*,
+		void*,
+		int);
+
+static unsigned long gSpideyState26SetHeightCalls = 0;
+static unsigned long gSpideyState26SetHeightReturns = 0;
+static unsigned long gSpideyState26DieCalls = 0;
+static unsigned long gSpideyState26DieReturns = 0;
+
+static void SpideyLogState26NestedCall(
+		const char* eventName,
+		CBaddy* baddy,
+		int result,
+		int arg0,
+		int arg1,
+		int arg2)
+{
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (!f)
+		return;
+
+	CThug* thug =
+		(CThug*)baddy;
+
+	fprintf(
+		f,
+		"state26_nested event=%s tick=%lu body=0x%08lX state=%d substate=%d health=%d cbody_flags=0x%04X anim=%u frame=%d anim_finished=%u arg0=%d arg1=%d arg2=%d result=%d setheight_calls=%lu setheight_returns=%lu die_calls=%lu die_returns=%lu\n",
+		eventName ?
+			eventName :
+			"unknown",
+		SpideyDropHangTraceTick(),
+		(unsigned long)baddy,
+		baddy ?
+			(int)thug->field_31C.bothFlags :
+			-1,
+		baddy ?
+			(int)thug->dumbAssPad :
+			-1,
+		baddy ?
+			(int)thug->mHealth :
+			-1,
+		baddy ?
+			(unsigned int)thug->mCBodyFlags :
+			0U,
+		baddy ?
+			(unsigned int)thug->mAnim :
+			0U,
+		baddy ?
+			(int)thug->mFrame :
+			-1,
+		baddy ?
+			(unsigned int)thug->mAnimFinished :
+			0U,
+		arg0,
+		arg1,
+		arg2,
+		result,
+		gSpideyState26SetHeightCalls,
+		gSpideyState26SetHeightReturns,
+		gSpideyState26DieCalls,
+		gSpideyState26DieReturns);
+	fclose(f);
+}
+
+static int __fastcall SpideyTraceState26SetHeight(
+		CBaddy* baddy,
+		void*,
+		int a2,
+		int a3,
+		int a4)
+{
+	++gSpideyState26SetHeightCalls;
+
+	SpideyLogState26NestedCall(
+		"setheight_enter",
+		baddy,
+		0,
+		a2,
+		a3,
+		a4);
+
+	SpideyRetailState26SetHeightFn retail =
+		(SpideyRetailState26SetHeightFn)
+		0x004041C0;
+
+	const int result =
+		retail(
+			baddy,
+			0,
+			a2,
+			a3,
+			a4);
+
+	++gSpideyState26SetHeightReturns;
+
+	SpideyLogState26NestedCall(
+		"setheight_return",
+		baddy,
+		result,
+		a2,
+		a3,
+		a4);
+
+	return result;
+}
+
+static void __fastcall SpideyTraceState26Die(
+		CBaddy* baddy,
+		void*,
+		int mode)
+{
+	++gSpideyState26DieCalls;
+
+	SpideyLogState26NestedCall(
+		"die_enter",
+		baddy,
+		0,
+		mode,
+		0,
+		0);
+
+	SpideyRetailState26DieFn retail =
+		(SpideyRetailState26DieFn)
+		0x00404320;
+
+	retail(
+		baddy,
+		0,
+		mode);
+
+	++gSpideyState26DieReturns;
+
+	SpideyLogState26NestedCall(
+		"die_return",
+		baddy,
+		0,
+		mode,
+		0,
+		0);
+}
+
+static int SpideyInstallState26NestedTrace()
+{
+	const int setHeightHook =
+		SpideyPatchDirectCall(
+			0x004D8FDC,
+			0x004041C0,
+			(void*)&SpideyTraceState26SetHeight,
+			"state26_sub1_setheight");
+
+	const int dieHook =
+		SpideyPatchDirectCall(
+			0x004D8FF8,
+			0x00404320,
+			(void*)&SpideyTraceState26Die,
+			"state26_sub1_die");
+
+	FILE* f =
+		SpideyOpenConsolidatedLog(
+			"TIMING");
+	if (f)
+	{
+		fprintf(
+			f,
+			"state26_nested_install setheight_hook=%d setheight_call=0x004D8FDC setheight_retail=0x004041C0 die_hook=%d die_call=0x004D8FF8 die_retail=0x00404320 policy=telemetry_only_state26_substate1\n",
+			setHeightHook,
+			dieHook);
+		fclose(f);
+	}
+
+	return
+		setHeightHook &&
+		dieHook;
+}
+
 static int SpideyInstallDropHangTraceDiagnostics()
 {
 	static const unsigned long obAiCalls[] =
@@ -27470,6 +27655,7 @@ void game_patches(void)
 	SpideyInstallModernManualAimCompat();
 	SpideyInstallCameraWebTargetingCompat();
 	SpideyInstallDropHangTraceDiagnostics();
+	SpideyInstallState26NestedTrace();
 	SpideyInstallQuadBitCameraAnchorCompat();
 	SpideyInstallMouseCoordinateCompat();
 	SpideyInstallFrontendLifecycleCompat();

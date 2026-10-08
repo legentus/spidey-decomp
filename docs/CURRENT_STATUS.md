@@ -17977,3 +17977,86 @@ This should identify the exact CThug state handler/substate that is spinning on 
 Validation:
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-08 — State 26/substate 1 isolated; nested helper call tracing added
+
+Live runtime `fa18d7ff` froze again during normal combat.
+
+Exact unmatched thug AI entry:
+
+`body=0x12F7D8A0 type=304 cbody_flags=0x0208 thug_state=26 thug_substate=1 thug_field318=2 thug_field310=0 thug_health=0 original_ai=0x004DB280`
+
+No matching return.
+
+### State transition history
+
+Same thug:
+- tick 9015: state 17 / substate 10 / health 0 -> retail AI returned.
+- tick 9018: state 17 / substate 10 / health 0 -> retail AI returned.
+- tick 9021: state 17 / substate 10 / health 0 -> retail AI returned.
+- tick 9022/9023: state 26 / substate 0, cadence-held.
+- tick 9024: first actual state-26/substate-0 execution -> returned normally and advanced substate.
+- tick 9025/9026: state 26 / substate 1, cadence-held.
+- tick 9027: first actual state-26/substate-1 execution -> entered CThug_AI and never returned.
+
+Therefore the hang is specifically inside the first real execution of **state 26 / substate 1**.
+
+### Retail dispatch mapping
+
+`CThug_AI` state jump table:
+- state 26 -> `0x004DB7F8`;
+- `0x004DB7F8` calls `sub_4D8E50 @ 0x004D8E50`.
+
+`sub_4D8E50` is a 9-substate thug handler.
+Its substate jump table:
+- substate 0 -> `0x004D8E6B`;
+- **substate 1 -> `0x004D8FD0`**.
+
+Substate 1 performs:
+1. `CBaddy::SetHeight(0, 100, 600) @ 0x004041C0`;
+2. if `mAnimFinished`, `CBaddy::Die(1) @ 0x00404320`;
+3. then advances the substate.
+
+### Nested helper analysis
+
+`CBaddy::SetHeight` is already decompiled in `baddy.cpp`. It may call:
+`Utils_GetGroundHeight @ 0x004E6840`.
+
+`Utils_GetGroundHeight` is marked `@NotOk` in source and calls:
+- `M3dColij_InitLineInfo @ 0x004524C0`;
+- `M3dZone_LineToItem @ 0x004549A0`.
+
+The ground-height ray is vertical, and retail has a vertical-line fast path; the general M3dZone grid-walk loop is therefore less likely but not yet eliminated.
+
+`CBaddy::Die(1)` first calls:
+`CBody::IsDead @ 0x00460700`,
+which simply checks mCBodyFlags bit 0x40.
+At `0x0208`, the thug has health 0 but is not yet flagged dead, so `Die(1)` executes its case-1 body and calls `CBody::KillShadow @ 0x00460570`.
+
+### New callsite-level telemetry
+
+Added wrappers only at state-26/substate-1 callsites:
+- `0x004D8FDC -> CBaddy::SetHeight`;
+- `0x004D8FF8 -> CBaddy::Die`.
+
+Markers:
+- `state26_nested event=setheight_enter`
+- `state26_nested event=setheight_return`
+- `state26_nested event=die_enter`
+- `state26_nested event=die_return`
+
+Each logs:
+- tick/body;
+- thug state/substate;
+- health;
+- mCBodyFlags;
+- thug animation/frame/mAnimFinished;
+- arguments/result;
+- enter/return counters.
+
+This is telemetry-only; retail behavior is forwarded unchanged.
+
+Validation:
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
