@@ -6932,71 +6932,6 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		return;
 	}
 
-	// Every fully captured combat freeze now reaches CThug_AI with a dead
-	// type-304 thug in state 26, then stops before the state-26 handler call.
-	// The state-26 death handler itself has returned normally in other frames.
-	// Once health is <= 0 and state 26 is active, the generic CThug_AI
-	// pre-dispatch combat bookkeeping is no longer required for behavior and
-	// is the proven non-returning region. Call the retail state-26 handler
-	// directly and bypass only that pre-dispatch region.
-	if (type == 304 &&
-		thugState == 26 &&
-		thugHealth <= 0)
-	{
-		typedef void (__fastcall *SpideyThugState26Fn)(
-			CThug*,
-			void*);
-
-		if (trace)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"TIMING");
-			if (f)
-			{
-				fprintf(
-					f,
-					"baddy_ai_trace event=dead_state26_direct_enter tick=%lu body=0x%08lX substate=%d health=%d cbody_flags=0x%04X handler=0x004D8E50 policy=bypass_nonreturning_cthug_predispatch\n",
-					tick,
-					(unsigned long)body,
-					thugSubstate,
-					thugHealth,
-					bodyFlags);
-				fclose(f);
-			}
-		}
-
-		SpideyThugState26Fn state26 =
-			(SpideyThugState26Fn)
-			0x004D8E50;
-		state26(
-			(CThug*)body,
-			0);
-
-		++gSpideyBaddyAITraceReturns;
-
-		if (trace)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"TIMING");
-			if (f)
-			{
-				fprintf(
-					f,
-					"baddy_ai_trace event=dead_state26_direct_return tick=%lu body=0x%08lX substate=%d health=%d cbody_flags=0x%04X handler=0x004D8E50\n",
-					tick,
-					(unsigned long)body,
-					(int)((CThug*)body)->dumbAssPad,
-					(int)((CThug*)body)->mHealth,
-					(unsigned int)((CThug*)body)->mCBodyFlags);
-				fclose(f);
-			}
-		}
-
-		return;
-	}
-
 	typedef void (__fastcall *SpideyBaddyAIFn)(
 		CBody*,
 		void*);
@@ -22679,10 +22614,300 @@ static void SpideyTracePlayerStateAfterLogic()
 	}
 }
 
+// In-process hang sampler.
+//
+// External thread-context inspection can be blocked when the game runs at a
+// higher Windows integrity level than Local Commander.  This sampler lives in
+// spider.dll, learns the actual Logic/main thread ID at runtime, and only wakes
+// up when a Logic pass has failed to return for a sustained period.  It then
+// repeatedly samples the suspended thread's EIP/registers/stack for a short
+// burst so tight CPU loops can be identified by their real hot instruction
+// addresses instead of inferred enter/return breadcrumbs.
+static volatile LONG gSpideyHangSamplerStarted = 0;
+static volatile LONG gSpideyHangSamplerInLogic = 0;
+static volatile LONG gSpideyHangSamplerLogicSequence = 0;
+static volatile DWORD gSpideyHangSamplerMainThreadId = 0;
+static volatile DWORD gSpideyHangSamplerLogicEnterMs = 0;
+
+typedef HANDLE (WINAPI *SpideyOpenThreadFn)(
+		DWORD,
+		BOOL,
+		DWORD);
+
+static void SpideyHangSamplerAppendSample(
+		FILE* f,
+		unsigned long sequence,
+		unsigned long sampleIndex,
+		const CONTEXT* ctx)
+{
+	if (!f || !ctx)
+		return;
+
+	fprintf(
+		f,
+		"hang_sampler sample sequence=%lu index=%lu eip=0x%08lX esp=0x%08lX ebp=0x%08lX eax=0x%08lX ebx=0x%08lX ecx=0x%08lX edx=0x%08lX esi=0x%08lX edi=0x%08lX eflags=0x%08lX",
+		sequence,
+		sampleIndex,
+		(unsigned long)ctx->Eip,
+		(unsigned long)ctx->Esp,
+		(unsigned long)ctx->Ebp,
+		(unsigned long)ctx->Eax,
+		(unsigned long)ctx->Ebx,
+		(unsigned long)ctx->Ecx,
+		(unsigned long)ctx->Edx,
+		(unsigned long)ctx->Esi,
+		(unsigned long)ctx->Edi,
+		(unsigned long)ctx->EFlags);
+
+	fprintf(f, " code=");
+	__try
+	{
+		const unsigned char* code =
+			(const unsigned char*)ctx->Eip;
+		for (int i = 0; i < 16; ++i)
+		{
+			fprintf(
+				f,
+				"%02X",
+				(unsigned int)code[i]);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		fprintf(f, "FAULT");
+	}
+
+	fprintf(f, " stack=");
+	__try
+	{
+		const unsigned long* stack =
+			(const unsigned long*)ctx->Esp;
+		for (int i = 0; i < 32; ++i)
+		{
+			if (i)
+				fputc(',', f);
+			fprintf(
+				f,
+				"%08lX",
+				stack[i]);
+		}
+	}
+	__except(EXCEPTION_EXECUTE_HANDLER)
+	{
+		fprintf(f, "FAULT");
+	}
+
+	fprintf(f, "\\n");
+	fflush(f);
+}
+
+static DWORD WINAPI SpideyHangSamplerThread(
+		LPVOID)
+{
+	HMODULE kernel =
+		GetModuleHandleA(
+			"kernel32.dll");
+	if (!kernel)
+		return 0;
+
+	SpideyOpenThreadFn openThread =
+		(SpideyOpenThreadFn)GetProcAddress(
+			kernel,
+			"OpenThread");
+	if (!openThread)
+		return 0;
+
+	unsigned long lastReportedSequence =
+		0;
+
+	for (;;)
+	{
+		Sleep(100);
+
+		if (!gSpideyHangSamplerInLogic)
+			continue;
+
+		const unsigned long sequence =
+			(unsigned long)gSpideyHangSamplerLogicSequence;
+		const unsigned long enterMs =
+			(unsigned long)gSpideyHangSamplerLogicEnterMs;
+		const unsigned long now =
+			(unsigned long)GetTickCount();
+
+		if (!sequence ||
+			sequence == lastReportedSequence ||
+			(unsigned long)(now - enterMs) < 750UL)
+		{
+			continue;
+		}
+
+		const DWORD threadId =
+			(DWORD)gSpideyHangSamplerMainThreadId;
+		if (!threadId)
+			continue;
+
+		HANDLE thread =
+			openThread(
+				THREAD_SUSPEND_RESUME |
+				THREAD_GET_CONTEXT |
+				THREAD_QUERY_INFORMATION,
+				FALSE,
+				threadId);
+		if (!thread)
+			continue;
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"HANG");
+		if (f)
+		{
+			fprintf(
+				f,
+				"hang_sampler event=trigger sequence=%lu thread_id=%lu logic_enter_ms=%lu now_ms=%lu stalled_ms=%lu samples=64 interval_ms=10 policy=suspend_getcontext_resume\\n",
+				sequence,
+				(unsigned long)threadId,
+				enterMs,
+				now,
+				(unsigned long)(now - enterMs));
+			fflush(f);
+		}
+
+		for (unsigned long sample = 0;
+			sample < 64;
+			++sample)
+		{
+			if (!gSpideyHangSamplerInLogic ||
+				(unsigned long)gSpideyHangSamplerLogicSequence != sequence)
+			{
+				break;
+			}
+
+			DWORD suspendResult =
+				SuspendThread(
+					thread);
+			if (suspendResult != (DWORD)-1)
+			{
+				CONTEXT ctx;
+				memset(
+					&ctx,
+					0,
+					sizeof(ctx));
+				ctx.ContextFlags =
+					CONTEXT_FULL;
+
+				if (GetThreadContext(
+						thread,
+						&ctx))
+				{
+					SpideyHangSamplerAppendSample(
+						f,
+						sequence,
+						sample,
+						&ctx);
+				}
+				else if (f)
+				{
+					fprintf(
+						f,
+						"hang_sampler event=get_context_failed sequence=%lu index=%lu error=%lu\\n",
+						sequence,
+						sample,
+						(unsigned long)GetLastError());
+					fflush(f);
+				}
+
+				ResumeThread(
+					thread);
+			}
+			else if (f)
+			{
+				fprintf(
+					f,
+					"hang_sampler event=suspend_failed sequence=%lu index=%lu error=%lu\\n",
+					sequence,
+					sample,
+					(unsigned long)GetLastError());
+				fflush(f);
+			}
+
+			Sleep(10);
+		}
+
+		if (f)
+		{
+			fprintf(
+				f,
+				"hang_sampler event=burst_complete sequence=%lu still_in_logic=%ld current_sequence=%ld\\n",
+				sequence,
+				gSpideyHangSamplerInLogic,
+				gSpideyHangSamplerLogicSequence);
+			fclose(f);
+		}
+
+		CloseHandle(
+			thread);
+		lastReportedSequence =
+			sequence;
+	}
+
+	return 0;
+}
+
+static void SpideyHangSamplerEnsureStarted()
+{
+	if (gSpideyHangSamplerStarted)
+		return;
+
+	gSpideyHangSamplerStarted =
+		1;
+
+	DWORD threadId = 0;
+	HANDLE thread =
+		CreateThread(
+			0,
+			0,
+			SpideyHangSamplerThread,
+			0,
+			0,
+			&threadId);
+
+	if (thread)
+	{
+		CloseHandle(
+			thread);
+
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"HANG");
+		if (f)
+		{
+			fprintf(
+				f,
+				"hang_sampler event=installed watchdog_thread_id=%lu threshold_ms=750 samples=64 interval_ms=10\\n",
+				(unsigned long)threadId);
+			fclose(f);
+		}
+	}
+	else
+	{
+		gSpideyHangSamplerStarted =
+			0;
+	}
+}
+
 static void __cdecl SpideyCompatLogicTiming()
 {
 	SpideyRetailLogicFn retail =
 		(SpideyRetailLogicFn)0x00455400;
+
+	SpideyHangSamplerEnsureStarted();
+	gSpideyHangSamplerMainThreadId =
+		GetCurrentThreadId();
+	gSpideyHangSamplerLogicEnterMs =
+		GetTickCount();
+	++gSpideyHangSamplerLogicSequence;
+	gSpideyHangSamplerInLogic =
+		1;
 
 	SpideyRecordChaseLogicScheduler();
 	SpideyDropHangTraceUpdateArmBeforeLogic();
@@ -22703,6 +22928,8 @@ static void __cdecl SpideyCompatLogicTiming()
 	QueryPerformanceCounter(
 		&retailStart);
 	retail();
+	gSpideyHangSamplerInLogic =
+		0;
 	QueryPerformanceCounter(
 		&retailEnd);
 

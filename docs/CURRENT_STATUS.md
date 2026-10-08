@@ -18191,3 +18191,54 @@ Validation:
 - normal BaddyList/ControlBaddyList updates restored to 60 Hz outside L5A1 chase;
 - `git diff --check`: PASS;
 - forced-clean matching VC6 build: PASS.
+
+
+## 2026-10-08 — In-process hang sampler added; unsafe state-26 direct bypass removed
+
+The latest reported "freeze" on revision 681bea81 was actually a real access violation introduced by the direct state-26 bypass.
+
+Crash:
+- exception 0xC0000005
+- EIP 0x00461132
+- read target 0x00000047
+- ESI = 0x00000001
+- EDI = dead thug body 0x168D1760
+
+Retail disassembly around 0x00461132 shows this is inside Ob_AI immediately after the virtual AI callback:
+`test byte ptr [esi + 0x46], 8`.
+
+Ob_AI expects ESI to remain the current body pointer across the AI callback. The direct call to sub_4D8E50 returned with ESI clobbered, violating the original CThug_AI caller/register contract. Therefore the state-26 direct bypass is removed.
+
+### New runtime analysis tool: in-process hang sampler
+
+External GetThreadContext/process-memory inspection is unreliable when SpideyPC is running at a higher Windows integrity level than Local Commander. To capture the actual CPU hot loop during a freeze, spider.dll now contains its own watchdog sampler.
+
+Behavior:
+- starts lazily on the first real Logic call, not from DllMain;
+- records the actual Logic/main-thread ID;
+- marks each Logic entry/return;
+- if a Logic pass remains entered for >= 750 ms, the watchdog opens that exact thread;
+- performs 64 samples at 10 ms intervals;
+- for each sample:
+  - SuspendThread;
+  - GetThreadContext(CONTEXT_FULL);
+  - capture EIP/ESP/EBP/EAX/EBX/ECX/EDX/ESI/EDI/EFLAGS;
+  - capture 16 instruction bytes at EIP;
+  - capture 32 stack dwords from ESP;
+  - ResumeThread immediately;
+- writes samples under [HANG] / `hang_sampler` in the consolidated runtime log;
+- sampling automatically stops if the Logic pass returns.
+
+This is designed to identify a tight busy loop by repeated real EIP samples and stack context, eliminating the need to infer the frozen instruction from function enter/return breadcrumbs.
+
+Markers:
+- `hang_sampler event=installed`
+- `hang_sampler event=trigger`
+- `hang_sampler sample ... eip=...`
+- `hang_sampler event=burst_complete`
+
+Validation:
+- unsafe dead-state direct bypass removed;
+- normal baddy updates remain 60 Hz outside the existing validated Venom chase exception;
+- git diff --check: PASS;
+- forced-clean matching VC6 build: PASS.
