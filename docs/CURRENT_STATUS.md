@@ -18137,3 +18137,57 @@ global_authored_baddy_and_control_lists_20hz_on_60hz_engine
 Validation:
 - git diff --check: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-08 — Live freeze on global baddy 20 Hz; root narrowed to CThug_AI pre-dispatch
+
+Runtime `719a53e7` froze again while fighting.
+
+The live process stayed alive/responding. The absolute log tail shows:
+- Logic entered normally;
+- player physics returned normally;
+- every non-BaddyList object list returned;
+- BaddyList entered;
+- neighboring type-304/type-305 enemies returned normally;
+- the final line is a type-304 thug entering retail `CThug_AI @ 0x004DB280`;
+- no matching AI return;
+- no BaddyList return;
+- no Logic return.
+
+Exact frozen thug:
+- body `0x167AB0E0`
+- type 304
+- `mCBodyFlags=0x0208`
+- `thug_state=26`
+- `thug_substate=1`
+- `thug_health=-10`
+- player state `0x00000800`
+- player anim 106
+
+The state-26 SetHeight compatibility callsite was not reached. Therefore this freeze occurs before the state-26 handler call inside the generic pre-dispatch region of `CThug_AI`.
+
+This directly rules out DX11/present as the freeze boundary for this run because gameplay Logic never returned.
+
+The global BaddyList 20-Hz experiment also failed to prevent the freeze, so normal baddy-world cadence is restored to 60 Hz outside the already-validated L5A1 Venom chase phase gate.
+
+### Direct targeted fix
+
+For a type-304 thug with state 26 and health <= 0, the vtable AI thunk no longer calls full retail `CThug_AI`.
+
+Instead it directly invokes the already-isolated retail state-26 handler:
+`sub_4D8E50 @ 0x004D8E50`.
+
+Rationale:
+- every fully captured freeze reaches full CThug_AI and stops before state-26 dispatch;
+- the state-26 handler itself has returned normally in captured frames;
+- dead state-26 thugs no longer need generic combat pre-dispatch bookkeeping;
+- bypass is limited to already-dead type-304 state-26 objects.
+
+Telemetry:
+- `baddy_ai_trace event=dead_state26_direct_enter`
+- `baddy_ai_trace event=dead_state26_direct_return`
+
+Validation:
+- normal BaddyList/ControlBaddyList updates restored to 60 Hz outside L5A1 chase;
+- `git diff --check`: PASS;
+- forced-clean matching VC6 build: PASS.

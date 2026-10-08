@@ -6932,6 +6932,71 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		return;
 	}
 
+	// Every fully captured combat freeze now reaches CThug_AI with a dead
+	// type-304 thug in state 26, then stops before the state-26 handler call.
+	// The state-26 death handler itself has returned normally in other frames.
+	// Once health is <= 0 and state 26 is active, the generic CThug_AI
+	// pre-dispatch combat bookkeeping is no longer required for behavior and
+	// is the proven non-returning region. Call the retail state-26 handler
+	// directly and bypass only that pre-dispatch region.
+	if (type == 304 &&
+		thugState == 26 &&
+		thugHealth <= 0)
+	{
+		typedef void (__fastcall *SpideyThugState26Fn)(
+			CThug*,
+			void*);
+
+		if (trace)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"baddy_ai_trace event=dead_state26_direct_enter tick=%lu body=0x%08lX substate=%d health=%d cbody_flags=0x%04X handler=0x004D8E50 policy=bypass_nonreturning_cthug_predispatch\n",
+					tick,
+					(unsigned long)body,
+					thugSubstate,
+					thugHealth,
+					bodyFlags);
+				fclose(f);
+			}
+		}
+
+		SpideyThugState26Fn state26 =
+			(SpideyThugState26Fn)
+			0x004D8E50;
+		state26(
+			(CThug*)body,
+			0);
+
+		++gSpideyBaddyAITraceReturns;
+
+		if (trace)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"baddy_ai_trace event=dead_state26_direct_return tick=%lu body=0x%08lX substate=%d health=%d cbody_flags=0x%04X handler=0x004D8E50\n",
+					tick,
+					(unsigned long)body,
+					(int)((CThug*)body)->dumbAssPad,
+					(int)((CThug*)body)->mHealth,
+					(unsigned int)((CThug*)body)->mCBodyFlags);
+				fclose(f);
+			}
+		}
+
+		return;
+	}
+
 	typedef void (__fastcall *SpideyBaddyAIFn)(
 		CBody*,
 		void*);
@@ -7909,16 +7974,14 @@ static void __cdecl SpideyChaseWorldAI20Hz(
 		player = 0;
 	}
 
-	// The original gameplay world advanced BaddyList and ControlBaddyList at
-	// the authored 20-Hz cadence. Keeping these lists at 60 Hz while only
-	// throttling individual AI callbacks leaves EveryFrame/bookkeeping,
-	// animation/state timers, messages, collision and generic AI pre-dispatch
-	// on a mismatched cadence. That mismatch is now implicated in repeated
-	// type-304 death-state spins. Restore the complete baddy-world pair to
-	// authored cadence globally while player/render/physics remain 60 Hz.
-	const int authoredWorldCadence = 1;
+	const int chaseScripted =
+		player &&
+		SpideyRetailGetLevelId() == 0x501 &&
+		player->field_1AC;
 
-	if (!authoredWorldCadence)
+	// Normal baddy-world updates remain 60 Hz. Only the already-validated
+	// L5A1 Venom scripted chase uses the shared authored 20-Hz phase gate.
+	if (!chaseScripted)
 	{
 		if (gSpideyChaseWorldAI20TickValid)
 		{
@@ -8018,7 +8081,7 @@ static int SpideyInstallChaseBaddyAI20HzCompat()
 	{
 		fprintf(
 			f,
-			"chase_world_ai_20hz_install baddy_installed=%d baddy_call=0x004554F5 baddy_list=0x0056E990 control_installed=%d control_call=0x00455501 control_list=0x0056E994 retail=0x00460FC0 wrapper=0x%08lX policy=global_authored_baddy_and_control_lists_20hz_on_60hz_engine\\n",
+			"chase_world_ai_20hz_install baddy_installed=%d baddy_call=0x004554F5 baddy_list=0x0056E990 control_installed=%d control_call=0x00455501 control_list=0x0056E994 retail=0x00460FC0 wrapper=0x%08lX policy=phase_locked_baddy_and_control_lists_20hz_during_l5a1_synthesized_control\\n",
 			gSpideyChaseBaddyAI20Installed,
 			gSpideyChaseControlAI20Installed,
 			(unsigned long)(void*)&SpideyChaseWorldAI20Hz);
@@ -8040,7 +8103,7 @@ static void SpideyLogChaseBaddyAI20Stats()
 
 	fprintf(
 		f,
-		"chase_world_ai_20hz_stats baddy_installed=%d baddy_calls=%lu baddy_retail=%lu baddy_held=%lu control_installed=%d control_calls=%lu control_retail=%lu control_held=%lu gate_events=%lu max_elapsed=%lu level=0x501 policy=global_authored_baddy_and_control_lists_20hz_on_60hz_engine\\n",
+		"chase_world_ai_20hz_stats baddy_installed=%d baddy_calls=%lu baddy_retail=%lu baddy_held=%lu control_installed=%d control_calls=%lu control_retail=%lu control_held=%lu gate_events=%lu max_elapsed=%lu level=0x501 policy=phase_locked_venom_and_scriptonly_camera_controller_lists\\n",
 		gSpideyChaseBaddyAI20Installed,
 		gSpideyChaseBaddyAI20Calls,
 		gSpideyChaseBaddyAI20RetailCalls,
