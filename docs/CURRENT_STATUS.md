@@ -17898,3 +17898,41 @@ Every captured combat freeze—ceiling takedown, airborne drop attack, and ordin
 Validation:
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-07 — 64b06d5e still froze; combat trace window was insufficient
+
+Runtime `64b06d5e` froze again.
+
+The new type-304 cadence gate was definitely active:
+`baddy_ai_trace event=type304_cadence_hold ... policy=type304_ai_20hz_on_60hz_engine`
+
+However, the existing detailed `drop_hang_trace` window expired around tick 4765, while the game continued running until after tick 6442 before freezing.
+
+Therefore this run does **not** provide an exact unmatched callback at the final freeze boundary. It disproves only the theory that 60-Hz type-304 dispatch by itself was sufficient to cause all freezes.
+
+The last visible player state before the freeze was:
+- `state=0x00000800`
+- `anim=106`
+- grounded normal combat.
+
+### Diagnostic extension
+
+`SpideyDropHangTraceUpdateArmBeforeLogic()` now also arms/keeps detailed Logic/Baddy tracing active whenever:
+`player->field_E1C == 0x00000800`.
+
+New marker:
+`drop_hang_trace ... event=arm_combat_state_0x800`
+
+While the player remains in combat state 0x800:
+- outer Logic enter/return remains traced;
+- player physics and input-gate wrappers remain traced;
+- BaddyList and ControlBaddyList enter/return remain traced;
+- per-baddy AI enter/return remains traced;
+- type-304 cadence-hold telemetry remains available.
+
+This is intentionally diagnostic. No new root-cause behavior fix is claimed yet.
+
+Validation:
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS

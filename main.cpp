@@ -6403,6 +6403,39 @@ static void SpideyDropHangTraceUpdateArmBeforeLogic()
 
 	if (player &&
 		player->field_E1C ==
+			0x00000800)
+	{
+		const int wasArmed =
+			SpideyDropHangTraceIsActive();
+
+		if (!wasArmed)
+		{
+			gSpideyDropHangTraceArmed =
+				1;
+			++gSpideyDropHangTraceGeneration;
+			gSpideyDropHangTraceLogicPass =
+				0;
+
+			SpideyDropHangTraceLog(
+				"arm_combat_state_0x800",
+				player,
+				0,
+				0);
+		}
+
+		// Keep detailed Logic/Baddy tracing alive for as long as the player
+		// remains in the combat state. The previous freeze happened long after
+		// the four-second drop window expired, so a bounded post-drop trace is
+		// insufficient to identify ordinary-combat hangs.
+		gSpideyDropHangTraceUntilTick =
+			tick +
+			120;
+
+		return;
+	}
+
+	if (player &&
+		player->field_E1C ==
 			0x01000000 &&
 		player->mAnim ==
 			133)
