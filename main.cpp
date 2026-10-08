@@ -6597,6 +6597,16 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		0;
 	unsigned int bodyFlags =
 		0;
+	int thugState =
+		-1;
+	int thugSubstate =
+		-1;
+	int thugField318 =
+		-1;
+	int thugField310 =
+		-1;
+	int thugHealth =
+		-1;
 	CBody* next =
 		0;
 	CBody* previous =
@@ -6616,6 +6626,21 @@ static void __fastcall SpideyBaddyAITraceThunk(
 				(unsigned int)body->mFlags;
 			bodyFlags =
 				(unsigned int)body->mCBodyFlags;
+			if (type == 304)
+			{
+				CThug* thug =
+					(CThug*)body;
+				thugState =
+					(int)thug->field_31C.bothFlags;
+				thugSubstate =
+					(int)thug->dumbAssPad;
+				thugField318 =
+					(int)thug->field_318;
+				thugField310 =
+					(int)thug->field_310;
+				thugHealth =
+					(int)thug->mHealth;
+			}
 			next =
 				(CBody*)body->mNextItem;
 			previous =
@@ -6814,7 +6839,7 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		{
 			fprintf(
 				f,
-				"baddy_ai_trace event=enter call=%lu tick=%lu body=0x%08lX vtable=0x%08lX type=%u flags=0x%04X cbody_flags=0x%04X next=0x%08lX previous=0x%08lX original_ai=0x%08lX mapping_ok=%d read_ok=%d state=0x%08lX anim=%u\n",
+				"baddy_ai_trace event=enter call=%lu tick=%lu body=0x%08lX vtable=0x%08lX type=%u flags=0x%04X cbody_flags=0x%04X thug_state=%d thug_substate=%d thug_field318=%d thug_field310=%d thug_health=%d next=0x%08lX previous=0x%08lX original_ai=0x%08lX mapping_ok=%d read_ok=%d player_state=0x%08lX player_anim=%u\n",
 				gSpideyBaddyAITraceCalls,
 				SpideyDropHangTraceTick(),
 				(unsigned long)body,
@@ -6822,6 +6847,11 @@ static void __fastcall SpideyBaddyAITraceThunk(
 				type,
 				flags,
 				bodyFlags,
+				thugState,
+				thugSubstate,
+				thugField318,
+				thugField310,
+				thugHealth,
 				(unsigned long)next,
 				(unsigned long)previous,
 				entry ?

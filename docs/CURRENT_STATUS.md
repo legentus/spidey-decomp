@@ -17936,3 +17936,44 @@ This is intentionally diagnostic. No new root-cause behavior fix is claimed yet.
 Validation:
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-08 — Exact combat freeze boundary captured; thug state/substate trace added
+
+Runtime `29fda2cc` froze during ordinary combat with the extended combat trace active.
+
+The exact unmatched callback is now proven:
+
+`baddy_ai_trace event=enter call=720 tick=3636 body=0x13172760 vtable=0x0053C550 type=304 flags=0x0002 cbody_flags=0x0208 original_ai=0x004DB280 player_state=0x00000800 player_anim=105`
+
+There is no matching `baddy_ai_trace event=return`.
+
+Therefore:
+- BaddyList structure is healthy;
+- neighboring type-305 and type-304 baddies all returned normally;
+- the same retail `CThug_AI @ 0x004DB280` remains the actual spinner;
+- 20-Hz type-304 cadence did not prevent the bad state;
+- the frozen thug is again the one with `mCBodyFlags=0x0208`, while most neighboring type-304 thugs are `0x0218`.
+
+Source correlation:
+`CThug::TakeHit()` explicitly clears bit `0x10` via:
+`mCBodyFlags &= 0xFFEF`.
+That exactly produces the observed `0x0218 -> 0x0208` transition seen repeatedly before freezes.
+
+### New state-level trace
+
+The per-baddy AI entry telemetry now reads and logs, for type-304 thugs:
+- `field_31C.bothFlags` as `thug_state`;
+- `dumbAssPad` as `thug_substate`;
+- `field_318`;
+- `field_310`;
+- `mHealth`.
+
+New entry format includes:
+`thug_state=... thug_substate=... thug_field318=... thug_field310=... thug_health=...`
+
+This should identify the exact CThug state handler/substate that is spinning on the next reproduction, allowing a direct state repair rather than another broad CThug_AI suppression or player-move workaround.
+
+Validation:
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
