@@ -6464,6 +6464,8 @@ static int gSpideyBaddyAITraceVtableCount = 0;
 static unsigned long gSpideyBaddyAITraceCalls = 0;
 static unsigned long gSpideyBaddyAITraceReturns = 0;
 
+static CBody* gSpideyPostDropVictim = 0;
+static unsigned long gSpideyPostDropVictimSeenTick = 0;
 static unsigned long gSpideyPostDropThugSafetyUntilTick = 0;
 static unsigned long gSpideyPostDropThugSkippedCalls = 0;
 
@@ -6542,33 +6544,107 @@ static void __fastcall SpideyBaddyAITraceThunk(
 	const unsigned long tick =
 		SpideyDropHangTraceTick();
 
-	// Live hangs are now proven to occur inside retail CThug_AI for a
-	// type-304 thug on the first frames immediately following a ceiling
-	// drop-attack landing. The BaddyList is structurally healthy, and the
-	// same thug returns normally before entering this transition.
-	//
-	// Keep a tiny post-landing quarantine window for only type-304 thug AI.
-	// This avoids the pathological retail transition without pausing other
-	// enemy classes or disabling thug AI outside the proven edge.
+	// The live freeze is now tied to the actual ceiling-takedown victim,
+	// not to type-304 thugs generally. During the authored smash descent the
+	// victim is the only type-304 thug carrying item flag 0x4 (0x0006 versus
+	// the normal 0x0002). Remember that exact body while anim 133 is active.
+	if (trace &&
+		player &&
+		player->field_E1C ==
+			0x01000000 &&
+		player->mAnim ==
+			133 &&
+		type ==
+			304 &&
+		(flags & 0x0004))
+	{
+		if (gSpideyPostDropVictim !=
+			body)
+		{
+			gSpideyPostDropVictim =
+				body;
+			gSpideyPostDropVictimSeenTick =
+				tick;
+
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"baddy_ai_trace event=takedown_victim_identified tick=%lu body=0x%08lX type=%u flags=0x%04X state=0x%08lX anim=%u policy=remember_flag_0x4_type304_victim\n",
+					tick,
+					(unsigned long)body,
+					type,
+					flags,
+					(unsigned long)player->field_E1C,
+					(unsigned int)player->mAnim);
+				fclose(f);
+			}
+		}
+	}
+
+	// Once Spider-Man reaches the grounded landing animation, quarantine only
+	// the remembered victim for 30 canonical ticks. The reproduced freeze is
+	// +17 ticks after landing, so 30 covers the proven hazard with margin while
+	// leaving every other thug AI completely untouched.
 	if (trace &&
 		player &&
 		player->mAnim ==
 			134 &&
-		(player->mCollision & 2))
+		(player->mCollision & 2) &&
+		gSpideyPostDropVictim)
 	{
-		gSpideyPostDropThugSafetyUntilTick =
+		const unsigned long proposedUntil =
 			tick +
-			8;
+			30;
+		if ((long)(
+				proposedUntil -
+				gSpideyPostDropThugSafetyUntilTick) > 0)
+		{
+			gSpideyPostDropThugSafetyUntilTick =
+				proposedUntil;
+		}
 	}
 
 	const int postDropThugGuard =
-		type ==
-			304 &&
+		body ==
+			gSpideyPostDropVictim &&
+		gSpideyPostDropThugSafetyUntilTick !=
+			0 &&
 		(long)(
 			tick -
-			gSpideyPostDropThugSafetyUntilTick) <= 0 &&
-		gSpideyPostDropThugSafetyUntilTick !=
+			gSpideyPostDropThugSafetyUntilTick) <= 0;
+
+	if (gSpideyPostDropVictim &&
+		gSpideyPostDropThugSafetyUntilTick &&
+		(long)(
+			tick -
+			gSpideyPostDropThugSafetyUntilTick) > 0)
+	{
+		FILE* f =
+			SpideyOpenConsolidatedLog(
+				"TIMING");
+		if (f)
+		{
+			fprintf(
+				f,
+				"baddy_ai_trace event=takedown_victim_quarantine_expired tick=%lu body=0x%08lX victim_seen_tick=%lu safety_until=%lu\n",
+				tick,
+				(unsigned long)gSpideyPostDropVictim,
+				gSpideyPostDropVictimSeenTick,
+				gSpideyPostDropThugSafetyUntilTick);
+			fclose(f);
+		}
+
+		gSpideyPostDropVictim =
 			0;
+		gSpideyPostDropVictimSeenTick =
+			0;
+		gSpideyPostDropThugSafetyUntilTick =
+			0;
+	}
 
 	++gSpideyBaddyAITraceCalls;
 
@@ -6619,7 +6695,7 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		{
 			fprintf(
 				f,
-				"baddy_ai_trace event=post_drop_thug_skip call=%lu skipped=%lu tick=%lu safety_until=%lu body=0x%08lX vtable=0x%08lX type=%u state=0x%08lX player_anim=%u player_frame=%d policy=skip_type304_ai_for_8_ticks_after_grounded_ceiling_smash_landing\\n",
+				"baddy_ai_trace event=post_drop_thug_skip call=%lu skipped=%lu tick=%lu safety_until=%lu body=0x%08lX vtable=0x%08lX type=%u state=0x%08lX player_anim=%u player_frame=%d policy=skip_identified_takedown_victim_for_30_ticks_after_landing\n",
 				gSpideyBaddyAITraceCalls,
 				gSpideyPostDropThugSkippedCalls,
 				tick,

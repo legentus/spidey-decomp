@@ -17659,3 +17659,106 @@ Fields include:
 - forced-clean matching VC6 build: PASS
 
 Existing camera, bomb-timer, post-drop thug-AI, and BaddyList compatibility fixes remain unchanged.
+
+
+## 2026-10-07 — Ceiling takedown freeze refined to exact victim
+
+### Live freeze on be0464c7
+
+The game froze again after a ceiling takedown.
+
+Final unmatched callback:
+
+`baddy_ai_trace event=enter call=367 tick=4544 body=0x167B5CE0 vtable=0x0053C550 type=304 original_ai=0x004DB280`
+
+No matching return exists.
+
+`0x004DB280 = CThug_AI`.
+
+So the same retail thug AI is still the spinner, but this freeze happened after the previous 8-tick all-type304 quarantine had already expired.
+
+### Timing
+
+Ceiling smash/takedown begins:
+
+`tick=4496 state=0x01000000 anim=133`
+
+Grounded landing:
+
+`tick=4527 state=0x00000001 anim=134`
+
+Old safety window:
+
+`4527..4535`
+
+Freeze:
+
+`tick=4544`
+
+Therefore the failure occurs **17 ticks after landing**, outside the old +8 window.
+
+### Critical victim discriminator
+
+During the ceiling takedown descent, the exact body that later freezes is uniquely identifiable.
+
+At tick 4498/4499/4501 etc:
+
+`body=0x167B5CE0 type=304 flags=0x0006`
+
+All other type-304 thugs are:
+
+`flags=0x0002`
+
+The extra bit is:
+
+`0x0004`
+
+The exact same body `0x167B5CE0` later hangs in `CThug_AI` at tick 4544.
+
+This gives a much cleaner relationship than "all type-304 thugs after landing": the spinner is the **actual takedown victim**.
+
+### Refined fix
+
+The previous all-type304 +8-tick quarantine has been replaced.
+
+New behavior:
+
+1. While the ceiling-smash state is active:
+   - player `state=0x01000000`;
+   - animation `133`;
+   - baddy type `304`;
+   - baddy item flags contain `0x0004`;
+   the compatibility layer remembers that exact `CBody*` as the takedown victim.
+
+2. When Spider-Man reaches grounded landing animation `134`, the layer opens a **30 canonical tick** quarantine window for only that remembered victim.
+
+3. During that window, only:
+   `body == gSpideyPostDropVictim`
+   has its retail `CThug_AI` call skipped.
+
+4. Every other type-304 thug, every type-305 thug, and all other enemy classes continue updating normally.
+
+5. After the 30-tick window expires, the victim pointer and safety state are cleared and normal retail AI resumes.
+
+Why 30:
+- reproduced freeze is +17 ticks after landing;
+- 30 covers the proven failure with margin;
+- it is still only about half a second at the canonical 60-Hz cadence;
+- only the actual victim is paused.
+
+### New telemetry
+
+`baddy_ai_trace event=takedown_victim_identified ...`
+
+`baddy_ai_trace event=post_drop_thug_skip ... policy=skip_identified_takedown_victim_for_30_ticks_after_landing`
+
+`baddy_ai_trace event=takedown_victim_quarantine_expired ...`
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+External process-memory inspection was attempted through the newer Local Commander read-only API, but Windows denied `OpenProcess` against the elevated frozen game process. The injected in-process trace was sufficient to identify the exact victim body and callback.
+
+Controller hot-unplug support from `be0464c7` remains intact.
