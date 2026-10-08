@@ -6466,6 +6466,9 @@ static unsigned long gSpideyBaddyAITraceReturns = 0;
 
 static CBody* gSpideyPostDropVictim = 0;
 static unsigned long gSpideyPostDropVictimSeenTick = 0;
+static unsigned long gSpideyPostDropVictimGeneration = 0;
+static int gSpideyPostDropVictimPriority = 0;
+static unsigned __int64 gSpideyPostDropVictimDistanceSq = 0;
 static unsigned long gSpideyPostDropThugSafetyUntilTick = 0;
 static unsigned long gSpideyPostDropThugSkippedCalls = 0;
 
@@ -6544,10 +6547,13 @@ static void __fastcall SpideyBaddyAITraceThunk(
 	const unsigned long tick =
 		SpideyDropHangTraceTick();
 
-	// The live freeze is now tied to the actual ceiling-takedown victim,
-	// not to type-304 thugs generally. During the authored smash descent the
-	// victim is the only type-304 thug carrying item flag 0x4 (0x0006 versus
-	// the normal 0x0002). Remember that exact body while anim 133 is active.
+	// Ceiling takedowns and airborne drop attacks share the same retail
+	// smash state/animation (0x01000000 / 133 -> 134). Some authored ceiling
+	// takedowns mark the victim with item flag 0x4, but ordinary jump/drop
+	// attacks do not. Track the exact victim in two tiers:
+	//   priority 2 = explicit type-304 flag-0x4 victim;
+	//   priority 1 = nearest type-304 thug during smash descent.
+	// This keeps the recovery quarantine victim-specific in both variants.
 	if (trace &&
 		player &&
 		player->field_E1C ==
@@ -6555,16 +6561,63 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		player->mAnim ==
 			133 &&
 		type ==
-			304 &&
-		(flags & 0x0004))
+			304)
 	{
-		if (gSpideyPostDropVictim !=
-			body)
+		if (gSpideyPostDropVictimGeneration !=
+			gSpideyDropHangTraceGeneration)
+		{
+			gSpideyPostDropVictim =
+				0;
+			gSpideyPostDropVictimSeenTick =
+				0;
+			gSpideyPostDropVictimGeneration =
+				gSpideyDropHangTraceGeneration;
+			gSpideyPostDropVictimPriority =
+				0;
+			gSpideyPostDropVictimDistanceSq =
+				0;
+			gSpideyPostDropThugSafetyUntilTick =
+				0;
+		}
+
+		const long dx =
+			body->mPos.vx -
+			player->mPos.vx;
+		const long dy =
+			body->mPos.vy -
+			player->mPos.vy;
+		const long dz =
+			body->mPos.vz -
+			player->mPos.vz;
+		const unsigned __int64 distanceSq =
+			(unsigned __int64)((__int64)dx * (__int64)dx) +
+			(unsigned __int64)((__int64)dy * (__int64)dy) +
+			(unsigned __int64)((__int64)dz * (__int64)dz);
+
+		const int candidatePriority =
+			(flags & 0x0004) ?
+				2 :
+				1;
+
+		const int replaceVictim =
+			candidatePriority >
+				gSpideyPostDropVictimPriority ||
+			(candidatePriority ==
+				gSpideyPostDropVictimPriority &&
+			 (!gSpideyPostDropVictim ||
+			  distanceSq <
+				gSpideyPostDropVictimDistanceSq));
+
+		if (replaceVictim)
 		{
 			gSpideyPostDropVictim =
 				body;
 			gSpideyPostDropVictimSeenTick =
 				tick;
+			gSpideyPostDropVictimPriority =
+				candidatePriority;
+			gSpideyPostDropVictimDistanceSq =
+				distanceSq;
 
 			FILE* f =
 				SpideyOpenConsolidatedLog(
@@ -6573,11 +6626,15 @@ static void __fastcall SpideyBaddyAITraceThunk(
 			{
 				fprintf(
 					f,
-					"baddy_ai_trace event=takedown_victim_identified tick=%lu body=0x%08lX type=%u flags=0x%04X state=0x%08lX anim=%u policy=remember_flag_0x4_type304_victim\n",
+					"baddy_ai_trace event=drop_victim_candidate tick=%lu generation=%lu body=0x%08lX type=%u flags=0x%04X priority=%d distance_sq_low=0x%08lX distance_sq_high=0x%08lX state=0x%08lX anim=%u policy=flag4_else_nearest_type304\n",
 					tick,
+					gSpideyPostDropVictimGeneration,
 					(unsigned long)body,
 					type,
 					flags,
+					candidatePriority,
+					(unsigned long)distanceSq,
+					(unsigned long)(distanceSq >> 32),
 					(unsigned long)player->field_E1C,
 					(unsigned int)player->mAnim);
 				fclose(f);
@@ -6630,17 +6687,22 @@ static void __fastcall SpideyBaddyAITraceThunk(
 		{
 			fprintf(
 				f,
-				"baddy_ai_trace event=takedown_victim_quarantine_expired tick=%lu body=0x%08lX victim_seen_tick=%lu safety_until=%lu\n",
+				"baddy_ai_trace event=drop_victim_quarantine_expired tick=%lu body=0x%08lX victim_seen_tick=%lu safety_until=%lu priority=%d\n",
 				tick,
 				(unsigned long)gSpideyPostDropVictim,
 				gSpideyPostDropVictimSeenTick,
-				gSpideyPostDropThugSafetyUntilTick);
+				gSpideyPostDropThugSafetyUntilTick,
+				gSpideyPostDropVictimPriority);
 			fclose(f);
 		}
 
 		gSpideyPostDropVictim =
 			0;
 		gSpideyPostDropVictimSeenTick =
+			0;
+		gSpideyPostDropVictimPriority =
+			0;
+		gSpideyPostDropVictimDistanceSq =
 			0;
 		gSpideyPostDropThugSafetyUntilTick =
 			0;

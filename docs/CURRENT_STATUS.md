@@ -17762,3 +17762,92 @@ Why 30:
 External process-memory inspection was attempted through the newer Local Commander read-only API, but Windows denied `OpenProcess` against the elevated frozen game process. The injected in-process trace was sufficient to identify the exact victim body and callback.
 
 Controller hot-unplug support from `be0464c7` remains intact.
+
+
+## 2026-10-07 — Jump/drop attack proves smash freeze is not ceiling-only
+
+### Live freeze on 1905931d
+
+User reported another freeze after what was likely a normal jump/drop attack rather than a ceiling-start takedown.
+
+The process remained open and the trace again ended on:
+
+`baddy_ai_trace event=enter call=7482 tick=5140 body=0x16FC68A0 vtable=0x0053C550 type=304 original_ai=0x004DB280`
+
+with no matching return.
+
+So the spinner is again:
+
+`CThug_AI @ 0x004DB280`.
+
+### Player move identity
+
+Despite not starting from a ceiling, this move uses the exact same retail player smash state and animation sequence:
+
+- tick 5120: `state=0x01000000 anim=133`
+- tick 5133: grounded `state=0x00000001 anim=134`
+- tick 5140: type-304 thug AI enters and never returns.
+
+Therefore the engine reuses the ceiling-smash/drop-attack state for ordinary airborne drop attacks as well.
+
+### Why the 1905931d victim heuristic missed this case
+
+The previous refinement identified authored ceiling takedown victims by:
+
+`type=304 && (mFlags & 0x0004)`.
+
+In this run, active BaddyList at attack time contained only:
+
+- type 305 body `0x16FC5DA0`;
+- type 304 body `0x16FC68A0`.
+
+The type-304 victim remained:
+
+`flags=0x0002`
+
+throughout anim 133, so the explicit `0x4` ceiling-victim marker never appeared and no quarantine armed.
+
+Immediately before the attack, the camera/auto-aim system had already selected the same body:
+
+`target=0x16FC68A0`.
+
+It was also the only type-304 thug in BaddyList.
+
+### Generalized victim selection
+
+Victim selection during smash state/anim 133 is now two-tiered:
+
+1. **priority 2**:
+   type-304 thug with explicit item flag `0x0004`.
+   This preserves the exact ceiling-takedown identification from the previous run.
+
+2. **priority 1 fallback**:
+   nearest type-304 thug to Spider-Man during smash descent.
+
+The closest candidate is updated throughout anim 133. An explicit `0x4` candidate always overrides distance selection.
+
+Selection is scoped to the current `drop_hang_trace` generation so stale victims from previous attacks cannot carry forward.
+
+### Recovery behavior
+
+Once grounded landing anim 134 is reached:
+
+- only the selected victim body is quarantined;
+- quarantine length remains 30 canonical ticks;
+- all other type-304 thugs and all other enemy types continue normal retail AI;
+- victim state is cleared after expiry.
+
+New selection telemetry:
+
+`baddy_ai_trace event=drop_victim_candidate ... priority=... distance_sq_low=... distance_sq_high=... policy=flag4_else_nearest_type304`
+
+Expiry telemetry:
+
+`baddy_ai_trace event=drop_victim_quarantine_expired ...`
+
+### Validation
+
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS
+
+This generalizes the freeze mitigation to both ceiling-start and ordinary airborne drop attacks while keeping the AI quarantine victim-specific.
