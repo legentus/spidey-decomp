@@ -17851,3 +17851,50 @@ Expiry telemetry:
 - forced-clean matching VC6 build: PASS
 
 This generalizes the freeze mitigation to both ceiling-start and ordinary airborne drop attacks while keeping the AI quarantine victim-specific.
+
+
+## 2026-10-07 — Plain combat freeze proves CThug_AI is the common subsystem
+
+Live runtime `708ea29e` froze during ordinary fighting with no drop attack involved.
+
+Final unmatched callback:
+`baddy_ai_trace event=enter call=1278 tick=2906 body=0x170CAF60 type=304 original_ai=0x004DB280`
+
+No matching return.
+
+Player state at freeze:
+- `state=0x00000800`
+- `anim=105`
+- grounded normal combat.
+
+BaddyList was structurally healthy with 7 nodes; multiple other type-304 thugs returned normally immediately before the stuck one.
+
+The stuck thug had earlier transitioned:
+`mCBodyFlags 0x0218 -> 0x0208`
+which matches `CThug::TakeHit()` clearing bit `0x10`.
+
+This proves the prior ceiling/drop-specific guards were symptom mitigations. The common failing subsystem is retail:
+`CThug_AI @ 0x004DB280`.
+
+Project history also shows the full-engine 20-FPS reference is known-good, while ordinary baddies remain at 60-Hz dispatch in the modern engine.
+
+### New authored-cadence candidate
+
+Added per-body type-304 AI cadence gating inside `SpideyBaddyAITraceThunk`:
+
+- engine/render/physics remain 60 Hz;
+- each type-304 thug gets at most one retail `CThug_AI` dispatch per three canonical 60-Hz timer ticks;
+- effective thug AI cadence = 20 Hz;
+- cadence state is tracked independently per thug body;
+- type-305 and all other enemy classes are unchanged;
+- existing victim-specific post-drop guard remains as an extra narrow safety layer.
+
+Telemetry:
+`baddy_ai_trace event=type304_cadence_hold ... policy=type304_ai_20hz_on_60hz_engine`
+
+Rationale:
+Every captured combat freeze—ceiling takedown, airborne drop attack, and ordinary combat—ends inside the same type-304 CThug_AI callback. Restoring authored AI dispatch cadence addresses the common state-machine timing issue instead of guessing which player move caused it.
+
+Validation:
+- `git diff --check`: PASS
+- forced-clean matching VC6 build: PASS

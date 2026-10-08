@@ -6464,6 +6464,68 @@ static int gSpideyBaddyAITraceVtableCount = 0;
 static unsigned long gSpideyBaddyAITraceCalls = 0;
 static unsigned long gSpideyBaddyAITraceReturns = 0;
 
+struct SpideyThug20HzBodyState
+{
+	CBody* body;
+	unsigned long lastBucket;
+	unsigned long retailCalls;
+	unsigned long heldCalls;
+};
+
+static SpideyThug20HzBodyState gSpideyThug20HzBodies[64];
+static unsigned long gSpideyThug20HzRetailCalls = 0;
+static unsigned long gSpideyThug20HzHeldCalls = 0;
+
+static SpideyThug20HzBodyState* SpideyGetThug20HzBodyState(
+		CBody* body)
+{
+	if (!body)
+		return 0;
+
+	for (int i = 0; i < 64; ++i)
+	{
+		if (gSpideyThug20HzBodies[i].body == body)
+			return &gSpideyThug20HzBodies[i];
+	}
+
+	for (int j = 0; j < 64; ++j)
+	{
+		if (!gSpideyThug20HzBodies[j].body)
+		{
+			gSpideyThug20HzBodies[j].body = body;
+			gSpideyThug20HzBodies[j].lastBucket = 0xFFFFFFFFUL;
+			gSpideyThug20HzBodies[j].retailCalls = 0;
+			gSpideyThug20HzBodies[j].heldCalls = 0;
+			return &gSpideyThug20HzBodies[j];
+		}
+	}
+
+	return 0;
+}
+
+static int SpideyShouldRunType304AI20Hz(
+		CBody* body,
+		unsigned long tick)
+{
+	SpideyThug20HzBodyState* state =
+		SpideyGetThug20HzBodyState(body);
+	if (!state)
+		return 1;
+
+	const unsigned long bucket = tick / 3UL;
+	if (state->lastBucket == bucket)
+	{
+		++state->heldCalls;
+		++gSpideyThug20HzHeldCalls;
+		return 0;
+	}
+
+	state->lastBucket = bucket;
+	++state->retailCalls;
+	++gSpideyThug20HzRetailCalls;
+	return 1;
+}
+
 static CBody* gSpideyPostDropVictim = 0;
 static unsigned long gSpideyPostDropVictimSeenTick = 0;
 static unsigned long gSpideyPostDropVictimGeneration = 0;
@@ -6777,6 +6839,39 @@ static void __fastcall SpideyBaddyAITraceThunk(
 			fclose(f);
 		}
 
+		return;
+	}
+
+
+	// Type-304 thug state machines were authored around the original 20-Hz
+	// gameplay cadence. Every captured combat freeze has ended inside the same
+	// retail CThug_AI callback while the rest of BaddyList remains healthy.
+	// Keep the 60-Hz engine/render/physics path, but advance each type-304
+	// thug's AI only once per three canonical timer ticks.
+	if (type == 304 &&
+		!postDropThugGuard &&
+		!SpideyShouldRunType304AI20Hz(
+			body,
+			tick))
+	{
+		if (trace)
+		{
+			FILE* f =
+				SpideyOpenConsolidatedLog(
+					"TIMING");
+			if (f)
+			{
+				fprintf(
+					f,
+					"baddy_ai_trace event=type304_cadence_hold tick=%lu body=0x%08lX cbody_flags=0x%04X retail=%lu held=%lu policy=type304_ai_20hz_on_60hz_engine\n",
+					tick,
+					(unsigned long)body,
+					bodyFlags,
+					gSpideyThug20HzRetailCalls,
+					gSpideyThug20HzHeldCalls);
+				fclose(f);
+			}
+		}
 		return;
 	}
 
