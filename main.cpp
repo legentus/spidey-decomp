@@ -7608,6 +7608,81 @@ static int __fastcall SpideyTraceState26SetHeight(
 {
 	++gSpideyState26SetHeightCalls;
 
+	CThug* thug =
+		(CThug*)baddy;
+
+	// State 26/substate 0 already called SetHeight(1,100,600), which
+	// refreshed field_2A0 from the world collision query.  On the very
+	// next real AI update, state 26/substate 1 historically calls
+	// SetHeight(0,100,600) again before it even checks mAnimFinished.
+	// That exact first substate-1 call is where every captured combat
+	// freeze now ends.  Reuse the cached ground target and execute only
+	// the bounded vertical-settle half of retail SetHeight.
+	if (baddy &&
+		baddy->mType == 304 &&
+		thug->field_31C.bothFlags == 26 &&
+		thug->dumbAssPad == 1 &&
+		thug->mHealth <= 0)
+	{
+		SpideyLogState26NestedCall(
+			"setheight_cached_ground_enter",
+			baddy,
+			0,
+			a2,
+			a3,
+			a4);
+
+		const int targetY =
+			baddy->field_2A0 -
+			(baddy->field_21E << 12);
+
+		int result =
+			2;
+
+		if (targetY != baddy->mPos.vy)
+		{
+			baddy->mPos.vy +=
+				((targetY - baddy->mPos.vy) >> 2);
+
+			int delta =
+				baddy->mPos.vy -
+				targetY;
+			if (delta < 0)
+				delta =
+					-delta;
+
+			const int snapDistance =
+				baddy->field_2A4 ?
+					122880 :
+					12288;
+
+			if (delta <= snapDistance)
+			{
+				baddy->mPos.vy =
+					targetY;
+				result =
+					2;
+			}
+			else
+			{
+				result =
+					1;
+			}
+		}
+
+		++gSpideyState26SetHeightReturns;
+
+		SpideyLogState26NestedCall(
+			"setheight_cached_ground_return",
+			baddy,
+			result,
+			a2,
+			a3,
+			a4);
+
+		return result;
+	}
+
 	SpideyLogState26NestedCall(
 		"setheight_enter",
 		baddy,

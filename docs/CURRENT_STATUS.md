@@ -18060,3 +18060,42 @@ This is telemetry-only; retail behavior is forwarded unchanged.
 Validation:
 - `git diff --check`: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-08 — Active fix for type-304 state-26/substate-1 combat freeze
+
+Repeated live captures isolated the freeze to a type-304 thug with health 0, mCBodyFlags 0x0208, state 26, substate 1. The first real execution of state 26/substate 1 never returned.
+
+Retail mapping:
+- CThug_AI state 26 -> 0x004DB7F8
+- state handler -> sub_4D8E50 @ 0x004D8E50
+- substate 1 -> 0x004D8FD0
+
+Substate 1 calls CBaddy::SetHeight(0,100,600) before checking mAnimFinished.
+
+Critical observation:
+state-26/substate-0 already calls SetHeight(1,100,600), forcing a fresh ground-height query and caching the intended ground target in field_2A0.
+
+### Active fix
+
+At only callsite 0x004D8FDC, when:
+- type == 304
+- state == 26
+- substate == 1
+- health <= 0
+
+the wrapper bypasses retail CBaddy::SetHeight and reuses cached field_2A0.
+
+It runs only the bounded vertical-settle half of retail SetHeight:
+- targetY = field_2A0 - (field_21E << 12)
+- move mPos.vy one quarter toward target
+- use the same snap thresholds: 12288 or 122880 depending on field_2A4
+- preserve retail return semantics 1/2
+
+This removes the repeated Utils_GetGroundHeight -> M3dZone_LineToItem world-collision query from the proven bad dead-thug state while preserving authored corpse ground placement.
+
+All other SetHeight calls remain retail.
+
+Validation:
+- git diff --check: PASS
+- forced-clean matching VC6 build: PASS
