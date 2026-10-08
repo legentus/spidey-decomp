@@ -6911,33 +6911,6 @@ static void __fastcall SpideyBaddyAITraceThunk(
 	// retail CThug_AI callback while the rest of BaddyList remains healthy.
 	// Keep the 60-Hz engine/render/physics path, but advance each type-304
 	// thug's AI only once per three canonical timer ticks.
-	if (type == 304 &&
-		!postDropThugGuard &&
-		!SpideyShouldRunType304AI20Hz(
-			body,
-			tick))
-	{
-		if (trace)
-		{
-			FILE* f =
-				SpideyOpenConsolidatedLog(
-					"TIMING");
-			if (f)
-			{
-				fprintf(
-					f,
-					"baddy_ai_trace event=type304_cadence_hold tick=%lu body=0x%08lX cbody_flags=0x%04X retail=%lu held=%lu policy=type304_ai_20hz_on_60hz_engine\n",
-					tick,
-					(unsigned long)body,
-					bodyFlags,
-					gSpideyThug20HzRetailCalls,
-					gSpideyThug20HzHeldCalls);
-				fclose(f);
-			}
-		}
-		return;
-	}
-
 	if (!entry ||
 		!entry->originalAI ||
 		entry->originalAI ==
@@ -7936,12 +7909,16 @@ static void __cdecl SpideyChaseWorldAI20Hz(
 		player = 0;
 	}
 
-	const int chaseScripted =
-		player &&
-		SpideyRetailGetLevelId() == 0x501 &&
-		player->field_1AC;
+	// The original gameplay world advanced BaddyList and ControlBaddyList at
+	// the authored 20-Hz cadence. Keeping these lists at 60 Hz while only
+	// throttling individual AI callbacks leaves EveryFrame/bookkeeping,
+	// animation/state timers, messages, collision and generic AI pre-dispatch
+	// on a mismatched cadence. That mismatch is now implicated in repeated
+	// type-304 death-state spins. Restore the complete baddy-world pair to
+	// authored cadence globally while player/render/physics remain 60 Hz.
+	const int authoredWorldCadence = 1;
 
-	if (!chaseScripted)
+	if (!authoredWorldCadence)
 	{
 		if (gSpideyChaseWorldAI20TickValid)
 		{
@@ -8041,7 +8018,7 @@ static int SpideyInstallChaseBaddyAI20HzCompat()
 	{
 		fprintf(
 			f,
-			"chase_world_ai_20hz_install baddy_installed=%d baddy_call=0x004554F5 baddy_list=0x0056E990 control_installed=%d control_call=0x00455501 control_list=0x0056E994 retail=0x00460FC0 wrapper=0x%08lX policy=phase_locked_baddy_and_control_lists_20hz_during_l5a1_synthesized_control\\n",
+			"chase_world_ai_20hz_install baddy_installed=%d baddy_call=0x004554F5 baddy_list=0x0056E990 control_installed=%d control_call=0x00455501 control_list=0x0056E994 retail=0x00460FC0 wrapper=0x%08lX policy=global_authored_baddy_and_control_lists_20hz_on_60hz_engine\\n",
 			gSpideyChaseBaddyAI20Installed,
 			gSpideyChaseControlAI20Installed,
 			(unsigned long)(void*)&SpideyChaseWorldAI20Hz);
@@ -8063,7 +8040,7 @@ static void SpideyLogChaseBaddyAI20Stats()
 
 	fprintf(
 		f,
-		"chase_world_ai_20hz_stats baddy_installed=%d baddy_calls=%lu baddy_retail=%lu baddy_held=%lu control_installed=%d control_calls=%lu control_retail=%lu control_held=%lu gate_events=%lu max_elapsed=%lu level=0x501 policy=phase_locked_venom_and_scriptonly_camera_controller_lists\\n",
+		"chase_world_ai_20hz_stats baddy_installed=%d baddy_calls=%lu baddy_retail=%lu baddy_held=%lu control_installed=%d control_calls=%lu control_retail=%lu control_held=%lu gate_events=%lu max_elapsed=%lu level=0x501 policy=global_authored_baddy_and_control_lists_20hz_on_60hz_engine\\n",
 		gSpideyChaseBaddyAI20Installed,
 		gSpideyChaseBaddyAI20Calls,
 		gSpideyChaseBaddyAI20RetailCalls,

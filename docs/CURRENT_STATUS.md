@@ -18099,3 +18099,41 @@ All other SetHeight calls remain retail.
 Validation:
 - git diff --check: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-08 — Global authored BaddyList cadence on 60-Hz engine
+
+Live runtime fbbccc8b froze again. The final log stopped on:
+- CThug_AI entry;
+- type 304;
+- state 26/substate 1;
+- health -60;
+- before the state-26 SetHeight compatibility wrapper was entered.
+
+Therefore the state-26 SetHeight path was not the freeze boundary in this run.
+
+This rules out the DX11 renderer as the direct source of this specific hang because the log stops inside the gameplay Logic/BaddyList update before Logic returns or rendering/present is reached.
+
+The stronger timing issue is architectural:
+- previous experiment throttled only CThug_AI to 20 Hz;
+- Ob_AI/EveryFrame for the same thug still ran at 60 Hz;
+- generic baddy bookkeeping, animation/state timers, collision/messages and CThug_AI were therefore on mismatched cadences.
+
+Project precedent from the validated Venom chase already proved that actor-only cadence gating is insufficient; BaddyList and ControlBaddyList must share an authored-phase gate.
+
+### Fix candidate
+
+The existing phase-locked BaddyList + ControlBaddyList wrapper is now the global policy on the 60-Hz engine instead of being limited to L5A1 scripted chase.
+
+- BaddyList @ 0x0056E990 advances once per 3 canonical 60-Hz ticks.
+- ControlBaddyList @ 0x0056E994 advances on the same due tick.
+- player/render/physics remain 60 Hz.
+- the per-type-304 CThug_AI 20-Hz gate was removed to avoid double-throttling thugs to ~6.7 Hz.
+- existing chase phase behavior is naturally preserved by the global policy.
+
+Telemetry policy string:
+global_authored_baddy_and_control_lists_20hz_on_60hz_engine
+
+Validation:
+- git diff --check: PASS
+- forced-clean matching VC6 build: PASS
