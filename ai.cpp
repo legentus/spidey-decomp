@@ -226,6 +226,19 @@ void CAIProc_RotY::Execute(void)
 	}
 }
 
+// Non-virtual bridge for the retail 0x00401110 patch site. Passing the
+// virtual member symbol itself to PATCH_PUSH_RET makes MSVC emit a virtual
+// dispatch thunk (mov eax,[ecx] / jmp [eax+4]). Since the retail vtable slot
+// points back to 0x00401110, that creates an infinite recursion after the
+// patch is installed. The qualified call below binds directly to our native
+// implementation instead of redispatching through the vtable.
+static void __fastcall SpideyCAIProcRotYExecute(
+		CAIProc_RotY* self,
+		void*)
+{
+	self->CAIProc_RotY::Execute();
+}
+
 // @Ok
 CAIProc_Fall::CAIProc_Fall(CBaddy *pBaddy, int a3)
 {
@@ -632,5 +645,5 @@ void validate_CAIProc_MoveTo(void)
 
 void patch_ai(void)
 {
-	PATCH_PUSH_RET(0x00401110, CAIProc_RotY::Execute);
+	PATCH_PUSH_RET(0x00401110, SpideyCAIProcRotYExecute);
 }

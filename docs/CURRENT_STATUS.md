@@ -18242,3 +18242,84 @@ Validation:
 - normal baddy updates remain 60 Hz outside the existing validated Venom chase exception;
 - git diff --check: PASS;
 - forced-clean matching VC6 build: PASS.
+
+
+## 2026-10-08 — Root cause of combat freeze proven by in-process EIP sampler
+
+Runtime `221976f5` froze again while fighting. The new in-process hang sampler captured 64 instruction-level samples from the actual stuck Logic/main thread.
+
+The samples overwhelmingly alternated between:
+- `0x100023C0 / 0x100023C2` in `spider.dll`;
+- `0x00401110` in `SpideyPC.exe`.
+
+Stable stack return address:
+- `0x004DB38C`, immediately after `CThug_AI`'s virtual call through the AI-procedure object at `field_28C`.
+
+Frozen object context:
+- thug body `0x16FCB8A0`;
+- AI-procedure object `ECX=0x16FCCF00`;
+- retail vtable around `0x0053B240`.
+
+### Exact recursion
+
+`spider.map` identified `0x100023C0` as the MSVC-generated virtual thunk for the patched `CAIProc_RotY::Execute` member.
+
+Old live DLL bytes at `0x100023C0`:
+
+`8B 01 FF 60 04`
+
+which is:
+
+`mov eax,[ecx]`
+`jmp dword ptr [eax+4]`
+
+Retail vtable `0x0053B240` slot +4 points to:
+`0x00401110`.
+
+But `patch_ai()` had installed:
+
+`PATCH_PUSH_RET(0x00401110, CAIProc_RotY::Execute)`
+
+which overwrote retail `0x00401110` with:
+
+`push 0x100023C0`
+`ret`
+
+Therefore the runtime loop was exactly:
+
+`0x00401110 -> 0x100023C0 -> vtable[+4] -> 0x00401110 -> ...`
+
+This is the actual CPU busy-spin responsible for the recurring combat freezes.
+
+### Fix
+
+Do not patch a retail virtual entry point directly to a virtual-member symbol.
+
+Added concrete non-virtual fastcall bridge:
+
+`SpideyCAIProcRotYExecute(CAIProc_RotY* self, void*)`
+
+which invokes:
+
+`self->CAIProc_RotY::Execute()`
+
+using a qualified direct call.
+
+`patch_ai()` now installs:
+
+`PATCH_PUSH_RET(0x00401110, SpideyCAIProcRotYExecute)`
+
+instead of the virtual member symbol.
+
+The compiled bridge at `0x100023C0` now begins with:
+
+`E9 9B F2 FF FF`
+
+a direct relative jump to the concrete native implementation. It no longer contains the recursive virtual-dispatch thunk.
+
+The in-process hang sampler remains enabled for future freezes.
+
+Validation:
+- git diff --check: PASS;
+- forced-clean matching VC6 build: PASS;
+- compiled bridge bytes verified non-virtual/direct.
