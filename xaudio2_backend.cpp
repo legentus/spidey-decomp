@@ -6,12 +6,23 @@
 #include "xaudio2_compat.h"
 
 #include <windows.h>
+#include <objbase.h>
 #include <dsound.h>
 #include <mmsystem.h>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
 #include <cstdio>
+
+// The Visual C++ 6.0 platform headers predate CoInitializeEx even though the
+// function is exported by ole32.dll on every Windows version we support.
+// Keep a local ABI declaration so the matching compiler can call it.
+extern "C" HRESULT WINAPI CoInitializeEx(
+        LPVOID pvReserved,
+        DWORD dwCoInit);
+#ifndef COINIT_MULTITHREADED
+#define COINIT_MULTITHREADED 0x0
+#endif
 
 struct SpideyXAudio2VoiceSlot
 {
@@ -31,6 +42,8 @@ static SpideyIXAudio2* gSpideyXAudio2 = 0;
 static SpideyIXAudio2MasteringVoice* gSpideyXAudio2Master = 0;
 static unsigned long gSpideyXAudio2OutputChannels = 2;
 static int gSpideyXAudio2Active = 0;
+static int gSpideyXAudio2ComInitialized = 0;
+static int gSpideyXAudio2LoggedL1A1Alias1 = 0;
 static SpideyXAudio2VoiceSlot gSpideyXAudio2Voices[32];
 
 static void SpideyXAudio2Log(
@@ -47,6 +60,29 @@ static void SpideyXAudio2Log(
         "%s\n",
         text ? text : "");
     fclose(f);
+}
+
+static void SpideyXAudio2LogHr(
+        const char* eventName,
+        HRESULT hr)
+{
+    char line[192];
+    sprintf(
+        line,
+        "%s hr=0x%08lX",
+        eventName ? eventName : "xaudio2_event",
+        (unsigned long)hr);
+    SpideyXAudio2Log(
+        line);
+}
+
+static void SpideyXAudio2ReleaseCom(void)
+{
+    if (gSpideyXAudio2ComInitialized)
+    {
+        CoUninitialize();
+        gSpideyXAudio2ComInitialized = 0;
+    }
 }
 
 static int SpideyXAudio2ForcedDirectSound()
@@ -150,6 +186,27 @@ int SpideyXAudio2Initialize(void)
         return 0;
     }
 
+    // XAudio2 2.9 requires COM to be initialized on the calling thread.
+    // The retail game never needed to do this for DirectSound, so initialize
+    // COM here before creating the XAudio2 mastering voice. If this thread is
+    // already initialized in a different apartment model, COM is still usable
+    // and we must not balance that case with CoUninitialize().
+    HRESULT comHr =
+        CoInitializeEx(
+            0,
+            COINIT_MULTITHREADED);
+    if (SUCCEEDED(comHr))
+    {
+        gSpideyXAudio2ComInitialized = 1;
+    }
+    else if (comHr != RPC_E_CHANGED_MODE)
+    {
+        SpideyXAudio2LogHr(
+            "backend=directsound reason=com_initialize_failed",
+            comHr);
+        return 0;
+    }
+
     memset(
         gSpideyXAudio2Voices,
         0,
@@ -174,6 +231,7 @@ int SpideyXAudio2Initialize(void)
     {
         SpideyXAudio2Log(
             "backend=directsound reason=xaudio2_9_not_found");
+        SpideyXAudio2ReleaseCom();
         return 0;
     }
 
@@ -188,6 +246,7 @@ int SpideyXAudio2Initialize(void)
         FreeLibrary(
             gSpideyXAudio2Module);
         gSpideyXAudio2Module = 0;
+        SpideyXAudio2ReleaseCom();
         return 0;
     }
 
@@ -199,12 +258,14 @@ int SpideyXAudio2Initialize(void)
     if (FAILED(hr) ||
         !gSpideyXAudio2)
     {
-        SpideyXAudio2Log(
-            "backend=directsound reason=xaudio2_create_failed");
+        SpideyXAudio2LogHr(
+            "backend=directsound reason=xaudio2_create_failed",
+            hr);
         FreeLibrary(
             gSpideyXAudio2Module);
         gSpideyXAudio2Module = 0;
         gSpideyXAudio2 = 0;
+        SpideyXAudio2ReleaseCom();
         return 0;
     }
 
@@ -222,14 +283,16 @@ int SpideyXAudio2Initialize(void)
     if (FAILED(hr) ||
         !gSpideyXAudio2Master)
     {
-        SpideyXAudio2Log(
-            "backend=directsound reason=mastering_voice_failed");
+        SpideyXAudio2LogHr(
+            "backend=directsound reason=mastering_voice_failed",
+            hr);
         gSpideyXAudio2->lpVtbl->Release(
             gSpideyXAudio2);
         gSpideyXAudio2 = 0;
         FreeLibrary(
             gSpideyXAudio2Module);
         gSpideyXAudio2Module = 0;
+        SpideyXAudio2ReleaseCom();
         return 0;
     }
 
@@ -261,8 +324,10 @@ int SpideyXAudio2Initialize(void)
         FreeLibrary(
             gSpideyXAudio2Module);
         gSpideyXAudio2Module = 0;
-        SpideyXAudio2Log(
-            "backend=directsound reason=start_engine_failed");
+        SpideyXAudio2LogHr(
+            "backend=directsound reason=start_engine_failed",
+            hr);
+        SpideyXAudio2ReleaseCom();
         return 0;
     }
 
@@ -319,6 +384,7 @@ void SpideyXAudio2Shutdown(void)
 
     gSpideyXAudio2Active =
         0;
+    SpideyXAudio2ReleaseCom();
 }
 
 int SpideyXAudio2IsActive(void)
@@ -471,6 +537,25 @@ void __cdecl SpideyXAudio2Open(
         format->nChannels;
     slot->sampleRate =
         format->nSamplesPerSec;
+
+    if (levelBank &&
+        soundIndex == 33 &&
+        !gSpideyXAudio2LoggedL1A1Alias1)
+    {
+        char line[256];
+        sprintf(
+            line,
+            "l1a1_alias1_xaudio_source asset=33 format_tag=%u channels=%u rate=%lu bits=%u block_align=%u bytes=%lu",
+            (unsigned int)format->wFormatTag,
+            (unsigned int)format->nChannels,
+            (unsigned long)format->nSamplesPerSec,
+            (unsigned int)format->wBitsPerSample,
+            (unsigned int)format->nBlockAlign,
+            (unsigned long)slot->audioBytes);
+        SpideyXAudio2Log(
+            line);
+        gSpideyXAudio2LoggedL1A1Alias1 = 1;
+    }
 
     hr =
         gSpideyXAudio2->lpVtbl->CreateSourceVoice(

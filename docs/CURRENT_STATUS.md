@@ -18485,3 +18485,71 @@ Compiled wrapper verification:
 Validation:
 - git diff --check: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-09 — XAudio2 COM initialization fix + live WASAPI loopback analyzer
+
+The first XAudio2 2.9 build was falling back to retail DirectSound with:
+- backend=directsound reason=mastering_voice_failed
+
+A direct XAudio2 probe reproduced the failure:
+- XAudio2Create: 0x00000000
+- CreateMasteringVoice: 0x800401F0 (CO_E_NOTINITIALIZED)
+
+Calling CoInitializeEx(NULL, COINIT_MULTITHREADED) before XAudio2 fixed the same probe:
+- CoInitializeEx: 0x00000000
+- XAudio2Create: 0x00000000
+- CreateMasteringVoice: 0x00000000
+
+### Backend changes
+
+xaudio2_backend.cpp now:
+- initializes COM before XAudio2 2.9;
+- accepts RPC_E_CHANGED_MODE as an already-initialized COM apartment case;
+- balances successful CoInitializeEx calls with CoUninitialize;
+- logs exact HRESULT values for COM/XAudio2 initialization failures;
+- keeps DirectSound fallback if modern backend startup still fails;
+- emits one one-time format record when L1A1 alias 1 / bank asset 33 is opened through XAudio2:
+  - format tag
+  - channels
+  - sample rate
+  - bit depth
+  - block align
+  - copied PCM byte count
+
+VC6 does not declare CoInitializeEx in its old platform headers, so a local ABI-compatible declaration is used. ole32.lib was already part of the project link set.
+
+### Missile A/B conclusion and restoration
+
+Previous build 255ece2d suppressed only the CChopperMissile alias-1 callsite at 0x0042435B.
+The audible ~2.5 second repeat remained.
+
+Therefore the missile loop is ruled out as the persistent repeating sound reported by the user.
+The missile suppression patch has now been removed and retail missile audio restored.
+
+The remaining confirmed owner is the helicopter's own alias-1 start at 0x00426313.
+
+### Actual speaker-output capture
+
+Added tools/SpideyLoopbackCapture.cs:
+- small Windows Core Audio / WASAPI loopback recorder;
+- captures the actual system render stream to WAV;
+- does not require game hooks or high-frequency logging.
+
+A 12-second live capture of the running game produced:
+- stereo
+- 48000 Hz
+- 32-bit IEEE float output
+
+Envelope autocorrelation showed:
+- strong recurrence near 2.48 seconds;
+- strongest recurrence near 4.95 seconds (~2 cycles).
+
+This matches the decoded L1A1 alias-1 / asset-33 nominal whole-buffer repeat duration (~2.52 seconds) closely enough to identify that asset as the audible repeating source.
+
+### Current next test
+
+Run the new build and verify spidey-audio.log reports:
+backend=xaudio2 ...
+
+Then enter L1A1 and capture/listen again. The missile audio is restored. If the helicopter alias-1 repeat remains under true XAudio2, use the one-time asset-33 source-format telemetry to implement a narrowly targeted loop-seam treatment in the modern backend rather than muting helicopter audio.
