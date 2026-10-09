@@ -18416,3 +18416,72 @@ Next test:
 - launch with default XAudio2 backend;
 - verify menu SFX, first-level ambience/chopper, positional pan, pitch, loops, pause/unpause and voice cleanup;
 - compare with SPIDEY_AUDIO_BACKEND=directsound only if a behavior difference needs isolation.
+
+
+## 2026-10-09 — L1A1 repeating audio A/B: suppress missile-owned alias-1 loop only
+
+Investigation of the first-level repeating sound identified L1A1 level-specific alias 1 as a confirmed looping entry.
+
+### Bank evidence
+
+Extracted and decompressed the real files from data.pkr:
+
+- l1a1.sfx
+  - PKR record offset: 0x09F29BA8
+  - file offset: 0x09EE2F00
+  - uncompressed size: 724 bytes
+  - compressed size: 216 bytes
+- l1a1.kat
+  - PKR record offset: 0x09F241AC
+  - file offset: 0x05EFF754
+  - uncompressed size: 319692 bytes
+  - compressed size: 277864 bytes
+
+Decoded L1A1 alias 1:
+- alias: 1
+- resolved bank asset index: 0x21 / 33
+- resolved flags: 0xC0210001
+- loop bit 0x80000000: SET
+- asset 33:
+  - compressed/sample payload size field: 15120 bytes
+  - sample rate: 12000 Hz
+  - format field: 4
+  - approximate whole-buffer repeat duration at nominal pitch: ~2.52 seconds
+
+Retail code uses the same alias 1 from two distinct owners:
+- helicopter engine loop:
+  - CChopper::AI
+  - SFX_PlayPos(0x8001, ...)
+  - retail callsite 0x00426313
+- helicopter missile loop:
+  - CChopperMissile::CommonInitialisation
+  - SFX_PlayPos(0x8001, ...)
+  - retail callsite 0x0042435B
+
+Missile destructor guards field_10C and calls SFX_Stop when nonzero.
+
+### A/B test patch
+
+Added:
+SpideySuppressChopperMissileLoop(u32, CVector*, i32)
+
+The wrapper returns 0 and performs no audio call.
+
+Only the missile initializer callsite is patched:
+- 0x0042435B -> SpideySuppressChopperMissileLoop
+
+The helicopter's own alias-1 start at 0x00426313 remains untouched.
+
+This creates a clean diagnostic:
+- if the persistent repeating sound disappears, the unwanted voice is missile-owned;
+- if it remains, the remaining source is the helicopter-owned alias-1 loop / loop seam.
+
+Compiled wrapper verification:
+- wrapper VA in current build: 0x10048BB0
+- bytes disassemble to:
+  - xor eax,eax
+  - ret
+
+Validation:
+- git diff --check: PASS
+- forced-clean matching VC6 build: PASS

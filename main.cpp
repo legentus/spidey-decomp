@@ -27962,6 +27962,25 @@ __declspec(naked) static void SpideyDiagDisplayD3DError(
 }
 #endif
 
+#ifdef _WIN32
+// A/B diagnostic for the first-level repeating loop. L1A1 level-specific
+// alias 1 resolves to looping bank asset 33 and is used by both CChopper and
+// CChopperMissile. Patch only the missile initializer callsite (0x0042435B)
+// so the helicopter's own engine loop remains unchanged. Returning a zero
+// voice handle is safe: the missile destructor already guards field_10C
+// before calling SFX_Stop.
+static u32 __cdecl SpideySuppressChopperMissileLoop(
+		u32 sound,
+		CVector* pos,
+		i32 pitchOffset)
+{
+	(void)sound;
+	(void)pos;
+	(void)pitchOffset;
+	return 0;
+}
+#endif
+
 
 // @Bogus
 void game_patches(void)
@@ -27999,6 +28018,10 @@ void game_patches(void)
 	SpideyInstallFrontendLifecycleCompat();
 	SpideyInstallGameplayUiScaleCompat();
 	SpideyInstallCleanup503AF0Compat();
+
+	// Test only the missile-owned L1A1 alias-1 loop. The helicopter's own
+	// alias-1 start at 0x00426313 is intentionally left retail.
+	PATCH_CALL(0x0042435B, SpideySuppressChopperMissileLoop);
 
 	// Prefer XAudio2 2.9 for active SFX voices. Retail DirectSound remains
 	// untouched if XAudio2 initialization fails or SPIDEY_AUDIO_BACKEND=directsound.
