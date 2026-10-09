@@ -18553,3 +18553,25 @@ Run the new build and verify spidey-audio.log reports:
 backend=xaudio2 ...
 
 Then enter L1A1 and capture/listen again. The missile audio is restored. If the helicopter alias-1 repeat remains under true XAudio2, use the one-time asset-33 source-format telemetry to implement a narrowly targeted loop-seam treatment in the modern backend rather than muting helicopter audio.
+
+
+### Reusable loopback analysis tool
+
+Added tools/analyze_loopback.py.
+
+It requires only the Python standard library and:
+- parses RIFF/WAVE and WAVEFORMATEXTENSIBLE;
+- supports IEEE float32 and PCM 8/16/24/32-bit captures;
+- builds a configurable RMS envelope;
+- calculates normalized autocorrelation over candidate periods;
+- reports the strongest repeat periods;
+- can score expected periods directly with --expected.
+
+Validation against the captured L1A1 sample:
+python tools/analyze_loopback.py logs/live_loopback.wav --expected 2.52 --top 8
+
+Results reproduced:
+- strongest period: 4.96 s, correlation 0.429026;
+- 2.52 s expected-period correlation: 0.202974.
+
+Together with SpideyLoopbackCapture.cs, future audio regressions can now be captured from actual speaker output and fingerprinted without invasive per-frame game logging.
