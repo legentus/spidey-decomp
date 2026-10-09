@@ -200,6 +200,7 @@ SOURCE=.\DXsound.cpp
 # End Source File
 # Begin Source File
 
+SOURCE=.\xaudio2_backend.cpp
 SOURCE=.\effects.cpp
 # End Source File
 # Begin Source File

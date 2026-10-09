@@ -68,6 +68,7 @@ CLEAN :
 	-@erase "$(INTDIR)\docock.obj"
 	-@erase "$(INTDIR)\DXinit.obj"
 	-@erase "$(INTDIR)\DXsound.obj"
+	-@erase "$(INTDIR)\xaudio2_backend.obj"
 	-@erase "$(INTDIR)\effects.obj"
 	-@erase "$(INTDIR)\exp.obj"
 	-@erase "$(INTDIR)\flash.obj"
@@ -216,6 +217,7 @@ LINK32_OBJS= \
 	"$(INTDIR)\docock.obj" \
 	"$(INTDIR)\DXinit.obj" \
 	"$(INTDIR)\DXsound.obj" \
+	"$(INTDIR)\xaudio2_backend.obj" \
 	"$(INTDIR)\effects.obj" \
 	"$(INTDIR)\exp.obj" \
 	"$(INTDIR)\flash.obj" \
@@ -365,6 +367,7 @@ CLEAN :
 	-@erase "$(INTDIR)\docock.obj"
 	-@erase "$(INTDIR)\DXinit.obj"
 	-@erase "$(INTDIR)\DXsound.obj"
+	-@erase "$(INTDIR)\xaudio2_backend.obj"
 	-@erase "$(INTDIR)\effects.obj"
 	-@erase "$(INTDIR)\exp.obj"
 	-@erase "$(INTDIR)\flash.obj"
@@ -513,6 +516,7 @@ LINK32_OBJS= \
 	"$(INTDIR)\docock.obj" \
 	"$(INTDIR)\DXinit.obj" \
 	"$(INTDIR)\DXsound.obj" \
+	"$(INTDIR)\xaudio2_backend.obj" \
 	"$(INTDIR)\effects.obj" \
 	"$(INTDIR)\exp.obj" \
 	"$(INTDIR)\flash.obj" \
@@ -799,6 +803,11 @@ SOURCE=.\DXinit.cpp
 SOURCE=.\DXsound.cpp
 
 "$(INTDIR)\DXsound.obj" : $(SOURCE) "$(INTDIR)"
+
+
+SOURCE=.\\xaudio2_backend.cpp
+
+"$(INTDIR)\xaudio2_backend.obj" : $(SOURCE) "$(INTDIR)"
 
 
 SOURCE=.\effects.cpp

@@ -85,6 +85,7 @@
 #include "stubs.h"
 #include "SpideyDX.h"
 #include "DXsound.h"
+#include "xaudio2_backend.h"
 #include "DXinit.h"
 #include "pack.h"
 #include "pal.h"
@@ -27998,6 +27999,20 @@ void game_patches(void)
 	SpideyInstallFrontendLifecycleCompat();
 	SpideyInstallGameplayUiScaleCompat();
 	SpideyInstallCleanup503AF0Compat();
+
+	// Prefer XAudio2 2.9 for active SFX voices. Retail DirectSound remains
+	// untouched if XAudio2 initialization fails or SPIDEY_AUDIO_BACKEND=directsound.
+	if (SpideyXAudio2Initialize())
+	{
+		PATCH_PUSH_RET(0x00504110, SpideyXAudio2Open);
+		PATCH_PUSH_RET(0x005041C0, SpideyXAudio2Close);
+		PATCH_PUSH_RET(0x00504230, SpideyXAudio2Play);
+		PATCH_PUSH_RET(0x005042A0, SpideyXAudio2Stop);
+		PATCH_PUSH_RET(0x005042F0, SpideyXAudio2SetVolume);
+		PATCH_PUSH_RET(0x00504350, SpideyXAudio2SetPan);
+		PATCH_PUSH_RET(0x005043B0, SpideyXAudio2SetPitch);
+		PATCH_PUSH_RET(0x00504420, SpideyXAudio2IsPlaying);
+	}
 
 	PATCH_PUSH_RET(0x004FC240, SpideyDiagDisplayDIError);
 	PATCH_PUSH_RET(0x004FC630, SpideyDiagDisplayDSError);

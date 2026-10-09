@@ -18344,3 +18344,75 @@ Preserved:
 Validation:
 - git diff --check: PASS
 - forced-clean matching VC6 build: PASS
+
+
+## 2026-10-08 — XAudio2 2.9 voice backend Phase 1
+
+Added a modern XAudio2 2.9 active-voice backend while retaining the retail DirectSound bank loader temporarily as the PCM source.
+
+### Architecture
+
+Higher-level game audio is unchanged:
+- SFX_Play / SFX_PlayPos
+- SFX_Stop / SFX_ModifyPos / SFX_ModifyVol
+- existing sound IDs, aliases, banks and voice handles
+
+Retail DirectSound remains responsible only for loading/decoding the source bank buffers in Phase 1.
+
+When a voice is opened, the XAudio2 backend:
+1. looks up the already-loaded retail DirectSound source buffer from the retail gDxSoundBuffers array at 0x006BBAD4;
+2. queries its actual WAVEFORMATEX and buffer size;
+3. copies the decoded PCM payload once;
+4. creates an XAudio2 source voice;
+5. handles Play/Stop/Close/Volume/Pan/Pitch/IsPlaying through XAudio2.
+
+### Live retail entry points replaced only when XAudio2 initializes successfully
+
+- DXSOUND_Open @ 0x00504110
+- DXSOUND_Close @ 0x005041C0
+- DXSOUND_Play @ 0x00504230
+- DXSOUND_Stop @ 0x005042A0
+- DXSOUND_SetVolume @ 0x005042F0
+- DXSOUND_SetPan @ 0x00504350
+- DXSOUND_SetPitch @ 0x005043B0
+- DXSOUND_IsPlaying @ 0x00504420
+
+If XAudio2 initialization fails, none of those retail entry points are patched and DirectSound remains the complete fallback.
+
+Environment override for A/B testing:
+SPIDEY_AUDIO_BACKEND=directsound
+
+### VC6-compatible XAudio2 layer
+
+Because the matching project uses Visual C++ 6.0, modern xaudio2.h is not included directly.
+Added:
+- xaudio2_compat.h: minimal ABI-compatible XAudio2 2.9 declarations
+- xaudio2_backend.h/.cpp: dynamic xaudio2_9.dll backend
+
+Runtime load order:
+1. xaudio2_9.dll
+2. xaudio2_9redist.dll
+3. fall back to untouched retail DirectSound
+
+One-time backend/error status is written to spidey-audio.log. No per-frame audio logging is enabled.
+
+### Compatibility behavior
+
+- volume preserves retail DirectSound hundredth-dB conversion;
+- pan preserves the game's 0..31 pan convention and maps it to an XAudio output matrix;
+- pitch follows the verified retail formula: baseFrequency * pitch / 1200;
+- looping maps to XAUDIO2_LOOP_INFINITE;
+- voice reclamation uses XAudio2 BuffersQueued for DXSOUND_IsPlaying;
+- pause/unpause remains compatible because the game pauses SFX by muting volume, not by stopping voices.
+
+### Validation
+
+- xaudio2_9.dll exists in both System32 and SysWOW64 on the test PC;
+- git diff --check: PASS;
+- forced-clean matching VC6 build: PASS;
+- xaudio2_backend.cpp is compiled and linked into spider.dll.
+
+Next test:
+- launch with default XAudio2 backend;
+- verify menu SFX, first-level ambience/chopper, positional pan, pitch, loops, pause/unpause and voice cleanup;
+- compare with SPIDEY_AUDIO_BACKEND=directsound only if a behavior difference needs isolation.
