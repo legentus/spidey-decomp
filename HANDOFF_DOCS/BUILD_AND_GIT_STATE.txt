@@ -1,0 +1,32 @@
+SPIDER-MAN 2000 DECOMP HANDOFF BUILD INFO
+Date: 2026-11-07
+Repo: F:\Spider-Man 2000 Recomp\project main
+Branch: dev
+Commit: 382362f3e14195a6bab552bf1c445cb33262d2ac
+Remote: origin/dev
+
+Working tree:
+# branch.oid 382362f3e14195a6bab552bf1c445cb33262d2ac
+# branch.head dev
+# branch.upstream origin/dev
+# branch.ab +0 -0
+? tools/_make_full_handoff_2026_11_07.py
+
+
+Release/spider.dll
+size=954368
+sha256=7cfb0f4354e3f15f9db34386efc8cb8248394bbd80097944bd6fe5297bb510d8
+
+Recent commits:
+382362f3e14195a6bab552bf1c445cb33262d2ac	382362f3	2026-10-09T00:50:18-04:00	Add loopback audio analyzer
+e1e9e2d5015aa86c9e74fb73a5fe9db99b3d0f5c	e1e9e2d5	2026-10-09T00:46:46-04:00	Fix XAudio2 COM initialization
+255ece2de2d32a41d6b2f5804dfb8b7c5cd9b71c	255ece2d	2026-10-09T00:21:45-04:00	Suppress missile loop for L1A1 audio test
+1ae991e0df5251dc80f6ceef4ccf0c6f31c22038	1ae991e0	2026-10-08T22:14:00-04:00	Add XAudio2 2.9 voice backend
+a4611f67b6d9c0b25786ffb6cb0605ccbd9b8180	a4611f67	2026-10-08T14:16:41-04:00	Temporarily disable heavy runtime diagnostics
+63fa967f0e744245e6f8913c48f608db119692d9	63fa967f	2026-10-08T13:38:38-04:00	Fix RotY virtual patch recursion
+221976f583676f6001a914e5f5c8e72faba86d4e	221976f5	2026-10-08T13:23:06-04:00	Add in-process hang sampler
+681bea81f68c2839150f06b77dc8b4fd8a2208ad	681bea81	2026-10-08T13:03:03-04:00	Bypass dead thug pre-dispatch freeze
+719a53e78dbdba01f7b05edfa649d80b3f0ad152	719a53e7	2026-10-08T12:48:10-04:00	Restore authored cadence for baddy world updates
+fbbccc8b1b34a2e6c3977487517719a783148ff5	fbbccc8b	2026-10-08T12:37:29-04:00	Fix dead thug state-26 ground settle freeze
+786d27807b1f11bb477baa67a7229a412377d977	786d2780	2026-10-08T12:31:25-04:00	Trace nested state-26 thug death calls
+fa18d7ff4ca0a71902064487360e5d87586535c2	fa18d7ff	2026-10-08T12:04:10-04:00	Trace exact thug state on combat freeze
