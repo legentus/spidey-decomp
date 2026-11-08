@@ -1,0 +1,27 @@
+path=F:\Spider-Man 2000 Recomp\Handoff\SPIDERMAN_2000_FULL_HANDOFF_2026-11-07_382362f3\RUNTIME_EVIDENCE\live_loopback.wav
+duration_s=12.000000
+format_tag=65534
+decoded_format_tag=3
+channels=2
+sample_rate=48000
+bits=32
+block_align=8
+mean_rms=0.081775406
+max_rms=0.467142682
+
+strongest_periods:
+  period_s=4.9600 correlation=0.429026
+  period_s=4.9500 correlation=0.420598
+  period_s=4.9400 correlation=0.370533
+  period_s=4.9700 correlation=0.342381
+  period_s=4.9000 correlation=0.336532
+  period_s=4.9300 correlation=0.335841
+  period_s=4.8900 correlation=0.334271
+  period_s=4.9800 correlation=0.332248
+  period_s=4.9900 correlation=0.330727
+  period_s=5.0100 correlation=0.330660
+  period_s=4.9200 correlation=0.327470
+  period_s=4.8800 correlation=0.325501
+
+expected_periods:
+  requested_s=2.5200 sampled_s=2.5200 correlation=0.202974
