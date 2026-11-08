@@ -1,0 +1,61 @@
+name: Build Spider-Man 2000 Full Handoff
+
+on:
+  push:
+    branches:
+      - handoff-2026-11-07-382362f3
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout handoff branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Assemble exact handoff package
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="SPIDERMAN_2000_FULL_HANDOFF_2026-11-07_382362f3"
+          mkdir -p "package/$NAME/SOURCE" "package/$NAME/BUILD" "package/$NAME/HANDOFF_DOCS"
+
+          git archive 382362f3e14195a6bab552bf1c445cb33262d2ac | tar -x -C "package/$NAME/SOURCE"
+
+          cp HANDOFF_DOCS/START_HERE.md "package/$NAME/START_HERE.md"
+          cp HANDOFF_DOCS/NEW_CHAT_HANDOFF.md "package/$NAME/HANDOFF_DOCS/"
+          cp HANDOFF_DOCS/WORKFLOW_AND_PATHS.md "package/$NAME/HANDOFF_DOCS/"
+          cp HANDOFF_DOCS/NEXT_STEPS.md "package/$NAME/HANDOFF_DOCS/"
+          cp HANDOFF_DOCS/BUILD_AND_GIT_STATE.txt "package/$NAME/HANDOFF_DOCS/"
+
+          for f in .handoff_chunks/spider.dll.part*.b64; do
+            base64 -d "$f" >> "package/$NAME/BUILD/spider.dll"
+          done
+
+          ACTUAL="$(sha256sum "package/$NAME/BUILD/spider.dll" | awk '{print $1}')"
+          EXPECTED="7cfb0f4354e3f15f9db34386efc8cb8248394bbd80097944bd6fe5297bb510d8"
+          test "$ACTUAL" = "$EXPECTED"
+
+          {
+            echo "Source commit: 382362f3e14195a6bab552bf1c445cb33262d2ac"
+            echo "Branch used only for artifact assembly: handoff-2026-11-07-382362f3"
+            echo "spider.dll SHA-256: $ACTUAL"
+            echo "Authoritative working folder: F:\\Spider-Man 2000 Recomp\\project main"
+          } > "package/$NAME/HANDOFF_INTEGRITY.txt"
+
+          cd package
+          find "$NAME" -type f -print0 | sort -z | xargs -0 sha256sum > "$NAME/SHA256SUMS.txt"
+          find "$NAME" -type f | sort > "$NAME/MANIFEST.txt"
+
+      - name: Upload handoff ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SPIDERMAN_2000_FULL_HANDOFF_2026-11-07_382362f3
+          path: package/SPIDERMAN_2000_FULL_HANDOFF_2026-11-07_382362f3
+          compression-level: 9
+          if-no-files-found: error
